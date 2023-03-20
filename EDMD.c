@@ -1,9 +1,11 @@
 #include"EDMD.h"
 #include"mersenne.c"
+#include <stdio.h>
 
 #define CELLCROSS 0
 #define COLLISION 1
 #define SCREENSHOT 2
+#define THERMO 6
 #define ADDINGNOISE 3
 #define WALL 4
 #define UPDATE 5
@@ -28,11 +30,12 @@ double dL = 2;
 
 
 double t = 0;
-double tmax = 30000;
+double tmax = 300;
 //time between each screenshots
-double dtime = 1;
+double dtime = 100;
+double dtimeThermo = 100;
 
-double firstScreen = 29999;
+double firstScreen = 0;
 double nextScreen = -1;
 double on = 1;
 
@@ -109,7 +112,7 @@ int paulListN;
 double t1 = 0;
 FILE *fichier;
 FILE *thermo;
-node* root;
+node *root;
 //array containing the particles
 particle* particles;
 //2D array of pointer
@@ -158,6 +161,10 @@ int main(int argc, char *argv[]){
 			case SCREENSHOT:
 				takeAScreenshot();
    				fflush(stdout);
+				break;
+			case THERMO:
+				takeAThermo();
+				fflush(stdout);
 				break;
 			case UPDATE:
 				updateT();
@@ -434,6 +441,7 @@ void eventListInit(){
 	}
 
 	addEventScreenshot(firstScreen);
+	addEventThermo(dtimeThermo);
 
 	if (noise)
 		addEventNoise(dtnoise);
@@ -1104,6 +1112,17 @@ void addEventScreenshot(double tscreen){
 	addEventToQueue(toAdd);
 }
 
+void addEventThermo(double tscreen){
+	node* toAdd;
+
+	toAdd = eventList[2*N + 3];
+	toAdd->type = THERMO;
+	toAdd->t = tscreen;
+	toAdd->j = 0; //whatever.
+
+	addEventToQueue(toAdd);
+}
+
 /* ---------------------------------------------
 	Updates the position of the particles
 	at actual time and take a screenshot of
@@ -1115,6 +1134,7 @@ void takeAScreenshot(){
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
 	}
+	physicalQ();
 	saveTXT();
 	if (on){
 		on = 0;
@@ -1126,9 +1146,17 @@ void takeAScreenshot(){
 	printInfo();
 }
 
+void takeAThermo(){
+
+
+	saveThermo();
+
+	addEventThermo(t + dtimeThermo);
+	printInfo();
+}
+
 void printInfo(){
 	int size = 29;
-	physicalQ();
 	int place = (int)(size*t)/(int)tmax;
 	printf("\r│\033[1;32m%.2e\033[0;37m/%.2e ", t, tmax);
 	CYAN;
@@ -1241,6 +1269,9 @@ void saveTXT(){
 			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].x + particles[i].crossX*Lx, particles[i].y + particles[i].crossY*Ly, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, particles[i].rad, synchro);
 		}
 	}
+}
+
+void saveThermo(){
     physicalQ();
 
 	double deltaTime = t - lastScreen;

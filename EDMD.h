@@ -67,6 +67,9 @@ void doTheCollision();
 void addEventScreenshot(double tscreen);
 void takeAScreenshot();
 
+void addEventThermo(double tscreen);
+void takeAThermo();
+
 void addEventNoise(double tnoise);
 void addNoise();
 
@@ -76,6 +79,7 @@ void updateT();
 
 void freeFly(particle* p);
 void saveTXT();
+void saveThermo();
 double drand(double min, double max);
 void randomGaussian(particle* p);
 void PBC(double* dx, double* dy);

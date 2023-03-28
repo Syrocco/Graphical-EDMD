@@ -30,10 +30,10 @@ double dL = 2;
 
 
 double t = 0;
-double tmax = 300;
+double tmax = 1000;
 //time between each screenshots
-double dtime = 100;
-double dtimeThermo = 100;
+double dtime = 0.1;
+double dtimeThermo = 0.1;
 
 double firstScreen = 0;
 double nextScreen = -1;
@@ -71,28 +71,29 @@ double cellyFac; // = 1/cellSize
 const int suppSizeEvent = 10;
 
 const int tinyOnes = 0;
-const int noise = 1;
+const int noise = 0;
 const int updating = 0;
+const int damping = 1;
 
 const int addDelta = 1;
 const int addExpo = 0;
-const int addWall = 0;
+const int addWall = 1;
 const int euler = 0;
 const int ther = 1;
 const int reduce = 0;
 double dp = 0;
 
 double delta = 0;
-double deltaM = 0.05;
+double deltaM = 0.03;
 double deltam = 0;
-double ts = 4;
+double ts = 6000000;
 double vo = 1;
 double ao = 1.3;
 
-double Einit = 0.3;
+double Einit = 10.5;
 double resW = 1;
-double res = 0.4;
-double gamm = 0.003;
+double res = 0.95;
+double gamm = 0.01;
 double T = 0;
 double expE = 1;
 //time between kicks
@@ -140,9 +141,9 @@ int main(int argc, char *argv[]){
 	if ((ther) || (addWall))
 		thermo = fopen(thermoName, "w");
 	while (t <= tmax){
-
 		nextEvent = findNextEvent();
 		t = nextEvent->t;
+
 		removeEventFromQueue(nextEvent);
 		switch(nextEvent->type){
 			case COLLISION:
@@ -524,7 +525,7 @@ int PBCcell(double a, int x){
 	else{
 		if (a < 0)
 			return a + Nycells;
-		else if (a >= Nycells )
+		else if (a >= Nycells)
 			return a - Nycells;
 		return a;
 	}
@@ -716,6 +717,9 @@ node* findNextEvent(){
 	calculating which cell border will be
 	reached first
 --------------------------------------------- */
+
+
+
 void crossingEvent(int i){
 
 	particle p = particles[i];
@@ -726,19 +730,19 @@ void crossingEvent(int i){
 	int yy = 1;
 
 	if (p.vx < 0){
-		travelTimeX = PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx;
+		travelTimeX = logTime(PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx);
 		xx = 1;
 	}
 	else{
-		travelTimeX = PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx;
+		travelTimeX = logTime(PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx);
 		xx = 2;
 	}
 	if (p.vy < 0){
-		travelTimeY = PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy;
+		travelTimeY = logTime(PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy);
 		yy = 3;
 	}
 	else{
-		travelTimeY = PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy;
+		travelTimeY = logTime(PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy);
 		yy = 4;
 	}
 	//break ___ if ((travelTimeX < 0) || (travelTimeY < 0))
@@ -833,6 +837,12 @@ void doTheCrossing(){
 --------------------------------------- */
 double collisionTime(particle* p1, particle* p2){
 
+	//return 10000000; //to deactivate collisions
+
+	if (damping == 1){
+		freeFly(p2); //evil trick
+	}
+
 	double lat2 = t - p2->t;
 
 	double dvx = p2->vx - p1->vx;
@@ -853,10 +863,9 @@ double collisionTime(particle* p1, particle* p2){
 	double det = pow(b, 2) - v2*distOfSquare;
 
 
-
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.0001){
-		printf("ERROR:\033[0;31m Overlaps detected!\033[0m\n");
+		printf("\nERROR:\033[0;31m Overlaps detected!\033[0m\n");
 		exit(3);
 
 	}
@@ -864,7 +873,9 @@ double collisionTime(particle* p1, particle* p2){
 	if (det < 0)
 		return 100000;
 
-	return (- b - sqrt(det))/v2;
+	double timeOfCollision = (- b - sqrt(det))/v2;
+
+	return logTime(timeOfCollision);
 }
 
 
@@ -885,13 +896,13 @@ void collisionEvent(int i){
 
 	if (addWall){
 		if ((Y == 0) && (p1->vy < 0)){
-			dt = -(p1->y - p1->rad)/p1->vy;
+			dt = logTime(-(p1->y - p1->rad)/p1->vy);
 			type = WALL;
 			xy = 1;
 		}
 		else if ((Y == Nycells - 1) && (p1->vy > 0)){
 
-			dt = (Ly - p1->y - p1->rad)/p1->vy;
+			dt = logTime((Ly - p1->y - p1->rad)/p1->vy);
 			type = WALL;
 			xy = 1;
 		}
@@ -899,7 +910,7 @@ void collisionEvent(int i){
 
 		if ((X == 0) && (p1->vx < 0)){
 
-			dtTemp = -(p1->x - p1->rad)/p1->vx;
+			dtTemp = logTime(-(p1->x - p1->rad)/p1->vx);
 			if (dt > dtTemp){
 				type = WALL;
 				dt = dtTemp;
@@ -908,7 +919,7 @@ void collisionEvent(int i){
 		}
 		else if ((X == Nxcells - 1) && (p1->vx > 0)){
 
-			dtTemp = (Lx - p1->x - p1->rad)/p1->vx;
+			dtTemp = logTime((Lx - p1->x - p1->rad)/p1->vx);
 			if (dt > dtTemp){
 				type = WALL;
 				dt = dtTemp;
@@ -978,6 +989,7 @@ void doTheWall(){
 	ncol++;
 	particle* pi = particles + i;
 	freeFly(pi);
+
 	if (xy == 0){
 		dp += fabs((resW + 1)*pi->m*pi->vx);
 		pi->vx = -resW*pi->vx;
@@ -986,6 +998,7 @@ void doTheWall(){
 		dp += fabs((resW + 1)*pi->m*pi->vy);
 		pi->vy = -resW*pi->vy;
 	}
+
 	pi->coll++;
 	removeEventFromQueue(eventList[i]);
 	crossingEvent(i);
@@ -1050,8 +1063,8 @@ void doTheCollision(){
 
 	collTerm += pi->m*pj->m*collKernel;
 	if (addDelta){
-		double tau = -ts*log(1 - drand(0, 1));
-        if ((t - pi->lastColl > tau) && (t - pj->lastColl > tau))
+		//double tau = -ts*log(1 - drand(0, 1));
+        if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts))
             delta = deltam;
         else
             delta = deltaM;
@@ -1246,8 +1259,18 @@ void updateT(){
 void freeFly(particle* p){
     double dt = t - p->t;
     p->t = t;
-    p->x += dt*p->vx;
-    p->y += dt*p->vy;
+	if (damping == 0){
+		p->x += dt*p->vx;
+		p->y += dt*p->vy;
+	}
+	else{
+		double ex = exp(-gamm*dt);
+		p->x += p->vx/gamm*(1 - ex);
+		p->y += p->vy/gamm*(1 - ex);
+		p->vx *= ex;
+		p->vy *= ex;
+	}
+
 	PBCpost(&(p->x), 1);
 	PBCpost(&(p->y), 0);
 }
@@ -1261,12 +1284,13 @@ void saveTXT(){
 		}
 	}
 	else{
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y xu yu vx vy radius m z synchro\n", t, N, Lx, Ly);
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y xu yu vx vy radius m z\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
+			/*
             int synchro = 0;
-            if (t - particles[i].lastColl > -ts*log(1 - drand(0, 1)))
-                synchro = 1;
-			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].x + particles[i].crossX*Lx, particles[i].y + particles[i].crossY*Ly, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, particles[i].rad, synchro);
+            if (t - particles[i].lastColl > ts)
+                synchro = 1;*/
+			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].x + particles[i].crossX*Lx, particles[i].y + particles[i].crossY*Ly, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, particles[i].rad);
 		}
 	}
 }
@@ -1285,7 +1309,7 @@ void saveThermo(){
 			lastCollNum = ncol;
 			if (addWall){
 				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*2*(Lx + Ly)));
-				printf("virial %lf et wall %lf \n", pressure, dp/((t - t1)*2*(Lx + Ly)));
+				//printf("virial %lf et wall %lf \n", pressure, dp/((t - t1)*2*(Lx + Ly)));
 				t1 = t;
 				dp = 0;
 			}
@@ -1309,22 +1333,41 @@ double sign(double x){
 	return 0;
 }
 
+inline double logTime(double time){
+	if (damping == 1){
+		double var = (1 - time*gamm);
+		if ((var < 0) || (var > 1))
+			return 1000000000000;
+		else
+			return  -log(var)/gamm;
+	}
+	else
+		return time;
+}
+
 void randomGaussian(particle* p){
 	double u1 = genrand_real3();
 	double u2 = genrand_real3();
 	double a = sqrt(-2*log(u1));
 	double b = 2*M_PI*u2;
-	if (euler){
-		double std = sqrt(2*gamm*T*dtnoise)/p->m;
-		p->vx += std*a*cos(b) - sign(p->vx)*gamm*dtnoise/p->m;
-		p->vy += std*a*sin(b) - sign(p->vy)*gamm*dtnoise/p->m;
+
+	if (damping == 0){
+		if (euler){
+			double std = sqrt(2*gamm*T*dtnoise)/p->m;
+			p->vx += std*a*cos(b) - sign(p->vx)*gamm*dtnoise/p->m;
+			p->vy += std*a*sin(b) - sign(p->vy)*gamm*dtnoise/p->m;
+		}
+		else{
+			double c = exp(-gamm*dtnoise);
+			double std = sqrt(T*(1 - c*c)/p->m);
+			p->vx = std*a*cos(b) + (p->vx)*c;
+			p->vy = std*a*sin(b) + (p->vy)*c;
+		}
 	}
 	else{
-		double c = exp(-gamm*dtnoise);
-		double std = sqrt(T*(1 - c*c)/p->m);
-		p->vx = std*a*cos(b) + (p->vx)*c;
-		p->vy = std*a*sin(b) + (p->vy)*c;
-
+		double std = sqrt(2*gamm*T*dtnoise)/p->m;
+		p->vx += std*a*cos(b);
+		p->vy += std*a*sin(b);
 	}
 }
 
@@ -1344,8 +1387,10 @@ double PBCinsideCell(double dx, int x){
 	if (x){
 		if (dx >= halfLx)
 			return dx - Lx;
-		else if (dx < -halfLx)
+		else if (dx < -halfLx){
 			return dx + Lx;
+
+			}
 		return dx;
 	}
 	else{
@@ -1483,6 +1528,10 @@ void runningCheck(){
 		printf("WARNING:\033[0;31m Thermostat used even though the system is not dissipative!\033[0m\n");
 	if ((noise) && ((addDelta) || (addExpo)))
 		printf("WARNING:\033[0;31m Thermostat used with energy input based on collision!\033[0m\n");
+	if ((damping) && (euler)){
+		printf("ERROR:\033[1;31m Can't use damping == 1 with Euler == 1\033[0m\n");
+		stop = 1;
+	}
 
 	printf("\n");
 

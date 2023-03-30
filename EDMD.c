@@ -30,10 +30,10 @@ double dL = 2;
 
 
 double t = 0;
-double tmax = 1000;
+double tmax = 100;
 //time between each screenshots
 double dtime = 0.1;
-double dtimeThermo = 0.1;
+double dtimeThermo = 10;
 
 double firstScreen = 0;
 double nextScreen = -1;
@@ -77,7 +77,7 @@ const int damping = 1;
 
 const int addDelta = 1;
 const int addExpo = 0;
-const int addWall = 1;
+const int addWall = 0;
 const int euler = 0;
 const int ther = 1;
 const int reduce = 0;
@@ -135,11 +135,13 @@ int main(int argc, char *argv[]){
 	fichier = fopen(fileName, "w");
 	cellListInit();
 	eventListInit();
+	printf("Startig\n");
 	physicalQ();
 	format();
 
 	if ((ther) || (addWall))
 		thermo = fopen(thermoName, "w");
+	
 	while (t <= tmax){
 		nextEvent = findNextEvent();
 		t = nextEvent->t;
@@ -729,6 +731,7 @@ void crossingEvent(int i){
 	int xx;
 	int yy = 1;
 
+	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	if (p.vx < 0){
 		travelTimeX = logTime(PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx);
 		xx = 1;
@@ -745,7 +748,8 @@ void crossingEvent(int i){
 		travelTimeY = logTime(PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy);
 		yy = 4;
 	}
-	//break ___ if ((travelTimeX < 0) || (travelTimeY < 0))
+
+
 	if (travelTimeX < travelTimeY)
 		addCrossingEvent(i, xx, t + travelTimeX);
 	else
@@ -840,8 +844,8 @@ double collisionTime(particle* p1, particle* p2){
 	//return 10000000; //to deactivate collisions
 
 	if (damping == 1){
-		freeFly(p2); //evil trick
-	}
+		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
+	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
 
 	double lat2 = t - p2->t;
 
@@ -873,7 +877,7 @@ double collisionTime(particle* p1, particle* p2){
 	if (det < 0)
 		return 100000;
 
-	double timeOfCollision = (- b - sqrt(det))/v2;
+	double timeOfCollision = (-b - sqrt(det))/v2;
 
 	return logTime(timeOfCollision);
 }
@@ -1256,6 +1260,7 @@ void updateT(){
 /								  /
 /--------------------------------*/
 
+
 void freeFly(particle* p){
     double dt = t - p->t;
     p->t = t;
@@ -1333,10 +1338,12 @@ double sign(double x){
 	return 0;
 }
 
+
+
 inline double logTime(double time){
 	if (damping == 1){
 		double var = (1 - time*gamm);
-		if ((var < 0) || (var > 1))
+		if ((var < 0))
 			return 1000000000000;
 		else
 			return  -log(var)/gamm;

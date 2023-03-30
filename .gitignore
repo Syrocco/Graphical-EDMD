@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# But not these files...
+!.gitignore
+!EDMD.c
+!EDMD.h
+!mersenne.c
+# etc...

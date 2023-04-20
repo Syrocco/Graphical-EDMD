@@ -1,6 +1,7 @@
 #include"EDMD.h"
 #include"mersenne.c"
 #include <stdio.h>
+#include <unistd.h>
 
 #define CELLCROSS 0
 #define COLLISION 1
@@ -18,7 +19,7 @@
 
 
 int N, Nbig, Nsmall;
-double px, py, E, pressure, dxr, dyr, dist;
+double px, py, E, pressure, dxr, dyr, dist, active;
 double lastScreen = 0;
 double lastCollNum = 0;
 
@@ -30,12 +31,12 @@ double dL = 2;
 
 
 double t = 0;
-double tmax = 100;
+double tmax = 7000000;
 //time between each screenshots
-double dtime = 0.1;
-double dtimeThermo = 10;
+double dtime = 10000;
+double dtimeThermo = 300;
 
-double firstScreen = 0;
+double firstScreen = 6999999;
 double nextScreen = -1;
 double on = 1;
 
@@ -86,11 +87,11 @@ double dp = 0;
 double delta = 0;
 double deltaM = 0.03;
 double deltam = 0;
-double ts = 6000000;
+double ts = 600000000000000;
 double vo = 1;
 double ao = 1.3;
 
-double Einit = 10.5;
+double Einit = 0.1;
 double resW = 1;
 double res = 0.95;
 double gamm = 0.01;
@@ -164,10 +165,17 @@ int main(int argc, char *argv[]){
 			case SCREENSHOT:
 				takeAScreenshot();
    				fflush(stdout);
+				if (noise == 0 && E < 1e-10){
+					goto exiting;
+				}
 				break;
 			case THERMO:
 				takeAThermo();
 				fflush(stdout);
+				if (noise == 0 && E < 1e-10){
+					saveTXT();
+					goto exiting;
+				}
 				break;
 			case UPDATE:
 				updateT();
@@ -175,12 +183,13 @@ int main(int argc, char *argv[]){
 
 		}
 	}
-	printInfo();
-	printClose();
-	fclose(fichier);
-	if (ther)
-		fclose(thermo);
-	freeArrays();
+	exiting:
+		printInfo();
+		printClose();
+		fclose(fichier);
+		if (ther)
+			fclose(thermo);
+		freeArrays();
 	return 0;
 }
 
@@ -205,9 +214,9 @@ void constantInit(int argc, char *argv[]){
             sscanf(argv[1], "%lf", &temp1);
             sscanf(argv[2], "%lf", &temp2);
             sscanf(argv[3], "%lf", &temp3);
-            sscanf(argv[4], "%lf", &deltaM);
+            //sscanf(argv[4], "%lf", &deltaM);
             char filename[200];
-            sprintf(filename, "%.7lf%.7lf%.7lf.txt",temp1, temp2, temp3);
+            sprintf(filename, "%.7lf%.7lf%.7lf%.7lf.txt",temp1, temp2, temp3, 0.);
 		}
 		else if (argc == 4){
 		    double temp1, temp2, temp3;
@@ -858,7 +867,7 @@ double collisionTime(particle* p1, particle* p2){
 
 	//no collision.
 	if (b > 0)
-		return 100000;
+		return 100000000;
 
 
 	double v2 = dvx*dvx + dvy*dvy;
@@ -875,7 +884,7 @@ double collisionTime(particle* p1, particle* p2){
 	}
 
 	if (det < 0)
-		return 100000;
+		return 100000000;
 
 	double timeOfCollision = (-b - sqrt(det))/v2;
 
@@ -890,7 +899,7 @@ double collisionTime(particle* p1, particle* p2){
 --------------------------------------------- */
 void collisionEvent(int i){
 	int finalPartner = 0;
-	double dt = 1000000;
+	double dt = 10000000;
 	int type = COLLISION;
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
@@ -1165,7 +1174,12 @@ void takeAScreenshot(){
 
 void takeAThermo(){
 
-
+	if (damping == 1){
+		for (int i = 0; i < N; i++){
+			freeFly(particles + i);
+		}
+	}
+	physicalQ();
 	saveThermo();
 
 	addEventThermo(t + dtimeThermo);
@@ -1301,7 +1315,7 @@ void saveTXT(){
 }
 
 void saveThermo(){
-    physicalQ();
+
 
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
@@ -1319,7 +1333,7 @@ void saveThermo(){
 				dp = 0;
 			}
 			else{
-				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure);
+				fprintf(thermo, "%lf %lf %lf %lf %lf %.10lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, active);
 			}
 			ncolss = 0;
 			ncolsb = 0;
@@ -1429,17 +1443,27 @@ void physicalQ(){
 	px = 0;
 	py = 0;
 	E = 0;
+	active = 0;
 	for (int i = 0; i < N; i++){
 		px += particles[i].vx*particles[i].m;
 		py += particles[i].vy*particles[i].m;
 		E += 0.5*(pow(particles[i].vx, 2)*particles[i].m + pow(particles[i].vy, 2)*particles[i].m);
+		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy > 1e-6){
+			active += 1.;
+		}
 	}
+	active /= N;
 }
 
 void customName(){
 	mkdir("dump/", 0777);
-    snprintf(fileName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lf.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL);
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lf.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL);
+	int v = 1;
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
+	while (access(fileName, F_OK) == 0){
+		v += 1;
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
+	}
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
 }
 
 int mygetline(char* str, FILE* f){

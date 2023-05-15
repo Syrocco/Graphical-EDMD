@@ -10,6 +10,10 @@
 #define ADDINGNOISE 3
 #define WALL 4
 #define UPDATE 5
+#define OUT 8
+#define IN 7
+
+
 
 #define GREEN printf("\033[1;32m")
 #define WHITE printf("\033[0;37m")
@@ -31,12 +35,12 @@ double dL = 2;
 
 
 double t = 0;
-double tmax = 7000000;
+double tmax = 8000;
 //time between each screenshots
-double dtime = 10000;
-double dtimeThermo = 300;
+double dtime = 10;
+double dtimeThermo = 100;
 
-double firstScreen = 6999999;
+double firstScreen = 0;
 double nextScreen = -1;
 double on = 1;
 
@@ -74,32 +78,44 @@ const int suppSizeEvent = 10;
 const int tinyOnes = 0;
 const int noise = 0;
 const int updating = 0;
-const int damping = 1;
+const int damping = 0;
 
 const int addDelta = 1;
 const int addExpo = 0;
-const int addWall = 0;
+
+
+const int addWallx = 0;
+const int addWally = 0;
+const int addMidWall = 0;
+
+const int addWell = 1;
+
 const int euler = 0;
 const int ther = 1;
 const int reduce = 0;
-double dp = 0;
+
+
 
 double delta = 0;
 double deltaM = 0.03;
 double deltam = 0;
-double ts = 600000000000000;
+double ts = 600000000;
 double vo = 1;
 double ao = 1.3;
 
-double Einit = 0.1;
+double sig = 1.5;
+double U = 0.5;
+
+double Einit = 1;
 double resW = 1;
 double res = 0.95;
 double gamm = 0.01;
-double T = 0;
+double T = 1;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
 double collTerm = 0;
+double dp = 0;
 
 double sizeRat;
 double phi;
@@ -123,7 +139,7 @@ node** eventList;
 node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
-
+int* pairs;
 
 int main(int argc, char *argv[]){
 
@@ -133,14 +149,18 @@ int main(int argc, char *argv[]){
 	constantInit(argc, argv);
 	runningCheck();
 	particlesInit();
+	if (addWell){
+		printf("Generating pairs for well potential...");
+		pairsInit();
+		printf("Done!\n");
+	}
 	fichier = fopen(fileName, "w");
 	cellListInit();
 	eventListInit();
-	printf("Startig\n");
 	physicalQ();
 	format();
 
-	if ((ther) || (addWall))
+	if ((ther) || (addWallx) || (addWally))
 		thermo = fopen(thermoName, "w");
 	
 	while (t <= tmax){
@@ -181,6 +201,12 @@ int main(int argc, char *argv[]){
 				updateT();
 				break;
 
+			case IN:
+				doIn();
+				break;
+			case OUT:
+				doOut();
+				break;
 		}
 	}
 	exiting:
@@ -192,7 +218,6 @@ int main(int argc, char *argv[]){
 		freeArrays();
 	return 0;
 }
-
 
 
 /* ------------------------------------------/
@@ -282,8 +307,14 @@ void constantInit(int argc, char *argv[]){
 	halfLx = Lx/2;
 	halfLy = Ly/2;
 	if ((Nxcells == -1) || (Nycells == -1)){
-		Nycells = (int)(halfLy);
-		Nxcells = (int)(halfLx);
+		if (addWell){
+			Nycells = (int)(halfLy/sig);
+			Nxcells = (int)(halfLx/sig);
+		}
+		else{
+			Nycells = (int)(halfLy);
+			Nxcells = (int)(halfLx);
+		}
 	}
 	cellxSize = Lx/Nxcells;
 	cellySize = Ly/Nycells;
@@ -292,7 +323,7 @@ void constantInit(int argc, char *argv[]){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 1/(double)N;
+	dtPaul = 10/(double)N;
 
     paulListN = N;
 
@@ -318,8 +349,8 @@ void particlesInit(){
 		    mygetline(buffer, file);
 		    sscanf(buffer, "%d %lf %lf %lf %lf\n", &(p->type), &(p->x), &(p->y), &(p->rad), &(p->m));
 		    Nbig += p->type;
-			p->vx = drand(-1, 1);
-			p->vy = drand(-1, 1);
+			p->vx = drand(-1, 1)*sqrt(drand(0, 1))/p->m;
+			p->vy = drand(-1, 1)*sqrt(drand(0, 1))/p->m;
 			p->num = i;
 			p->t = 0;
 			p->coll = 0;
@@ -389,6 +420,38 @@ void particlesInit(){
 		particles[i].vy /= sqrt(E/N/Einit);
 	}
 }
+
+
+/* ---------------------------------------------
+	Initializes the list of particles close!
+--------------------------------------------- */
+
+void pairsInit(){
+	particle* p1;
+	particle* p2;
+	pairs = calloc(N*N, sizeof(int));
+	if (!pairs){
+		printf("alloc failed");
+	}
+	for(int i = 0; i < N; i++){
+		for(int j = 0; j < i; j++){
+			if (i != j){
+				p1 = particles + i;
+				p2 = particles + j;
+				double dx = p2->x - p1->x;
+				double dy = p2->y - p1->y;
+				PBC(&dx, &dy);
+				if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad)){
+					pairs[i*N + j] = 1;
+					pairs[j*N + i] = 1;
+				}
+			}
+		}
+	}
+}
+
+
+
 
 /* ---------------------------------------------
 	Initializes the cellList. cellList[X][Y]
@@ -475,6 +538,9 @@ void freeArrays(){
 	}
 	free(eventList);
 	free(eventPaul);
+	if (addWell){
+		free(pairs);
+	}
 }
 /* --------------------------/
 /							 /
@@ -891,7 +957,71 @@ double collisionTime(particle* p1, particle* p2){
 	return logTime(timeOfCollision);
 }
 
+//time to enter in the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
+double sphereTime(particle* p1, particle* p2){
 
+	if (damping == 1){
+		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
+	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
+
+	double lat2 = t - p2->t;
+
+	double dvx = p2->vx - p1->vx;
+	double dvy = p2->vy - p1->vy;
+	double dx = (p2->x + lat2*p2->vx) - p1->x;
+	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	PBC(&dx, &dy);
+	double b = dx*dvx + dy*dvy;
+
+	//no collision.
+	if (b > 0)
+		return 100000000;
+
+
+	double v2 = dvx*dvx + dvy*dvy;
+	double distOfSquare = dx*dx + dy*dy -  sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	double det = b*b - v2*distOfSquare;
+
+
+	if (det < 0)
+		return 100000000;
+
+	return logTime(- b - sqrt(det))/v2;
+}
+
+
+//time to leave the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
+double separateTime(particle* p1, particle* p2){
+
+	if (damping == 1){
+		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
+	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
+
+	double lat2 = t - p2->t;
+
+	double dvx = p2->vx - p1->vx;
+	double dvy = p2->vy - p1->vy;
+	double dx = (p2->x + lat2*p2->vx) - p1->x;
+	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	PBC(&dx, &dy);
+	double b = dx*dvx + dy*dvy;
+
+
+
+	double v2 = dvx*dvx + dvy*dvy;
+	double distOfSquare = dx*dx + dy*dy - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	double det = b*b - v2*distOfSquare;
+
+
+	if (det < 0)
+		return 10000000000;
+
+	double temp = (- b + sqrt(det))/v2;
+	if (temp < 0)
+		return 10000000000;
+	else
+		return logTime(temp);
+}
 /* ---------------------------------------------
 	Finds the next collision of particle i
 	by calculating collision time of i with
@@ -905,9 +1035,11 @@ void collisionEvent(int i){
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
 	int xy = 2;
-	double dtTemp;
+	double dtTemp, dtTemp2;
+	int typeTemp;
 
-	if (addWall){
+	if (addWallx){
+
 		if ((Y == 0) && (p1->vy < 0)){
 			dt = logTime(-(p1->y - p1->rad)/p1->vy);
 			type = WALL;
@@ -920,7 +1052,8 @@ void collisionEvent(int i){
 			xy = 1;
 		}
 
-
+	}
+	if (addWally){
 		if ((X == 0) && (p1->vx < 0)){
 
 			dtTemp = logTime(-(p1->x - p1->rad)/p1->vx);
@@ -930,9 +1063,29 @@ void collisionEvent(int i){
 			}
 			xy = 0;
 		}
+
 		else if ((X == Nxcells - 1) && (p1->vx > 0)){
 
 			dtTemp = logTime((Lx - p1->x - p1->rad)/p1->vx);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
+	}
+
+	if ((addMidWall) && (p1->type == 1)){
+		if ((p1->x > Lx/2 - 4) && (p1->x < Lx/2) && (p1->vx > 0)){
+			dtTemp = logTime((Lx/2 - p1->x - p1->rad)/p1->vx);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
+		else if ((p1->x < Lx/2 + 4) && (p1->x > Lx/2) && (p1->vx < 0)){
+		dtTemp = logTime(((p1->x - p1->rad) - Lx/2)/(-p1->vx));
 			if (dt > dtTemp){
 				type = WALL;
 				dt = dtTemp;
@@ -946,11 +1099,35 @@ void collisionEvent(int i){
 			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
-			 		double dtTemp = collisionTime(p1, p2);
+					if (addWell){
+						if (pairs[p1->num*N + p2->num]){
+							dtTemp = collisionTime(p1, p2);
+							dtTemp2 = separateTime(p1, p2);
+							if (dtTemp < dtTemp2){
+
+								typeTemp = COLLISION;
+							}
+							else{
+								dtTemp = dtTemp2;
+								typeTemp = OUT;
+							}
+						}
+						else{
+							dtTemp = sphereTime(p1, p2);
+							typeTemp = IN;
+						}
+					}
+					else{
+						dtTemp = collisionTime(p1, p2);
+						if (dtTemp < dtTemp2){
+							typeTemp = COLLISION;
+						}
+					}
+
 			 		if (dt > dtTemp){ //get min
 						finalPartner = p2->num;
 						dt = dtTemp;
-						type = COLLISION;
+						type = typeTemp;
 					}
 				}
 				p2 = p2->nxt;
@@ -958,10 +1135,16 @@ void collisionEvent(int i){
 	 	}
 	}
 
-	if (type == COLLISION)
+	if (type == COLLISION){
 		addCollisionEvent(i, finalPartner, t + dt);
+	}
+	else if (type == OUT)
+		addOutEvent(i, finalPartner, t + dt);
+	else if (type == IN)
+		addInEvent(i, finalPartner, t + dt);
 	else
 		addWallEvent(i, xy, t + dt);
+
 }
 
 
@@ -982,10 +1165,27 @@ void addCollisionEvent(int i, int j, double tColl){
 	addEventToQueue(toAdd);
 }
 
-/* ---------------------------------------------
-	Creates the collision event and adds it
-	to the BST.
---------------------------------------------- */
+void addInEvent(int i, int j, double tColl){
+	node* toAdd;
+
+	toAdd = eventList[N + i];
+	toAdd->j = j;
+	toAdd->type = IN;
+	toAdd->t = tColl;
+	toAdd->collActual = particles[j].coll; //the collision trick of the article
+	addEventToQueue(toAdd);
+}
+
+void addOutEvent(int i, int j, double tColl){
+	node* toAdd;
+
+	toAdd = eventList[N + i];
+	toAdd->j = j;
+	toAdd->type = OUT;
+	toAdd->t = tColl;
+	toAdd->collActual = particles[j].coll; //the collision trick of the article
+	addEventToQueue(toAdd);
+}
 void addWallEvent(int i, int xy, double tColl){
 	node* toAdd;
 
@@ -1122,6 +1322,144 @@ void doTheCollision(){
 	collisionEvent(j);
 }
 
+void doIn(){
+
+	int i = nextEvent->i;
+	int j = nextEvent->j;
+
+	particle* pi = particles + i;
+	particle* pj = particles + j;
+
+
+	freeFly(pi); //might put it on top?
+	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
+        collisionEvent(i);
+        return;
+    }
+
+
+
+
+	freeFly(pj);
+
+	pi->coll++;
+	pj->coll++;
+
+
+
+	double dx = pj->x - pi->x;
+	double dy = pj->y - pi->y;
+
+	PBC(&dx, &dy);
+
+	double dxr = dx/sqrt(dx*dx + dy*dy);
+	double dyr = dy/sqrt(dx*dx + dy*dy);
+
+
+	//https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+	double vi = pi->vx*dxr + pi->vy*dyr;
+	double vj = pj->vx*dxr + pj->vy*dyr;
+	double mi = pi->m;
+	double mj = pj->m;
+	double atroce = (mi*vi + mj*vj);
+	double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*U);
+	double vif = (mi*atroce + horrible)/(mi*(mi + mj));
+	double vjf = (mj*atroce - horrible)/(mj*(mi + mj));
+
+	pi->vx = (vif - vi)*dxr + pi->vx;
+	pi->vy = (vif - vi)*dyr + pi->vy;
+	pj->vx = (vjf - vj)*dxr + pj->vx;
+	pj->vy = (vjf - vj)*dyr + pj->vy;
+
+
+
+	pairs[i*N + j] = 1;
+	pairs[j*N + i] = 1;
+	//recomputes crossing and collision of pi and pj
+	removeEventFromQueue(eventList[i]);
+	removeEventFromQueue(eventList[j]);
+	crossingEvent(i);
+	crossingEvent(j);
+
+	removeEventFromQueue(eventList[N + j]);
+	collisionEvent(i);
+	collisionEvent(j);
+
+
+
+}
+
+//Leave the square well or bounce on it
+void doOut(){
+
+	int i = nextEvent->i;
+	int j = nextEvent->j;
+
+	particle* pi = particles + i;
+	particle* pj = particles + j;
+
+
+
+	freeFly(pi); //might put it on top?
+	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
+        collisionEvent(i);
+        return;
+    }
+
+
+	freeFly(pj);
+
+	pi->coll++;
+	pj->coll++;
+
+
+	double dx = pj->x - pi->x;
+	double dy = pj->y - pi->y;
+
+	PBC(&dx, &dy);
+
+	double dxr = dx/sqrt(dx*dx + dy*dy);
+	double dyr = dy/sqrt(dx*dx + dy*dy);
+
+
+	// https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+	double vi = pi->vx*dxr + pi->vy*dyr;
+	double vj = pj->vx*dxr + pj->vy*dyr;
+	double mi = pi->m;
+	double mj = pj->m;
+	double temporary = mi*mj*(vi - vj)*(vi - vj);
+	double vif, vjf;
+
+	if (U < temporary/(2*(mi + mj))){ //leaves the square well
+		double atroce = (mi*vi + mj*vj);
+		double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
+		vif = (mi*atroce - horrible)/(mi*(mi + mj));
+		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+		pairs[i*N + j] = 0;
+		pairs[j*N + i] = 0;
+
+	}
+	else{ //bounce on the square well
+		vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
+		vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
+	}
+
+
+	pi->vx = vif*dxr + (pi->vx - vi*dxr);
+	pi->vy = vif*dyr + (pi->vy - vi*dyr);
+	pj->vx = vjf*dxr + (pj->vx - vj*dxr);
+	pj->vy = vjf*dyr + (pj->vy - vj*dyr);
+
+	//recomputes crossing and collision of pi and pj
+	removeEventFromQueue(eventList[i]);
+	removeEventFromQueue(eventList[j]);
+	crossingEvent(i);
+	crossingEvent(j);
+
+	removeEventFromQueue(eventList[N + j]);
+	collisionEvent(i);
+	collisionEvent(j);
+}
 
 /* ---------------------------------------------
 	Creates the screenshot event and adds it
@@ -1326,8 +1664,15 @@ void saveThermo(){
 		if (ther){
 			double deltaColl = ncol - lastCollNum;
 			lastCollNum = ncol;
-			if (addWall){
-				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*2*(Lx + Ly)));
+			if ((addWallx) || (addWally)){
+				double perimeter = 0;
+				if (addWallx){
+					perimeter += 2*Ly;
+				}
+				if (addWally){
+					perimeter += 2*Lx;
+				}
+				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*perimeter));
 				//printf("virial %lf et wall %lf \n", pressure, dp/((t - t1)*2*(Lx + Ly)));
 				t1 = t;
 				dp = 0;
@@ -1488,7 +1833,7 @@ double resCoeff(double v){
 void format(){
 	printf("BOUNDARY CONDITIONS: ");
 	GREEN;
-	if (addWall){
+	if ((addWallx) || (addWally)){
 		if (resW == 1)
 			printf("HARD WALLS");
 		else
@@ -1543,7 +1888,7 @@ void runningCheck(){
 		printf("ERROR:\033[1;31m Coefficient of restitution greater than 1!\033[0m\n");
 		stop = 1;
 	}
-	if (( ( (addWall) && (resW < 1) ) || (res < 1)) && ((addDelta == 0) && (addExpo == 0) && (noise == 0))){
+	if (( ( ((addWally) || (addWallx)) && (resW < 1) ) || (res < 1)) && ((addDelta == 0) && (addExpo == 0) && (noise == 0))){
 		printf("ERROR:\033[1;31m Dissipative system without energy input!\033[0m\n");
 		stop = 1;
 	}

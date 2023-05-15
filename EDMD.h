@@ -29,6 +29,8 @@ struct node{
 	int q;
 };
 
+void doOut();
+void doIn();
 
 void addWallEvent(int i, int xy, double tColl);
 void doTheWall();
@@ -94,5 +96,15 @@ void format();
 void printInfo();
 void printClose();
 void runningCheck();
+
+double separateTime(particle* p1, particle* p2);
+double sphereTime(particle* p1, particle* p2);
+
+void addOutEvent(int i, int j, double tColl);
+void addInEvent(int i, int j, double tColl);
+
+void pairsInit();
+
+
 
 

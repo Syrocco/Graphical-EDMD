@@ -27,6 +27,8 @@ double px, py, E, pressure, dxr, dyr, dist, active;
 double lastScreen = 0;
 double lastCollNum = 0;
 
+
+
 int Nycells = -1;
 int Nxcells = -1;
 double halfLx; // = Lx/2
@@ -46,7 +48,19 @@ double t = 0;
 
 double collTerm = 0;
 double dp = 0;
+double dpLeft = 0;
+double dpRight = 0;
+double dpMid = 0;
 
+unsigned long int ncol = 0;
+unsigned long int ncolss = 0;
+unsigned long int ncolsb = 0;
+unsigned long int ncolbb = 0;
+unsigned long int ncross = 0;
+char fileName[350];
+char thermoName[350];
+char buffer[255];
+FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
@@ -68,7 +82,7 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 3000;
+double tmax = 30000;
 //time between each screenshots
 double dtime = 10;
 double dtimeThermo = 1000;
@@ -76,17 +90,6 @@ double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
-
-
-unsigned long int ncol = 0;
-unsigned long int ncolss = 0;
-unsigned long int ncolsb = 0;
-unsigned long int ncolbb = 0;
-unsigned long int ncross = 0;
-char fileName[350];
-char thermoName[350];
-char buffer[255];
-FILE* file;
 
 
 
@@ -132,7 +135,7 @@ const int reduce = 0;
 
 
 //value for delta model
-double delta = 0.03;
+double delta = 0.05;
 
 //values for double delta model
 double deltaM = 0.04;
@@ -152,8 +155,9 @@ double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
+
 //coeff of restitution of particles
-double res = 0.7;
+double res = 0.9;
 
 //parameter if noise or damping
 double gamm = 0.01;
@@ -291,7 +295,6 @@ void constantInit(int argc, char *argv[]){
             sscanf(argv[1], "%lf", &temp1);
             sscanf(argv[2], "%lf", &temp2);
             sscanf(argv[3], "%lf", &temp3);
-            //sscanf(argv[4], "%lf", &deltaM);
             char filename[200];
             sprintf(filename, "%.7lf%.7lf%.7lf%.7lf.txt",temp1, temp2, temp3, 0.);
 		}
@@ -1256,6 +1259,24 @@ void doTheWall(){
 
 	if (xy == 0){
 		dp += fabs((resW + 1)*pi->m*pi->vx);
+		if (addMidWall){
+			if (pi->vx < 0){
+				if (pi->x - 2 < 0){
+					dpLeft += fabs((resW + 1)*pi->m*pi->vx);
+				}
+				else{
+					dpMid += fabs((resW + 1)*pi->m*pi->vx);
+				}
+			}
+			else{
+				if (pi->x + 2 > Lx){
+					dpRight += fabs((resW + 1)*pi->m*pi->vx);
+				}
+				else{
+					dpMid += fabs((resW + 1)*pi->m*pi->vx);
+				}
+			}
+		}
 		pi->vx = -resW*pi->vx;
 	}
 	else{
@@ -1718,19 +1739,27 @@ void saveThermo(){
 			double deltaColl = ncol - lastCollNum;
 			lastCollNum = ncol;
 			if ((addWallx) || (addWally)){
-				double perimeter = 0;
-				if (addWallx){
-					perimeter += 2*Ly;
-				}
-				if (addWally){
-					perimeter += 2*Lx;
-				}
-				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*perimeter));
-				t1 = t;
-				dp = 0;
+
 				if (addMidWall){
 
+					fprintf(thermo, "%lf %lf %lf %lf\n", t, E/N, dpMid/((t - t1)*Ly), (dpRight - dpLeft)/((t - t1)*Ly));
+					dpMid = 0;
+					dpRight = 0;
+					dpLeft = 0;
 				}
+				else{
+					double perimeter = 0;
+					if (addWallx){
+						perimeter += 2*Ly;
+					}
+					if (addWally){
+						perimeter += 2*Lx;
+					}
+					fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*perimeter));
+
+					dp = 0;
+				}
+			t1 = t;
 			}
 			else{
 				fprintf(thermo, "%lf %lf %lf %lf %lf %.10lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, active);

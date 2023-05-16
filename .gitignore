@@ -2,8 +2,8 @@
 *
 
 # But not these files...
-!.gitignore
 !EDMD.c
 !EDMD.h
 !mersenne.c
+!Makefile
 # etc...

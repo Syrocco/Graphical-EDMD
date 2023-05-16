@@ -27,40 +27,6 @@ double px, py, E, pressure, dxr, dyr, dist, active;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-//will be overwritten if:    load = 1     below.
-double Lx = 12000;
-double Ly = 12000;
-//spacing bewteen big particles in the init state
-double dL = 2;
-
-
-double t = 0;
-double tmax = 8000;
-//time between each screenshots
-double dtime = 10;
-double dtimeThermo = 100;
-
-double firstScreen = 0;
-double nextScreen = -1;
-double on = 1;
-
-double updateTime = 100;
-double updateTimeMax = 2000;
-unsigned long int ncol = 0;
-unsigned long int ncolss = 0;
-unsigned long int ncolsb = 0;
-unsigned long int ncolbb = 0;
-unsigned long int ncross = 0;
-char fileName[350];
-char thermoName[350];
-char buffer[255];
-FILE* file;
-
-double rad1 = 1.;
-double rad2 = 0.457;
-double m1 = 1;
-double m2 = 0.06;
-
 int Nycells = -1;
 int Nxcells = -1;
 double halfLx; // = Lx/2
@@ -75,52 +41,138 @@ double cellyFac; // = 1/cellSize
 //for now we only need 3 more events
 const int suppSizeEvent = 10;
 
+double on = 1;
+double t = 0;
+
+double collTerm = 0;
+double dp = 0;
+
+
+
+//load a configuration if == 1 (if nothing specified it loads from data.txt)
+const int load = 1;
+
 const int tinyOnes = 0;
+
+//will be overwritten if:    load = 1     below.
+double Lx = 12000;
+double Ly = 12000;
+
+//spacing bewteen big particles in the init state if no loading data given
+double dL = 2;
+
+//values of radius and mass if load == 0 (so they will be overwritten if we load from a file)
+double rad1 = 1.;
+double rad2 = 0.457;
+double m1 = 1;
+double m2 = 0.06;
+
+//duration of simulation
+double tmax = 3000;
+//time between each screenshots
+double dtime = 10;
+double dtimeThermo = 1000;
+double firstScreen = 0;
+
+//if -1, screenshot will be taken at constant interval of dtimeThermo
+double nextScreen = -1;
+
+
+unsigned long int ncol = 0;
+unsigned long int ncolss = 0;
+unsigned long int ncolsb = 0;
+unsigned long int ncolbb = 0;
+unsigned long int ncross = 0;
+char fileName[350];
+char thermoName[350];
+char buffer[255];
+FILE* file;
+
+
+
+
+
+//add a noise
 const int noise = 0;
+
+//updata the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
+
+//add damping
 const int damping = 0;
 
+
+//activate the delta model
 const int addDelta = 1;
+
+//activate double delta modem
+const int addDoubleDelta = 0;
+
+//activate the exponential model
 const int addExpo = 0;
 
-
-const int addWallx = 0;
+//add a wall at y = Ly and y = 0
 const int addWally = 0;
-const int addMidWall = 0;
+//add a wall at x = Lx and x = 0
+const int addWallx = 1;
+//add a wall at x = Lx/2
+const int addMidWall = 1;
 
-const int addWell = 1;
+//add square potential
+const int addWell = 0;
 
+//if noise use euler solver
 const int euler = 0;
+
+//save a file with thermodynamics quantities each dtimeThermo
 const int ther = 1;
+
+//reduce the number of properties dumped into the dump files
 const int reduce = 0;
 
 
+//value for delta model
+double delta = 0.03;
 
-double delta = 0;
-double deltaM = 0.03;
+//values for double delta model
+double deltaM = 0.04;
 double deltam = 0;
-double ts = 600000000;
+double ts = 6;
+
+//values for exponential model
 double vo = 1;
 double ao = 1.3;
 
+//values for square potential model
 double sig = 1.5;
 double U = 0.5;
 
+//Initial temperature
 double Einit = 1;
+
+//coeff of restitution of the wall
 double resW = 1;
-double res = 0.95;
+//coeff of restitution of particles
+double res = 0.7;
+
+//parameter if noise or damping
 double gamm = 0.01;
 double T = 1;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
-double collTerm = 0;
-double dp = 0;
+
+
+//parameter to reach a given temperature out of equilibrium with langevin dynamics
+double updateTime = 100;
+double updateTimeMax = 2000;
+
+
 
 double sizeRat;
 double phi;
 
-const int load = 1;
+
 
 double paulTime = 0;
 int actualPaulList = 0;
@@ -258,7 +310,7 @@ void constantInit(int argc, char *argv[]){
 
 			if (argc == 3){
 				sscanf(argv[1], "%lf", &res);
-				sscanf(argv[2], "%lf", &tmax);
+				sscanf(argv[2], "%lf", &deltaM);
 			}
 		}
 		file = fopen(filename, "r");
@@ -1038,7 +1090,7 @@ void collisionEvent(int i){
 	double dtTemp, dtTemp2;
 	int typeTemp;
 
-	if (addWallx){
+	if (addWally){
 
 		if ((Y == 0) && (p1->vy < 0)){
 			dt = logTime(-(p1->y - p1->rad)/p1->vy);
@@ -1053,7 +1105,7 @@ void collisionEvent(int i){
 		}
 
 	}
-	if (addWally){
+	if (addWallx){
 		if ((X == 0) && (p1->vx < 0)){
 
 			dtTemp = logTime(-(p1->x - p1->rad)/p1->vx);
@@ -1119,9 +1171,8 @@ void collisionEvent(int i){
 					}
 					else{
 						dtTemp = collisionTime(p1, p2);
-						if (dtTemp < dtTemp2){
-							typeTemp = COLLISION;
-						}
+
+						typeTemp = COLLISION;
 					}
 
 			 		if (dt > dtTemp){ //get min
@@ -1275,12 +1326,14 @@ void doTheCollision(){
 
 
 	collTerm += pi->m*pj->m*collKernel;
-	if (addDelta){
+	if ((addDelta) ||(addDoubleDelta)){
 		//double tau = -ts*log(1 - drand(0, 1));
-        if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts))
-            delta = deltam;
-        else
-            delta = deltaM;
+		if (addDoubleDelta){
+			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts))
+				delta = deltam;
+			else
+				delta = deltaM;
+		}
 		dist = sqrt(dx*dx + dy*dy);
 		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
 		dxr = dx/dist;
@@ -1295,7 +1348,7 @@ void doTheCollision(){
 
 
 
-	if (addDelta){
+	if ((addDoubleDelta) || (addDelta)){
 
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -1673,9 +1726,11 @@ void saveThermo(){
 					perimeter += 2*Lx;
 				}
 				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*perimeter));
-				//printf("virial %lf et wall %lf \n", pressure, dp/((t - t1)*2*(Lx + Ly)));
 				t1 = t;
 				dp = 0;
+				if (addMidWall){
+
+				}
 			}
 			else{
 				fprintf(thermo, "%lf %lf %lf %lf %lf %.10lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, active);

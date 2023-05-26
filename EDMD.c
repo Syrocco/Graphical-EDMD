@@ -82,10 +82,10 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 30000;
+double tmax = 10000;
 //time between each screenshots
-double dtime = 10;
-double dtimeThermo = 1000;
+double dtime = 1;
+double dtimeThermo = 100;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -98,7 +98,7 @@ double nextScreen = -1;
 //add a noise
 const int noise = 0;
 
-//updata the thermostat temperature to reach a wanted temperature for the system
+//update the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
 
 //add damping
@@ -106,10 +106,14 @@ const int damping = 0;
 
 
 //activate the delta model
-const int addDelta = 1;
+const int addDelta = 0;
 
-//activate double delta modem
+//activate double delta model
 const int addDoubleDelta = 0;
+
+//activate evoling delta model
+const int addEvolvingDelta = 1;
+
 
 //activate the exponential model
 const int addExpo = 0;
@@ -117,9 +121,9 @@ const int addExpo = 0;
 //add a wall at y = Ly and y = 0
 const int addWally = 0;
 //add a wall at x = Lx and x = 0
-const int addWallx = 1;
+const int addWallx = 0;
 //add a wall at x = Lx/2
-const int addMidWall = 1;
+const int addMidWall = 0;
 
 //add square potential
 const int addWell = 0;
@@ -138,30 +142,34 @@ const int reduce = 0;
 double delta = 0.05;
 
 //values for double delta model
-double deltaM = 0.04;
+double deltaM = 0.05;
 double deltam = 0;
 double ts = 6;
+
+//value for evolving delta model
+double tau = 5;
+double deltaMax = 0.02;
 
 //values for exponential model
 double vo = 1;
 double ao = 1.3;
 
 //values for square potential model
-double sig = 1.5;
-double U = 0.5;
+double sig = 1.6;
+double U = 15;
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.2;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.9;
+double res = 0.95;
 
 //parameter if noise or damping
 double gamm = 0.01;
-double T = 1;
+double T = 0.2;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
@@ -265,6 +273,7 @@ int main(int argc, char *argv[]){
 				break;
 		}
 	}
+
 	exiting:
 		printInfo();
 		printClose();
@@ -290,6 +299,7 @@ int main(int argc, char *argv[]){
 void constantInit(int argc, char *argv[]){
 	if (load){
 		char filename[200];
+		printf("here\n");
 		if (argc == 5){
 		    double temp1, temp2, temp3;
             sscanf(argv[1], "%lf", &temp1);
@@ -316,6 +326,7 @@ void constantInit(int argc, char *argv[]){
 				sscanf(argv[2], "%lf", &deltaM);
 			}
 		}
+		printf("%s\n", fileName);
 		file = fopen(filename, "r");
 
 		mygetline(buffer, file);
@@ -404,8 +415,11 @@ void particlesInit(){
 		    mygetline(buffer, file);
 		    sscanf(buffer, "%d %lf %lf %lf %lf\n", &(p->type), &(p->x), &(p->y), &(p->rad), &(p->m));
 		    Nbig += p->type;
-			p->vx = drand(-1, 1)*sqrt(drand(0, 1))/p->m;
-			p->vy = drand(-1, 1)*sqrt(drand(0, 1))/p->m;
+			double U1 = drand(0, 1);
+			double U2 = drand(0, 1);
+			/* 0.0000000002 choice of KT for the initialisaion here*/
+            p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2) ;
+            p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2) ;
 			p->num = i;
 			p->t = 0;
 			p->coll = 0;
@@ -1310,15 +1324,12 @@ void doTheCollision(){
 
     if ((pi->type == 1) && (pj->type == 1)){
     	ncolbb += 1;
-    	//res = 0.9;
     }
     else if ((pi->type == 0) && (pj->type == 0)){
     	ncolss += 1;
-    	//res = 0.1;
     }
     else{
     	ncolsb += 1;
- 	 	//res = 0.95;
     }
     ncol++;
 	freeFly(pj);
@@ -1347,7 +1358,7 @@ void doTheCollision(){
 
 
 	collTerm += pi->m*pj->m*collKernel;
-	if ((addDelta) ||(addDoubleDelta)){
+	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
 			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts))
@@ -1355,11 +1366,16 @@ void doTheCollision(){
 			else
 				delta = deltaM;
 		}
+		else if (addEvolvingDelta){
+			double dti = t - pi->lastColl;
+			double dtj = t - pj->lastColl;
+			delta = deltaMax*(2 - (exp(-dtj/tau) + exp(-dti/tau)))/2;
+		}
+
 		dist = sqrt(dx*dx + dy*dy);
 		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
 		dxr = dx/dist;
 		dyr = dy/dist;
-
 	}
 
 
@@ -1369,7 +1385,7 @@ void doTheCollision(){
 
 
 
-	if ((addDoubleDelta) || (addDelta)){
+	if ((addDoubleDelta) || (addDelta) || (addEvolvingDelta)){
 
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -1435,10 +1451,33 @@ void doIn(){
 	double vj = pj->vx*dxr + pj->vy*dyr;
 	double mi = pi->m;
 	double mj = pj->m;
-	double atroce = (mi*vi + mj*vj);
-	double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*U);
-	double vif = (mi*atroce + horrible)/(mi*(mi + mj));
-	double vjf = (mj*atroce - horrible)/(mj*(mi + mj));
+	double vif, vjf;
+
+	double temporary = mi*mj*(vi - vj)*(vi - vj);
+
+	if (U > 0){
+		pairs[i*N + j] = 1;
+		pairs[j*N + i] = 1;
+		double atroce = (mi*vi + mj*vj);
+		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*U);
+		vif = (mi*atroce + horrible)/(mi*(mi + mj));
+		vjf = (mj*atroce - horrible)/(mj*(mi + mj));
+	}
+	else{
+		if (U > -temporary/(2*(mi + mj))){
+			double atroce = (mi*vi + mj*vj);
+			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
+			vif = (mi*atroce - horrible)/(mi*(mi + mj));
+			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+			pairs[i*N + j] = 1;
+			pairs[j*N + i] = 1;
+
+		}
+		else{ //bounces on the square well
+			vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
+			vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
+		}
+	}
 
 	pi->vx = (vif - vi)*dxr + pi->vx;
 	pi->vy = (vif - vi)*dyr + pi->vy;
@@ -1447,8 +1486,6 @@ void doIn(){
 
 
 
-	pairs[i*N + j] = 1;
-	pairs[j*N + i] = 1;
 	//recomputes crossing and collision of pi and pj
 	removeEventFromQueue(eventList[i]);
 	removeEventFromQueue(eventList[j]);
@@ -1504,18 +1541,28 @@ void doOut(){
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 	double vif, vjf;
 
-	if (U < temporary/(2*(mi + mj))){ //leaves the square well
+	if (U > 0){
+		if (U < temporary/(2*(mi + mj))){ //leaves the square well
+			double atroce = (mi*vi + mj*vj);
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
+			vif = (mi*atroce - horrible)/(mi*(mi + mj));
+			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+			pairs[i*N + j] = 0;
+			pairs[j*N + i] = 0;
+
+		}
+		else{ //bounces on the square well
+			vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
+			vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
+		}
+	}
+	else{
 		double atroce = (mi*vi + mj*vj);
 		double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
 		vif = (mi*atroce - horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 		pairs[i*N + j] = 0;
 		pairs[j*N + i] = 0;
-
-	}
-	else{ //bounce on the square well
-		vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
-		vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
 	}
 
 
@@ -1786,7 +1833,7 @@ double sign(double x){
 inline double logTime(double time){
 	if (damping == 1){
 		double var = (1 - time*gamm);
-		if ((var < 0))
+		if (var < 0)
 			return 1000000000000;
 		else
 			return  -log(var)/gamm;
@@ -1815,7 +1862,7 @@ void randomGaussian(particle* p){
 		}
 	}
 	else{
-		double std = sqrt(2*gamm*T*dtnoise)/p->m;
+		double std = sqrt(2*gamm*T*dtnoise/p->m);
 		p->vx += std*a*cos(b);
 		p->vy += std*a*sin(b);
 	}
@@ -1972,7 +2019,7 @@ void runningCheck(){
 		printf("ERROR:\033[1;31m Coefficient of restitution greater than 1!\033[0m\n");
 		stop = 1;
 	}
-	if (( ( ((addWally) || (addWallx)) && (resW < 1) ) || (res < 1)) && ((addDelta == 0) && (addExpo == 0) && (noise == 0))){
+	if (( ( ((addWally) || (addWallx)) && (resW < 1) ) || (res < 1)) && (((addDelta == 0) && (addDoubleDelta == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
 		printf("ERROR:\033[1;31m Dissipative system without energy input!\033[0m\n");
 		stop = 1;
 	}

@@ -82,9 +82,9 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 10000;
+double tmax = 1000;
 //time between each screenshots
-double dtime = 1;
+double dtime = 100;
 double dtimeThermo = 100;
 double firstScreen = 0;
 
@@ -104,7 +104,6 @@ const int updating = 0;
 //add damping
 const int damping = 0;
 
-
 //activate the delta model
 const int addDelta = 0;
 
@@ -112,21 +111,21 @@ const int addDelta = 0;
 const int addDoubleDelta = 0;
 
 //activate evoling delta model
-const int addEvolvingDelta = 1;
+const int addEvolvingDelta = 0;
 
 
 //activate the exponential model
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 0;
+const int addWally = 1;
 //add a wall at x = Lx and x = 0
-const int addWallx = 0;
+const int addWallx = 1;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 
 //add square potential
-const int addWell = 0;
+const int addWell = 1;
 
 //if noise use euler solver
 const int euler = 0;
@@ -156,7 +155,7 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.6;
-double U = 15;
+double U = 3;
 
 //Initial temperature
 double Einit = 0.2;
@@ -165,7 +164,7 @@ double Einit = 0.2;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.01;
@@ -989,7 +988,7 @@ double collisionTime(particle* p1, particle* p2){
 
 	if (damping == 1){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
+	}                //with damping, it would be harder, so I just update the position of p2. 
 
 	double lat2 = t - p2->t;
 
@@ -1012,10 +1011,9 @@ double collisionTime(particle* p1, particle* p2){
 
 
 	//to delete when confident with life decisions...
-	if (distOfSquare < -0.0001){
+	if (distOfSquare < -0.1){
 		printf("\nERROR:\033[0;31m Overlaps detected!\033[0m\n");
 		exit(3);
-
 	}
 
 	if (det < 0)
@@ -1031,7 +1029,7 @@ double sphereTime(particle* p1, particle* p2){
 
 	if (damping == 1){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
+	}                //with damping, it would be harder, so I just update the position of p2. 
 
 	double lat2 = t - p2->t;
 
@@ -1064,7 +1062,7 @@ double separateTime(particle* p1, particle* p2){
 
 	if (damping == 1){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. FIX: changer cette saloperie plus tard. C'est terrible...
+	}                //with damping, it would be harder, so I just update the position of p2. 
 
 	double lat2 = t - p2->t;
 
@@ -1173,7 +1171,6 @@ void collisionEvent(int i){
 							dtTemp = collisionTime(p1, p2);
 							dtTemp2 = separateTime(p1, p2);
 							if (dtTemp < dtTemp2){
-
 								typeTemp = COLLISION;
 							}
 							else{
@@ -1479,10 +1476,15 @@ void doIn(){
 		}
 	}
 
-	pi->vx = (vif - vi)*dxr + pi->vx;
-	pi->vy = (vif - vi)*dyr + pi->vy;
-	pj->vx = (vjf - vj)*dxr + pj->vx;
-	pj->vy = (vjf - vj)*dyr + pj->vy;
+
+	double dvjx = (vjf - vj)*dxr;
+	double dvjy = (vjf - vj)*dyr;
+	collTerm += dvjy*dy + dvjx*dx;
+
+	pi->vx += (vif - vi)*dxr;
+	pi->vy += (vif - vi)*dyr;
+	pj->vx += dvjx;
+	pj->vy += dvjy;
 
 
 
@@ -1565,11 +1567,14 @@ void doOut(){
 		pairs[j*N + i] = 0;
 	}
 
+	double dvjx = (vjf - vj)*dxr;
+	double dvjy = (vjf - vj)*dyr;
+	collTerm += dvjy*dy + dvjx*dx;
 
-	pi->vx = vif*dxr + (pi->vx - vi*dxr);
-	pi->vy = vif*dyr + (pi->vy - vi*dyr);
-	pj->vx = vjf*dxr + (pj->vx - vj*dxr);
-	pj->vy = vjf*dyr + (pj->vy - vj*dyr);
+	pi->vx += (vif - vi)*dxr;
+	pi->vy += (vif - vi)*dyr;
+	pj->vx += dvjx;
+	pj->vy += dvjy;
 
 	//recomputes crossing and collision of pi and pj
 	removeEventFromQueue(eventList[i]);

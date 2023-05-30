@@ -85,8 +85,8 @@ double m2 = 0.06;
 //duration of simulation
 double tmax = 1000;
 //time between each screenshots
-double dtime = 0.5;
-double dtimeThermo = 100000;
+double dtime = 10;
+double dtimeThermo = 10;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -124,8 +124,8 @@ const int addWally = 0;
 const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
-//add a spherical wall
-const int addSphericalWall = 1;
+//add a circular wall
+const int addCircularWall = 1;
 
 //add square potential
 const int addWell = 0;
@@ -141,7 +141,7 @@ const int reduce = 0;
 
 
 //value for delta model
-double delta = 0.05;
+double delta = 0.03;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -477,7 +477,10 @@ void particlesInit(){
 	}
 
 	sizeRat = particles[N-1].rad;
-	phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
+	if (addCircularWall)
+		phi = (sizeRat*sizeRat*Nsmall + Nbig)/(halfLx*halfLx);
+	else
+		phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
 	customName();
 	physicalQ();
 	for (int i = 0; i < N; i++){
@@ -489,10 +492,6 @@ void particlesInit(){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
 	}
-	particles[1].vx = 1;
-	particles[1].vy = 0;
-	particles[0].vx = 0;
-	particles[0].vy = 0;
 }
 
 
@@ -1110,7 +1109,6 @@ void collisionEvent(int i){
 	int xy = 2;
 	double dtTemp, dtTemp2;
 	int typeTemp;
-	double xtemp, ytemp;
 
 
 	if (addWally){
@@ -1170,38 +1168,24 @@ void collisionEvent(int i){
 	}
 
 
-	if (addSphericalWall){
-		double y0 = p1->y;
-		double x0 = p1->x;
-		double v0x = p1->vx;
-		double v0y = p1->vy;
-		double rad = p1->rad;
-		double a = v0y/v0x;
-		double b = y0 - v0y/v0x*x0;
-		double A = (a*a  + 1);
-		double B = 2*a*(b - halfLx) - Lx;
-		double C = halfLx*halfLx + (b - halfLx)*(b - halfLx) - (halfLx - rad)*(halfLx - rad);
-		double D = B*B - 4*A*C;
-		printf("\n%lf\n", D);
-		double x1 = (-B - sqrt(D))/(2*A);
-
-		if ((x0 - x1 > 0) && (v0x < 0)){
-			xtemp = x1;
-			ytemp = a*x1 + b;
-			printf("1) %lf %lf %lf %lf, %lf, %lf, %lf\n", x0, y0, v0x, v0y, xtemp, ytemp, (xtemp - halfLx)*(xtemp - halfLx) + (ytemp - halfLx)*(ytemp - halfLx));
-		}
-		else{
-			xtemp = (-B + sqrt(D))/(2*A);
-			ytemp = a*x1 + b;
-			printf("2) %lf %lf %lf %lf , %lf, %lf, %lf\n", x0, y0, v0x, v0y, xtemp, ytemp, (xtemp - halfLx)*(xtemp - halfLx) + (ytemp - halfLx)*(ytemp - halfLx));
-
-		}
-		double distance = sqrt((ytemp - y0)*(ytemp - y0) + (xtemp - x0)*(xtemp - x0));
-		double speed = sqrt(v0x*v0x + v0y*v0y);
-		type = WALL;
-		dt = distance/speed;
-		printf("%lf %lf %lf\n", distance, speed, dt);
-		xy = 2;
+	if (addCircularWall){
+		
+			double y0 = p1->y;
+			double x0 = p1->x;
+			double v0x = p1->vx;
+			double v0y = p1->vy;
+			double rad = p1->rad;
+			
+			x0 = x0 - halfLx;
+			y0 = y0 - halfLx;
+			double A = (v0x*v0x + v0y*v0y);
+			double B = 2*(v0x*x0 + v0y*y0);
+			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
+			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
+			
+			type = WALL;
+			xy = 2;
+			
 
 	}
 
@@ -1251,7 +1235,7 @@ void collisionEvent(int i){
 	else if (type == IN)
 		addInEvent(i, finalPartner, t + dt);
 	else
-		addWallEvent(i, xy, t + dt, xtemp, ytemp);
+		addWallEvent(i, xy, t + dt);
 
 }
 
@@ -1294,17 +1278,14 @@ void addOutEvent(int i, int j, double tColl){
 	toAdd->collActual = particles[j].coll; //the collision trick of the article
 	addEventToQueue(toAdd);
 }
-void addWallEvent(int i, int xy, double tColl, double x, double y){
+void addWallEvent(int i, int xy, double tColl){
 	node* toAdd;
 
 	toAdd = eventList[N + i];
 	toAdd->type = WALL;
 	toAdd->t = tColl;
 	toAdd->j = xy;
-	if (xy == 2){
-		toAdd->x = x;
-		toAdd->y = y;
-	}
+
 	addEventToQueue(toAdd);
 }
 
@@ -1342,16 +1323,14 @@ void doTheWall(){
 		pi->vy = -resW*pi->vy;
 	}
 	else{
-		double theta = atan2(nextEvent->y - halfLx, nextEvent->x - halfLx);
+		double theta = atan2(pi->y - halfLx, pi->x - halfLx);
 		double nx = cos(theta);
 		double ny = sin(theta);
-		double mix = -2*(pi->vx*nx + pi->vy*ny);
-		printf("nx ny = %lf %lf ", nx,ny);
-		printf("pre: %lf", pi->vx);
+		double mix = -(1 + resW)*(pi->vx*nx + pi->vy*ny);
+
 		pi->vx += mix*nx;
 		pi->vy += mix*ny;
-		printf("  %lf \n", pi->vx);
-
+		dp += fabs(pi->m*mix);
 	}
 
 	pi->coll++;
@@ -1838,18 +1817,23 @@ void saveTXT(){
 }
 
 void saveThermo(){
-
+	double area = Lx*Ly;
 
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
-    pressure = (-1/(deltaTime))*collTerm/(2*Lx*Ly) + E/(Lx*Ly);
+	
+	if (addCircularWall){
+		area = M_PI*halfLx*halfLx; 
+	}
+	
+    pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
     collTerm = 0;
 
     if (t != 0){
 		if (ther){
 			double deltaColl = ncol - lastCollNum;
 			lastCollNum = ncol;
-			if ((addWallx) || (addWally)){
+			if ((addWallx) || (addWally) || (addCircularWall)){
 
 				if (addMidWall){
 
@@ -1860,6 +1844,9 @@ void saveThermo(){
 				}
 				else{
 					double perimeter = 0;
+					if (addCircularWall){
+						perimeter = M_PI*Lx;
+					}
 					if (addWallx){
 						perimeter += 2*Ly;
 					}
@@ -2083,7 +2070,7 @@ void runningCheck(){
 		printf("ERROR:\033[1;31m Coefficient of restitution greater than 1!\033[0m\n");
 		stop = 1;
 	}
-	if (( ( ((addWally) || (addWallx)) && (resW < 1) ) || (res < 1)) && (((addDelta == 0) && (addDoubleDelta == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
+	if (( ( ((addWally) || (addWallx) || (addCircularWall)) && (resW < 1) ) || (res < 1)) && (((addDelta == 0) && (addDoubleDelta == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
 		printf("ERROR:\033[1;31m Dissipative system without energy input!\033[0m\n");
 		stop = 1;
 	}

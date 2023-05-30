@@ -1,5 +1,6 @@
 #include"EDMD.h"
 #include"mersenne.c"
+#include <math.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -84,8 +85,8 @@ double m2 = 0.06;
 //duration of simulation
 double tmax = 1000;
 //time between each screenshots
-double dtime = 100;
-double dtimeThermo = 100;
+double dtime = 0.5;
+double dtimeThermo = 100000;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -118,14 +119,16 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 1;
+const int addWally = 0;
 //add a wall at x = Lx and x = 0
-const int addWallx = 1;
+const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
+//add a spherical wall
+const int addSphericalWall = 1;
 
 //add square potential
-const int addWell = 1;
+const int addWell = 0;
 
 //if noise use euler solver
 const int euler = 0;
@@ -155,7 +158,7 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.6;
-double U = 3;
+double U = 13;
 
 //Initial temperature
 double Einit = 0.2;
@@ -416,7 +419,6 @@ void particlesInit(){
 		    Nbig += p->type;
 			double U1 = drand(0, 1);
 			double U2 = drand(0, 1);
-			/* 0.0000000002 choice of KT for the initialisaion here*/
             p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2) ;
             p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2) ;
 			p->num = i;
@@ -487,6 +489,10 @@ void particlesInit(){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
 	}
+	particles[1].vx = 1;
+	particles[1].vy = 0;
+	particles[0].vx = 0;
+	particles[0].vy = 0;
 }
 
 
@@ -1011,7 +1017,7 @@ double collisionTime(particle* p1, particle* p2){
 
 
 	//to delete when confident with life decisions...
-	if (distOfSquare < -0.1){
+	if (distOfSquare < -0.001){
 		printf("\nERROR:\033[0;31m Overlaps detected!\033[0m\n");
 		exit(3);
 	}
@@ -1104,6 +1110,8 @@ void collisionEvent(int i){
 	int xy = 2;
 	double dtTemp, dtTemp2;
 	int typeTemp;
+	double xtemp, ytemp;
+
 
 	if (addWally){
 
@@ -1161,6 +1169,42 @@ void collisionEvent(int i){
 		}
 	}
 
+
+	if (addSphericalWall){
+		double y0 = p1->y;
+		double x0 = p1->x;
+		double v0x = p1->vx;
+		double v0y = p1->vy;
+		double rad = p1->rad;
+		double a = v0y/v0x;
+		double b = y0 - v0y/v0x*x0;
+		double A = (a*a  + 1);
+		double B = 2*a*(b - halfLx) - Lx;
+		double C = halfLx*halfLx + (b - halfLx)*(b - halfLx) - (halfLx - rad)*(halfLx - rad);
+		double D = B*B - 4*A*C;
+		printf("\n%lf\n", D);
+		double x1 = (-B - sqrt(D))/(2*A);
+
+		if ((x0 - x1 > 0) && (v0x < 0)){
+			xtemp = x1;
+			ytemp = a*x1 + b;
+			printf("1) %lf %lf %lf %lf, %lf, %lf, %lf\n", x0, y0, v0x, v0y, xtemp, ytemp, (xtemp - halfLx)*(xtemp - halfLx) + (ytemp - halfLx)*(ytemp - halfLx));
+		}
+		else{
+			xtemp = (-B + sqrt(D))/(2*A);
+			ytemp = a*x1 + b;
+			printf("2) %lf %lf %lf %lf , %lf, %lf, %lf\n", x0, y0, v0x, v0y, xtemp, ytemp, (xtemp - halfLx)*(xtemp - halfLx) + (ytemp - halfLx)*(ytemp - halfLx));
+
+		}
+		double distance = sqrt((ytemp - y0)*(ytemp - y0) + (xtemp - x0)*(xtemp - x0));
+		double speed = sqrt(v0x*v0x + v0y*v0y);
+		type = WALL;
+		dt = distance/speed;
+		printf("%lf %lf %lf\n", distance, speed, dt);
+		xy = 2;
+
+	}
+
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
 			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
@@ -1185,7 +1229,6 @@ void collisionEvent(int i){
 					}
 					else{
 						dtTemp = collisionTime(p1, p2);
-
 						typeTemp = COLLISION;
 					}
 
@@ -1208,7 +1251,7 @@ void collisionEvent(int i){
 	else if (type == IN)
 		addInEvent(i, finalPartner, t + dt);
 	else
-		addWallEvent(i, xy, t + dt);
+		addWallEvent(i, xy, t + dt, xtemp, ytemp);
 
 }
 
@@ -1251,13 +1294,17 @@ void addOutEvent(int i, int j, double tColl){
 	toAdd->collActual = particles[j].coll; //the collision trick of the article
 	addEventToQueue(toAdd);
 }
-void addWallEvent(int i, int xy, double tColl){
+void addWallEvent(int i, int xy, double tColl, double x, double y){
 	node* toAdd;
 
 	toAdd = eventList[N + i];
 	toAdd->type = WALL;
 	toAdd->t = tColl;
 	toAdd->j = xy;
+	if (xy == 2){
+		toAdd->x = x;
+		toAdd->y = y;
+	}
 	addEventToQueue(toAdd);
 }
 
@@ -1290,9 +1337,21 @@ void doTheWall(){
 		}
 		pi->vx = -resW*pi->vx;
 	}
-	else{
+	else if (xy == 1){
 		dp += fabs((resW + 1)*pi->m*pi->vy);
 		pi->vy = -resW*pi->vy;
+	}
+	else{
+		double theta = atan2(nextEvent->y - halfLx, nextEvent->x - halfLx);
+		double nx = cos(theta);
+		double ny = sin(theta);
+		double mix = -2*(pi->vx*nx + pi->vy*ny);
+		printf("nx ny = %lf %lf ", nx,ny);
+		printf("pre: %lf", pi->vx);
+		pi->vx += mix*nx;
+		pi->vy += mix*ny;
+		printf("  %lf \n", pi->vx);
+
 	}
 
 	pi->coll++;
@@ -1423,7 +1482,7 @@ void doIn(){
         collisionEvent(i);
         return;
     }
-
+	ncol++;
 
 
 
@@ -1518,7 +1577,7 @@ void doOut(){
         collisionEvent(i);
         return;
     }
-
+	ncol++;
 
 	freeFly(pj);
 

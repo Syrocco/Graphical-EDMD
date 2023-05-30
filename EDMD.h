@@ -27,12 +27,13 @@ struct node{
 	unsigned long int collActual; //collActual = counter of collision at event prediciton
 	double t;
 	int q;
+	double x, y;
 };
 
 void doOut();
 void doIn();
 
-void addWallEvent(int i, int xy, double tColl);
+void addWallEvent(int i, int xy, double tColl, double x, double y);
 void doTheWall();
 
 void constantInit(int argc, char *argv[]);

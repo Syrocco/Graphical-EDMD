@@ -85,7 +85,7 @@ double m2 = 0.06;
 //duration of simulation
 double tmax = 1000000;
 //time between each screenshots
-double dtime = 1;
+double dtime = 10;
 double dtimeThermo = 10;
 double firstScreen = 0;
 
@@ -126,7 +126,7 @@ const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 //add a circular wall
-const int addCircularWall = 1;
+const int addCircularWall = 0;
 
 //add square potential
 const int addWell = 0;
@@ -159,10 +159,10 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.6;
-double U = -10.56;
+double U = 10.56;
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.1;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -171,8 +171,8 @@ double resW = 1;
 double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.01;
-double T = 0.2;
+double gamm = 0.1;
+double T = 0.056;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -206,7 +206,7 @@ node** eventList;
 node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
-int* pairs;
+
 
 int main(int argc, char *argv[]){
 
@@ -218,6 +218,8 @@ int main(int argc, char *argv[]){
 	particlesInit();
 	fichier = fopen(fileName, "w");
 	cellListInit();
+	if (addWell)
+		pairsInit();
 	eventListInit();
 	physicalQ();
 	format();
@@ -478,11 +480,6 @@ void particlesInit(){
 		phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
 	customName();
 
-	if (addWell){
-		printf("Generating pairs for well potential...");
-		pairsInit();
-		printf("Done!\n");
-	}
 
 
 	if (addCircularWall != 1){
@@ -530,31 +527,44 @@ void particlesInit(){
 --------------------------------------------- */
 
 void pairsInit(){
+
+	
+	printf("Generating pairs for well potential...");
+
+	fflush(stdout);
+
+	
+
 	particle* p1;
-	particle* p2;
-	pairs = calloc(N*N, sizeof(int));
-	if (!pairs){
-		printf("alloc failed");
-	}
+
 	for(int i = 0; i < N; i++){
-		for(int j = 0; j < i; j++){
-			if (i != j){
-				p1 = particles + i;
-				p2 = particles + j;
-				double dx = p2->x - p1->x;
-				double dy = p2->y - p1->y;
-				PBC(&dx, &dy);
-				if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad)){
-					pairs[i*N + j] = 1;
-					pairs[j*N + i] = 1;
+		p1 = particles + i;
+		p1->particlesInWell = calloc(20, sizeof(unsigned int));
+		p1->numberOfParticlesInWell = 0;
+		int X = p1->cell[0];
+		int Y = p1->cell[1];
+
+		for (int j = -1; j <= 1; j++){
+			for (int k = -1; k <= 1; k++){
+				particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (p1->num != p2->num){
+						double dx = p2->x - p1->x;
+						double dy = p2->y - p1->y;
+						PBC(&dx, &dy);
+						if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad))
+							addParticleInWellList(p1, p2->num);
+					}
+					p2 = p2->nxt;
 				}
 			}
 		}
 	}
+
+	printf("Done!\n");
+
+	fflush(stdout);
 }
-
-
-
 
 /* ---------------------------------------------
 	Initializes the cellList. cellList[X][Y]
@@ -630,7 +640,11 @@ void eventListInit(){
 
 void freeArrays(){
 	int totalSize = 2*N + suppSizeEvent;
-
+	if (addWell){
+		for (int i = 0; i < N; i++){
+			free(particles[i].particlesInWell);
+		}	
+	}
 	free(particles);
 	for (int i = 0; i < Nxcells; i++){
 			free(cellList[i]);
@@ -641,9 +655,8 @@ void freeArrays(){
 	}
 	free(eventList);
 	free(eventPaul);
-	if (addWell){
-		free(pairs);
-	}
+	
+
 }
 /* --------------------------/
 /							 /
@@ -1225,7 +1238,7 @@ void collisionEvent(int i){
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
 					if (addWell){
-						if (pairs[p1->num*N + p2->num]){
+						if (isParticleInWellList(p1, p2->num)){
 							dtTemp = collisionTime(p1, p2);
 							dtTemp2 = separateTime(p1, p2);
 							if (dtTemp < dtTemp2){
@@ -1267,6 +1280,33 @@ void collisionEvent(int i){
 	else
 		addWallEvent(i, xy, t + dt);
 
+}
+
+
+/* ---------------------------------------------
+	Updates the Well List
+--------------------------------------------- */
+void addParticleInWellList(particle* p1, int num){
+	p1->particlesInWell[p1->numberOfParticlesInWell] = num;
+	p1->numberOfParticlesInWell += 1;
+}
+
+void removeParticleInWellList(particle* p1, int num){
+	for (int i = 0; i < p1->numberOfParticlesInWell; i++){
+		if (p1->particlesInWell[i] == num){
+			p1->numberOfParticlesInWell -= 1;
+			if (p1->numberOfParticlesInWell != 0)
+				p1->particlesInWell[i] = p1->particlesInWell[p1->numberOfParticlesInWell];
+		}
+	}
+}
+
+int isParticleInWellList(particle* p1, int num){
+	for (int i = 0; i < p1->numberOfParticlesInWell; i++){
+		if (p1->particlesInWell[i] == num)
+			return 1;
+	}
+	return 0;
 }
 
 
@@ -1520,8 +1560,8 @@ void doIn(){
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 
 	if (U > 0){
-		pairs[i*N + j] = 1;
-		pairs[j*N + i] = 1;
+		addParticleInWellList(pi, j);
+		addParticleInWellList(pj, i);
 		double atroce = (mi*vi + mj*vj);
 		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*U);
 		vif = (mi*atroce + horrible)/(mi*(mi + mj));
@@ -1533,8 +1573,8 @@ void doIn(){
 			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
-			pairs[i*N + j] = 1;
-			pairs[j*N + i] = 1;
+			addParticleInWellList(pi, j);
+			addParticleInWellList(pj, i);
 
 		}
 		else{ //bounces on the square well
@@ -1616,8 +1656,8 @@ void doOut(){
 			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
-			pairs[i*N + j] = 0;
-			pairs[j*N + i] = 0;
+			removeParticleInWellList(pi, j);
+			removeParticleInWellList(pj, i);
 
 		}
 		else{ //bounces on the square well
@@ -1630,8 +1670,8 @@ void doOut(){
 		double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
 		vif = (mi*atroce - horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
-		pairs[i*N + j] = 0;
-		pairs[j*N + i] = 0;
+		removeParticleInWellList(pi, j);
+		removeParticleInWellList(pj, i);
 	}
 
 	double dvjx = (vjf - vj)*dxr;

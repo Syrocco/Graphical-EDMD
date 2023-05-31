@@ -17,6 +17,8 @@ struct particle{
 	double t;
 	int crossX, crossY;
 	double lastColl;
+	unsigned int* particlesInWell;
+	int numberOfParticlesInWell;
 };
 
 typedef struct node node;
@@ -105,6 +107,8 @@ void addInEvent(int i, int j, double tColl);
 
 void pairsInit();
 
-
+void addParticleInWellList(particle* p1, int num);
+void removeParticleInWellList(particle* p1, int num);
+int isParticleInWellList(particle* p1, int num);
 
 

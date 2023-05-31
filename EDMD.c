@@ -83,9 +83,9 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 1000;
+double tmax = 1000000;
 //time between each screenshots
-double dtime = 10;
+double dtime = 1;
 double dtimeThermo = 10;
 double firstScreen = 0;
 
@@ -113,6 +113,7 @@ const int addDoubleDelta = 0;
 
 //activate evoling delta model
 const int addEvolvingDelta = 0;
+
 
 
 //activate the exponential model
@@ -158,10 +159,10 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.6;
-double U = 13;
+double U = -10.56;
 
 //Initial temperature
-double Einit = 0.2;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -174,7 +175,7 @@ double gamm = 0.01;
 double T = 0.2;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.1;
+double dtnoise = 0.3;
 
 
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
@@ -215,11 +216,6 @@ int main(int argc, char *argv[]){
 	constantInit(argc, argv);
 	runningCheck();
 	particlesInit();
-	if (addWell){
-		printf("Generating pairs for well potential...");
-		pairsInit();
-		printf("Done!\n");
-	}
 	fichier = fopen(fileName, "w");
 	cellListInit();
 	eventListInit();
@@ -251,14 +247,14 @@ int main(int argc, char *argv[]){
 			case SCREENSHOT:
 				takeAScreenshot();
    				fflush(stdout);
-				if (noise == 0 && E < 1e-10){
+				if (noise == 0 && E < 1e-10 && addWell == 0){
 					goto exiting;
 				}
 				break;
 			case THERMO:
 				takeAThermo();
 				fflush(stdout);
-				if (noise == 0 && E < 1e-10){
+				if (noise == 0 && E < 1e-10 && addWell == 0){
 					saveTXT();
 					goto exiting;
 				}
@@ -301,7 +297,6 @@ int main(int argc, char *argv[]){
 void constantInit(int argc, char *argv[]){
 	if (load){
 		char filename[200];
-		printf("here\n");
 		if (argc == 5){
 		    double temp1, temp2, temp3;
             sscanf(argv[1], "%lf", &temp1);
@@ -391,7 +386,7 @@ void constantInit(int argc, char *argv[]){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 10/(double)N;
+	dtPaul = 1000/(double)N;
 
     paulListN = N;
 
@@ -482,16 +477,51 @@ void particlesInit(){
 	else
 		phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
 	customName();
-	physicalQ();
-	for (int i = 0; i < N; i++){
-		particles[i].vx -= px/(N*particles[i].m);
-		particles[i].vy -= py/(N*particles[i].m);
+
+	if (addWell){
+		printf("Generating pairs for well potential...");
+		pairsInit();
+		printf("Done!\n");
 	}
+
+
+	if (addCircularWall != 1){
+		physicalQ();
+		for (int i = 0; i < N; i++){
+			particles[i].vx -= px/(N*particles[i].m);
+			particles[i].vy -= py/(N*particles[i].m);
+		}
+	}
+	else{
+
+		double dvT = 0;
+		double dvM = 0;
+		for (int i = 0; i < N; i ++){
+			particle* p = particles + i;
+			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
+			dvT -= p->m*(-p->vx*(p->y - halfLx) + p->vy*(p->x - halfLx));
+			dvM += p->m*r;
+		}
+
+		double dv = dvT/dvM;
+
+		for(int i = 0; i < N; i++){
+			particle* p = particles + i;
+			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
+			p->vx += -dv*(p->y - halfLx)/r;
+			p->vy += dv*(p->x - halfLx)/r;
+		}
+	}
+
+
+
 	physicalQ();
 	for (int i = 0; i < N; i++){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
 	}
+
+
 }
 
 
@@ -1016,7 +1046,7 @@ double collisionTime(particle* p1, particle* p2){
 
 
 	//to delete when confident with life decisions...
-	if (distOfSquare < -0.001){
+	if (distOfSquare < -0.01){
 		printf("\nERROR:\033[0;31m Overlaps detected!\033[0m\n");
 		exit(3);
 	}
@@ -1414,7 +1444,6 @@ void doTheCollision(){
 	}
 
 
-
 	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
 
 
@@ -1706,6 +1735,17 @@ void printInfo(){
 			printf(" ");
 	}
 	WHITE;
+	
+	/*
+	if (addWell){
+		for (int i = 0; i < N; i ++){
+			for (int j = 0; j < i; j++){
+				E -= U*pairs[i*N + j];
+			} 
+		}
+	}
+	*/
+
 	printf(" │ n° coll = \033[1;32m%.2e\033[0;37m  Energy = \033[1;32m%.3lf\033[0;37m  Pressure = \033[1;32m%.3lf\033[0;37m │", (float)ncol, E/N, pressure);
 
 }
@@ -1805,13 +1845,13 @@ void saveTXT(){
 		}
 	}
 	else{
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y xu yu vx vy radius m z\n", t, N, Lx, Ly);
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
 			/*
             int synchro = 0;
             if (t - particles[i].lastColl > ts)
                 synchro = 1;*/
-			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].x + particles[i].crossX*Lx, particles[i].y + particles[i].crossY*Ly, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, particles[i].rad);
+			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m);
 		}
 	}
 }
@@ -1979,6 +2019,8 @@ void physicalQ(){
 			active += 1.;
 		}
 	}
+
+
 	active /= N;
 }
 

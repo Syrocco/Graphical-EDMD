@@ -83,9 +83,9 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 1000000;
+double tmax = 20;
 //time between each screenshots
-double dtime = 10;
+double dtime = 3;
 double dtimeThermo = 10;
 double firstScreen = 0;
 
@@ -129,7 +129,7 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 
 //add square potential
-const int addWell = 0;
+const int addWell = 1;
 
 //if noise use euler solver
 const int euler = 0;
@@ -388,7 +388,7 @@ void constantInit(int argc, char *argv[]){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 1000/(double)N;
+	dtPaul = 100/(double)N;
 
     paulListN = N;
 

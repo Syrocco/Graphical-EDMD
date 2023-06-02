@@ -20,11 +20,11 @@
 #define WHITE printf("\033[0;37m")
 #define CYAN printf("\033[1;96m")
 
-#define ERROR 1
+#define ERROR 0
 
 
 int N, Nbig, Nsmall;
-double px, py, E, pressure, dxr, dyr, dist, active;
+double px, py, E, pressure, dxr, dyr, dist, active, Ep;
 double lastScreen = 0;
 double lastCollNum = 0;
 
@@ -54,9 +54,6 @@ double dpRight = 0;
 double dpMid = 0;
 
 unsigned long int ncol = 0;
-unsigned long int ncolss = 0;
-unsigned long int ncolsb = 0;
-unsigned long int ncolbb = 0;
 unsigned long int ncross = 0;
 char fileName[350];
 char thermoName[350];
@@ -83,10 +80,10 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 20;
+double tmax = 20000;
 //time between each screenshots
-double dtime = 3;
-double dtimeThermo = 10;
+double dtime = 1;
+double dtimeThermo = 1;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -158,11 +155,11 @@ double vo = 1;
 double ao = 1.3;
 
 //values for square potential model
-double sig = 1.6;
-double U = 10.56;
+double sig = 1.1;
+double U = 1;
 
 //Initial temperature
-double Einit = 0.1;
+double Einit = 0.005;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -171,8 +168,8 @@ double resW = 1;
 double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.1;
-double T = 0.056;
+double gamm = 0.25;
+double T = 0.01;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -207,11 +204,10 @@ node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
 
-
 int main(int argc, char *argv[]){
 
-	init_genrand(time(NULL));
-	//init_genrand(666);
+	//init_genrand(time(NULL));
+	init_genrand(668);
 
 	constantInit(argc, argv);
 	runningCheck();
@@ -224,16 +220,22 @@ int main(int argc, char *argv[]){
 	physicalQ();
 	format();
 
-	if ((ther) || (addWallx) || (addWally))
+	if ((ther) || (addWallx) || (addWally)){
 		thermo = fopen(thermoName, "w");
+		//initializeThermo();
+	}
 	
 	while (t <= tmax){
 		nextEvent = findNextEvent();
 		t = nextEvent->t;
 
+
+
 		removeEventFromQueue(nextEvent);
 		switch(nextEvent->type){
 			case COLLISION:
+
+
 				doTheCollision();
 				break;
 			case WALL:
@@ -249,14 +251,14 @@ int main(int argc, char *argv[]){
 			case SCREENSHOT:
 				takeAScreenshot();
    				fflush(stdout);
-				if (noise == 0 && E < 1e-10 && addWell == 0){
+				if (noise == 0 && E < 1e-10){// && addWell == 0){
 					goto exiting;
 				}
 				break;
 			case THERMO:
 				takeAThermo();
 				fflush(stdout);
-				if (noise == 0 && E < 1e-10 && addWell == 0){
+				if (noise == 0 && E < 1e-10){// && addWell == 0){
 					saveTXT();
 					goto exiting;
 				}
@@ -388,7 +390,7 @@ void constantInit(int argc, char *argv[]){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 100/(double)N;
+	dtPaul = 20/(double)N;
 
     paulListN = N;
 
@@ -539,8 +541,9 @@ void pairsInit(){
 
 	for(int i = 0; i < N; i++){
 		p1 = particles + i;
-		p1->particlesInWell = calloc(20, sizeof(unsigned int));
+		p1->particlesInWell = calloc(30, sizeof(unsigned int));
 		p1->numberOfParticlesInWell = 0;
+
 		int X = p1->cell[0];
 		int Y = p1->cell[1];
 
@@ -552,7 +555,7 @@ void pairsInit(){
 						double dx = p2->x - p1->x;
 						double dy = p2->y - p1->y;
 						PBC(&dx, &dy);
-						if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad))
+						if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad) && (isParticleInWellList(p1, p2->num) == 0)) //last condition to prevent double counting for small system
 							addParticleInWellList(p1, p2->num);
 					}
 					p2 = p2->nxt;
@@ -1049,7 +1052,7 @@ double collisionTime(particle* p1, particle* p2){
 
 	//no collision.
 	if (b > 0)
-		return 100000000;
+		return 1000000000000;
 
 
 	double v2 = dvx*dvx + dvy*dvy;
@@ -1060,16 +1063,14 @@ double collisionTime(particle* p1, particle* p2){
 
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected!\033[0m\n");
+		printf("\nERROR:\033[0;31m Overlaps detected between particle %d and particle %d !\033[0m\n", p1->num, p2->num);
 		exit(3);
 	}
 
 	if (det < 0)
-		return 100000000;
+		return 1000000000000;
 
-	double timeOfCollision = (-b - sqrt(det))/v2;
-
-	return logTime(timeOfCollision);
+	return logTime((-b - sqrt(det))/v2);
 }
 
 //time to enter in the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
@@ -1101,7 +1102,7 @@ double sphereTime(particle* p1, particle* p2){
 	if (det < 0)
 		return 100000000;
 
-	return logTime(- b - sqrt(det))/v2;
+	return logTime((- b - sqrt(det))/v2);
 }
 
 
@@ -1134,8 +1135,7 @@ double separateTime(particle* p1, particle* p2){
 	double temp = (- b + sqrt(det))/v2;
 	if (temp < 0)
 		return 10000000000;
-	else
-		return logTime(temp);
+	return logTime(temp);
 }
 /* ---------------------------------------------
 	Finds the next collision of particle i
@@ -1213,14 +1213,12 @@ void collisionEvent(int i){
 
 	if (addCircularWall){
 		
-			double y0 = p1->y;
-			double x0 = p1->x;
+			double y0 = p1->y - halfLx;;
+			double x0 = p1->x - halfLx;;
 			double v0x = p1->vx;
 			double v0y = p1->vy;
 			double rad = p1->rad;
-			
-			x0 = x0 - halfLx;
-			y0 = y0 - halfLx;
+
 			double A = (v0x*v0x + v0y*v0y);
 			double B = 2*(v0x*x0 + v0y*y0);
 			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
@@ -1228,7 +1226,6 @@ void collisionEvent(int i){
 			
 			type = WALL;
 			xy = 2;
-			
 
 	}
 
@@ -1427,6 +1424,7 @@ void doTheCollision(){
         return;
     }
 
+	/*
     if ((pi->type == 1) && (pj->type == 1)){
     	ncolbb += 1;
     }
@@ -1435,7 +1433,7 @@ void doTheCollision(){
     }
     else{
     	ncolsb += 1;
-    }
+    }*/
     ncol++;
 	freeFly(pj);
 
@@ -1776,15 +1774,7 @@ void printInfo(){
 	}
 	WHITE;
 	
-	/*
-	if (addWell){
-		for (int i = 0; i < N; i ++){
-			for (int j = 0; j < i; j++){
-				E -= U*pairs[i*N + j];
-			} 
-		}
-	}
-	*/
+
 
 	printf(" │ n° coll = \033[1;32m%.2e\033[0;37m  Energy = \033[1;32m%.3lf\033[0;37m  Pressure = \033[1;32m%.3lf\033[0;37m │", (float)ncol, E/N, pressure);
 
@@ -1896,6 +1886,27 @@ void saveTXT(){
 	}
 }
 
+void initializeThermo(){
+	if ((addWallx) || (addWally) || (addCircularWall)){
+
+		if (addMidWall){
+			fprintf(thermo, "t E pm p\n");
+		}
+		else{
+			fprintf(thermo, "t E p pW\n");
+		}
+	}
+	else{
+		if (addWell){
+			fprintf(thermo, "t E Ep p\n");
+		}
+		else{
+			fprintf(thermo, "t E p\n");
+		}
+	}
+}
+
+
 void saveThermo(){
 	double area = Lx*Ly;
 
@@ -1911,8 +1922,6 @@ void saveThermo(){
 
     if (t != 0){
 		if (ther){
-			double deltaColl = ncol - lastCollNum;
-			lastCollNum = ncol;
 			if ((addWallx) || (addWally) || (addCircularWall)){
 
 				if (addMidWall){
@@ -1933,18 +1942,26 @@ void saveThermo(){
 					if (addWally){
 						perimeter += 2*Lx;
 					}
-					fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, dp/((t - t1)*perimeter));
+					fprintf(thermo, "%lf %.10lf %lf %lf\n", t, E/N, pressure, dp/((t - t1)*perimeter));
 
 					dp = 0;
 				}
 			t1 = t;
 			}
+
 			else{
-				fprintf(thermo, "%lf %lf %lf %lf %lf %.10lf %lf %lf\n", t, ncolss/deltaTime, ncolbb/deltaTime, ncolsb/deltaTime, deltaColl/deltaTime, E/N, pressure, active);
+
+				if (addWell){
+					Ep = 0;
+					for (int i = 0; i < N; i ++){
+						Ep -= U*particles[i].numberOfParticlesInWell/2;
+					}
+					fprintf(thermo, "%lf %.10lf %lf %lf \n", t, E/N, Ep/N, pressure);
+				}
+				else{
+					fprintf(thermo, "%lf %.10lf %lf \n", t, E/N, pressure);
+				}
 			}
-			ncolss = 0;
-			ncolsb = 0;
-			ncolbb = 0;
 		}
 	}
 }
@@ -1966,8 +1983,12 @@ inline double logTime(double time){
 		double var = (1 - time*gamm);
 		if (var < 0)
 			return 1000000000000;
-		else
-			return  -log(var)/gamm;
+		else{
+			double result = -log(var)/gamm;
+			if (result < 0)
+				printf("%lf\n", result);
+			return result;
+		}
 	}
 	else
 		return time;

@@ -80,11 +80,11 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 20000;
+double tmax = 150000;
 //time between each screenshots
 double dtime = 1;
-double dtimeThermo = 1;
-double firstScreen = 0;
+double dtimeThermo = 100;
+double firstScreen = 10;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -123,10 +123,10 @@ const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 //add a circular wall
-const int addCircularWall = 0;
+const int addCircularWall = 1;
 
 //add square potential
-const int addWell = 1;
+const int addWell = 0;
 
 //if noise use euler solver
 const int euler = 0;
@@ -142,7 +142,7 @@ const int reduce = 0;
 double delta = 0.03;
 
 //values for double delta model
-double deltaM = 0.05;
+double deltaM = 0.03;
 double deltam = 0;
 double ts = 6;
 
@@ -159,7 +159,7 @@ double sig = 1.1;
 double U = 1;
 
 //Initial temperature
-double Einit = 0.005;
+double Einit = 0.06387651143466333;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -168,8 +168,8 @@ double resW = 1;
 double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.25;
-double T = 0.01;
+double gamm = 0.01;
+double T = 0.06387651143466333;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -206,8 +206,8 @@ node* nextEvent;
 
 int main(int argc, char *argv[]){
 
-	//init_genrand(time(NULL));
-	init_genrand(668);
+	init_genrand(time(NULL));
+	//init_genrand(668);
 
 	constantInit(argc, argv);
 	runningCheck();
@@ -390,7 +390,7 @@ void constantInit(int argc, char *argv[]){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 20/(double)N;
+	dtPaul = 100/(double)N;
 
     paulListN = N;
 
@@ -511,7 +511,6 @@ void particlesInit(){
 			p->vy += dv*(p->x - halfLx)/r;
 		}
 	}
-
 
 
 	physicalQ();
@@ -1798,6 +1797,7 @@ void addEventNoise(double tnoise){
 --------------------------------------------- */
 
 void addNoise(){
+	//double k = 2*M_PI*3/Lx;
 	for (int i = 0; i < N; i++){
 		particle* p = particles + i; //(int)(genrand_int32()%N)
 		int j = p->num;
@@ -1806,7 +1806,8 @@ void addNoise(){
 		freeFly(p);
 		//adds the kick
 		randomGaussian(p);
-
+		//p->vx += 0.03*sin(k*p->x - 0.1*t)*dtnoise;
+		//p->vy += 0.3*sin(k*p->y - 0.1*t)*dtnoise;
 
 		//Calculate the new collisions and the new cell crossings.
 		removeEventFromQueue(eventList[j]);
@@ -1875,13 +1876,13 @@ void saveTXT(){
 		}
 	}
 	else{
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m\n", t, N, Lx, Ly);
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m synchro\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
-			/*
+
             int synchro = 0;
             if (t - particles[i].lastColl > ts)
-                synchro = 1;*/
-			fprintf(fichier, "%d %d %lf %lf %lf %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m);
+                synchro = 1;
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
 		}
 	}
 }
@@ -1959,7 +1960,7 @@ void saveThermo(){
 					fprintf(thermo, "%lf %.10lf %lf %lf \n", t, E/N, Ep/N, pressure);
 				}
 				else{
-					fprintf(thermo, "%lf %.10lf %lf \n", t, E/N, pressure);
+					fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
 				}
 			}
 		}

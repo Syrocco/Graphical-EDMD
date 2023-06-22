@@ -3,6 +3,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <getopt.h>
+
 
 #define CELLCROSS 0
 #define COLLISION 1
@@ -23,8 +25,13 @@
 #define ERROR 0
 
 
-int N, Nbig, Nsmall;
+//Values if no load file
+int N = 100;
+double phi = 0.1;
+
+int Nbig, Nsmall;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep;
+double Lx, Ly;
 double lastScreen = 0;
 double lastCollNum = 0;
 
@@ -62,27 +69,15 @@ FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
-const int load = 0;
+int load = 1;
 
-const int tinyOnes = 0;
 
-//will be overwritten if:    load = 1     below.
-double Lx = 12000;
-double Ly = 12000;
 
-//spacing bewteen big particles in the init state if no loading data given
-double dL = 2;
-
-//values of radius and mass if load == 0 (so they will be overwritten if we load from a file)
-double rad1 = 1.;
-double rad2 = 0.457;
-double m1 = 1;
-double m2 = 0.06;
 
 //duration of simulation
-double tmax = 10000;
+double tmax = 10;
 //time between each screenshots
-double dtime = 0.1;
+double dtime = 1;
 double dtimeThermo = 100;
 double firstScreen = 0;
 
@@ -117,7 +112,7 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 1;
+const int addWally = 0;
 //add a wall at x = Lx and x = 0
 const int addWallx = 0;
 //add a wall at x = Lx/2
@@ -161,7 +156,7 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.1;
-double U = 300;
+double U = 3;
 
 //value for the field, must be < 0
 double field = -0.6; 
@@ -190,7 +185,7 @@ double updateTimeMax = 2000;
 
 
 double sizeRat;
-double phi;
+
 
 
 
@@ -242,8 +237,6 @@ int main(int argc, char *argv[]){
 		removeEventFromQueue(nextEvent);
 		switch(nextEvent->type){
 			case COLLISION:
-
-
 				doTheCollision();
 				break;
 			case WALL:
@@ -307,73 +300,74 @@ int main(int argc, char *argv[]){
 	constants required for the cellList.
 -------------------------------------------- */
 void constantInit(int argc, char *argv[]){
+
+	char filename[200];
+	sprintf(filename, "data.txt");
+
+	struct option longopt[] = {
+		{"load", required_argument, NULL, 'l'},
+		{"number", required_argument, NULL, 'N'},
+		{"phi", required_argument, NULL, 'p'},
+		{"res", required_argument, NULL, 'r'},
+		{"delta", required_argument, NULL, 'd'},
+		{"gamma", required_argument, NULL, 'g'},
+		{"time", required_argument, NULL, 't'},
+		{"dt", required_argument, NULL, 'D'},
+		{NULL, 0, NULL, 0}
+	};
+	
+	
+	int c;
+
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:", longopt, NULL)) != -1){
+		switch(c){
+			case 'l':
+				load = 1;
+				double temp1;
+				double temp2;
+				double temp3;
+				sscanf(optarg, "%lf %lf %lf", &temp1, &temp2, &temp3);
+				sprintf(filename, "%.7lf%.7lf%.7lf.txt", temp1, temp2, temp3);
+				break;
+			case 'N':
+				load = 0;
+				sscanf(optarg, "%d", &N);
+				break;
+			case 'p':
+				load = 0;
+				sscanf(optarg, "%lf", &phi);
+				break;
+			case 'r':
+				sscanf(optarg, "%lf", &res);
+				break;
+			case 'd':
+				sscanf(optarg, "%lf", &delta);
+				break;
+			case 'g':
+				sscanf(optarg, "%lf", &gamm);
+				break;
+			case 't':
+				sscanf(optarg, "%lf", &tmax);
+				break;
+			case 'D':
+				sscanf(optarg, "%lf", &dtime);
+				break;
+		}
+	}
+
 	if (load){
-		char filename[200];
-		if (argc == 5){
-		    double temp1, temp2, temp3;
-            sscanf(argv[1], "%lf", &temp1);
-            sscanf(argv[2], "%lf", &temp2);
-            sscanf(argv[3], "%lf", &temp3);
-            char filename[200];
-            sprintf(filename, "%.7lf%.7lf%.7lf%.7lf.txt",temp1, temp2, temp3, 0.);
-		}
-		else if (argc == 4){
-		    double temp1, temp2, temp3;
-            sscanf(argv[1], "%lf", &temp1);
-            sscanf(argv[2], "%lf", &temp2);
-            sscanf(argv[3], "%lf", &temp3);
-            char filename[200];
-            sprintf(filename, "%.7lf%.7lf%.7lf.txt",temp1, temp2, temp3);
-		}
-		else{
-			sprintf(filename, "data.txt");
-			if (argc == 2)
-				sscanf(argv[1], "%lf", &res);
-
-			if (argc == 3){
-				sscanf(argv[1], "%lf", &res);
-				sscanf(argv[2], "%lf", &deltaM);
-			}
-		}
-		printf("%s\n", fileName);
 		file = fopen(filename, "r");
-
 		mygetline(buffer, file);
-		sscanf(buffer, "%d %lf %lf\n", &N, &Lx, &Ly);
-		if (Ly == 12000)
+		int nValues = sscanf(buffer, "%d %lf %lf\n", &N, &Lx, &Ly);
+		if (nValues == 2)
 			Ly = Lx;
 	}
 	else{
-	//brute force (ie stupid) computation of N
-
-		if (argc == 2){
-			sscanf(argv[1], "%lf", &dL);
-		}
-
-		int i = 0;
-		double y = 0.1 + rad1;
-		while (y < Ly - rad1){
-			for (double x = rad1; x < Lx - rad1; x += dL + 2*rad1){
-				i++;
-			}
-			y += dL + 2*rad1;
-		}
-
-		Nbig = i;
-
-		if (tinyOnes){
-			y = 0.5*dL + 2*rad1;
-
-			while (y < Ly - rad2){
-				for (double x = 0.5*dL + 2*rad1; x < Lx - rad2; x += dL + 2*rad1){
-					i++;
-				}
-				y += dL + 2*rad1;
-			}
-		}
-		N = i;
-		Nsmall = N - Nbig;
+		Lx = sqrt(M_PI*N/phi);
+		Ly = Lx;
 	}
+
+	
 
 	if (nextScreen == -1)
 		nextScreen = dtime;
@@ -426,8 +420,8 @@ void particlesInit(){
 		    Nbig += p->type;
 			double U1 = drand(0, 1);
 			double U2 = drand(0, 1);
-            p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2) ;
-            p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2) ;
+            p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+            p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
 			p->num = i;
 			p->t = 0;
 			p->coll = 0;
@@ -437,57 +431,52 @@ void particlesInit(){
 		Nsmall = N - Nbig;
 	}
 	else{
-		double vxTot, vyTot;
-		//big particles
-		double y = 0.1 + rad1;
-		while (y < Ly - rad1){
-			for (double x = rad1; x < Lx - rad1; x += dL + 2*rad1){
-				particles[i].x = x;
-				particles[i].y = y;
-				particles[i].vx = drand(-2, 2);
-				particles[i].vy = drand(-2, 2);
-				vxTot += particles[i].vx;
-				vyTot += particles[i].vy;
-				particles[i].num = i;
-				particles[i].rad = rad1;
-				particles[i].m = m1;
-				particles[i].type = 1;
-				particles[i].t = 0;
-				particles[i].coll = 0;
-				i++;
-			}
-			y+= dL + 2*rad1;
-		}
+		Nbig = N;
+		Nsmall = 0;
+		double x = 1.01;
+		double y = 1.01;
+		particle* p;
+		int j = 0;
+		int sqrtN = (int)ceil(sqrt((double)N)) ;
+		while (i < N){
+			p = particles + i;
+			p->x = x*(Lx - 1)/(sqrtN*2)*0.999;
+			p->y = y*(Lx - 1)/(sqrtN*2)*0.999;
+			p->m = 1;
+			double U1 = drand(0, 1);
+			double U2 = drand(0, 1);
+			p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+			p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+			p->num = i;
+			p->rad = 1;
+			p->type = 1;
+			p->t = 0;
+			p->coll = 0;
 
-		if (tinyOnes){
-		//tiny ones surrounded by big ones
-			y = 0.5*dL + 2*rad1;
-			while (y < Ly - rad2){
-				for (double x = 0.5*dL + 2*rad1; x < Lx - rad2; x += dL + 2*rad1){
-					particles[i].x = x;
-					particles[i].y = y;
-					particles[i].vx = drand(-2,2);
-					particles[i].vy = drand(-2,2);
-					vxTot += particles[i].vx;
-					vyTot += particles[i].vy;
-					particles[i].num = i;
-					particles[i].rad = rad2;
-					particles[i].m = m2;
-					particles[i].type = 0;
-					particles[i].t = 0;
-					particles[i].coll = 0;
-					i++;
+			p->lastColl = 0;
+			i++;
+			x += 2 + 0.001;
+			if (i%sqrtN == 0){
+				j++;
+				y += 2;
+				if (j%2 == 0){
+					x = 1;
 				}
-				y += dL + 2*rad1;
+				else{
+					x = 2;
+				} 
 			}
+			
 		}
 	}
 
 	sizeRat = particles[N-1].rad;
-	if (addCircularWall)
-		phi = (sizeRat*sizeRat*Nsmall + Nbig)/(halfLx*halfLx);
-	else
-		phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
+	if (load == 1){
+		if (addCircularWall)
+			phi = (sizeRat*sizeRat*Nsmall + Nbig)/(halfLx*halfLx);
+		else
+			phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
+	}
 	customName();
 
 
@@ -2146,12 +2135,12 @@ void physicalQ(){
 void customName(){
 	mkdir("dump/", 0777);
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfdL_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, dL, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lflfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){

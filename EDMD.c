@@ -112,19 +112,19 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 0;
+const int addWally = 1;
 //add a wall at x = Lx and x = 0
-const int addWallx = 0;
+const int addWallx = 1;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 //add a circular wall
 const int addCircularWall = 0;
 
 //add square potential
-const int addWell = 0;
+const int addWell = 1;
 
 //add field 
-const int addField = 0;
+const int addField = 1;
 
 
 
@@ -155,8 +155,8 @@ double vo = 1;
 double ao = 1.3;
 
 //values for square potential model
-double sig = 1.1;
-double U = 3;
+double sig = 1.5;
+double U = 5;
 
 //value for the field, must be < 0
 double field = -0.6; 
@@ -313,13 +313,17 @@ void constantInit(int argc, char *argv[]){
 		{"gamma", required_argument, NULL, 'g'},
 		{"time", required_argument, NULL, 't'},
 		{"dt", required_argument, NULL, 'D'},
+		{"initial-energy", required_argument, NULL, 'E'},
+		{"potential", required_argument, NULL, 'U'},
+		{"well-radius", required_argument, NULL, 'R'},
+		{"field", required_argument, NULL, 'f'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -341,9 +345,13 @@ void constantInit(int argc, char *argv[]){
 				sscanf(optarg, "%lf", &res);
 				break;
 			case 'd':
+				if (addDelta != 1)
+					printf("WARNING:\033[0;31m Changing Delta while Delta model is not enabled!\033[0m\n");
 				sscanf(optarg, "%lf", &delta);
 				break;
 			case 'g':
+				if ((damping != 1) || (noise != 1))
+					printf("WARNING:\033[0;31m Changing gamma while noise or damping is not enabled!\033[0m\n");
 				sscanf(optarg, "%lf", &gamm);
 				break;
 			case 't':
@@ -351,6 +359,24 @@ void constantInit(int argc, char *argv[]){
 				break;
 			case 'D':
 				sscanf(optarg, "%lf", &dtime);
+				break;
+			case 'E':
+				sscanf(optarg, "%lf", &Einit);
+				break;
+			case 'U':
+				if (addWell != 1)
+					printf("WARNING:\033[0;31m Changing potential while it is not enabled!\033[0m\n");
+				sscanf(optarg, "%lf", &U);
+				break;
+			case 'R':
+				if (addWell != 1)
+					printf("WARNING:\033[0;31m Changing potential radius while it is not enabled!\033[0m\n");
+				sscanf(optarg, "%lf", &sig);
+				break;
+			case 'f':
+				if (addField != 1)
+					printf("WARNING:\033[0;31m Changing field while it is not enabled!\033[0m\n");
+				sscanf(optarg, "%lf", &field);
 				break;
 		}
 	}
@@ -2140,7 +2166,7 @@ void customName(){
 		v += 1;
 			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lflfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){
@@ -2216,12 +2242,17 @@ void printClose(){
 
 void runningCheck(){
 	double stop = 0;
-	if ((res > 1) && (addDelta == 0)){
+	if (res > 1){
 		printf("ERROR:\033[1;31m Coefficient of restitution greater than 1!\033[0m\n");
 		stop = 1;
 	}
-	if (( ( ((addWally) || (addWallx) || (addCircularWall)) && (resW < 1) ) || (res < 1)) && (((addDelta == 0) && (addDoubleDelta == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
+	if (( ( ((addWally) || (addWallx) || (addCircularWall) || (addMidWall)) && (resW < 1) ) || (res < 1) || (damping == 1)) && (((addDelta == 0) && (addDoubleDelta == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
 		printf("ERROR:\033[1;31m Dissipative system without energy input!\033[0m\n");
+		stop = 1;
+	}
+
+	if (field > 0){
+		printf("ERROR:\033[1;31m Field must be negative!\033[0m\n");
 		stop = 1;
 	}
 	if ((addDelta) && (res == 1)){

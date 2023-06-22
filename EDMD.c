@@ -62,7 +62,7 @@ FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
-const int load = 1;
+const int load = 0;
 
 const int tinyOnes = 0;
 
@@ -80,11 +80,11 @@ double m1 = 1;
 double m2 = 0.06;
 
 //duration of simulation
-double tmax = 150000;
+double tmax = 10000;
 //time between each screenshots
-double dtime = 1;
+double dtime = 0.1;
 double dtimeThermo = 100;
-double firstScreen = 10;
+double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -117,16 +117,21 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 0;
+const int addWally = 1;
 //add a wall at x = Lx and x = 0
 const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 //add a circular wall
-const int addCircularWall = 1;
+const int addCircularWall = 0;
 
 //add square potential
 const int addWell = 0;
+
+//add field 
+const int addField = 0;
+
+
 
 //if noise use euler solver
 const int euler = 0;
@@ -139,7 +144,7 @@ const int reduce = 0;
 
 
 //value for delta model
-double delta = 0.03;
+double delta = 0.01;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -156,7 +161,10 @@ double ao = 1.3;
 
 //values for square potential model
 double sig = 1.1;
-double U = 1;
+double U = 300;
+
+//value for the field, must be < 0
+double field = -0.6; 
 
 //Initial temperature
 double Einit = 0.06387651143466333;
@@ -169,7 +177,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.01;
-double T = 0.06387651143466333;
+double T = 0;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -518,7 +526,6 @@ void particlesInit(){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
 	}
-
 
 }
 
@@ -933,15 +940,35 @@ void crossingEvent(int i){
 		travelTimeX = logTime(PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx);
 		xx = 2;
 	}
-	if (p.vy < 0){
-		travelTimeY = logTime(PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy);
+
+
+
+
+	if (addField){
+		double vy = p.vy;
+		double dy = PBCinsideCell(p.y - p.cell[1]*cellySize, 0);
+		travelTimeY = (-vy - sqrt(vy*vy - 2*field*dy))/field;
 		yy = 3;
+		if (vy > 0){
+			double dy = PBCinsideCell(p.y - (1 + p.cell[1])*cellySize, 0);
+			double travelTimeY2 = (-vy + sqrt(vy*vy - 2*field*dy))/field;
+			if (!(isnan(travelTimeY2)) && (travelTimeY2 < travelTimeY)){
+				travelTimeY = travelTimeY2;
+				yy = 4;
+			}
+		}
+
 	}
 	else{
-		travelTimeY = logTime(PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy);
-		yy = 4;
+		if (p.vy < 0){
+			travelTimeY = logTime(PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy);
+			yy = 3;
+		}
+		else{
+			travelTimeY = logTime(PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy);
+			yy = 4;
+		}
 	}
-
 
 	if (travelTimeX < travelTimeY)
 		addCrossingEvent(i, xx, t + travelTimeX);
@@ -1036,7 +1063,7 @@ double collisionTime(particle* p1, particle* p2){
 
 	//return 10000000; //to deactivate collisions
 
-	if (damping == 1){
+	if ((damping == 1) || (addField == 1)){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
 	}                //with damping, it would be harder, so I just update the position of p2. 
 
@@ -1075,7 +1102,7 @@ double collisionTime(particle* p1, particle* p2){
 //time to enter in the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
 double sphereTime(particle* p1, particle* p2){
 
-	if (damping == 1){
+	if ((damping == 1) || (addField == 1)){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
 	}                //with damping, it would be harder, so I just update the position of p2. 
 
@@ -1108,7 +1135,7 @@ double sphereTime(particle* p1, particle* p2){
 //time to leave the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
 double separateTime(particle* p1, particle* p2){
 
-	if (damping == 1){
+	if ((damping == 1)|| (addField == 1)){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
 	}                //with damping, it would be harder, so I just update the position of p2. 
 
@@ -1153,20 +1180,36 @@ void collisionEvent(int i){
 	int typeTemp;
 
 
+
 	if (addWally){
-
-		if ((Y == 0) && (p1->vy < 0)){
-			dt = logTime(-(p1->y - p1->rad)/p1->vy);
-			type = WALL;
-			xy = 1;
+		if (addField){
+			if (Y == 0){
+				dt = (-p1->vy - sqrt(p1->vy*p1->vy - 2*field*(p1->y - p1->rad)))/field;
+				type = WALL;
+				xy = 1;
+			}
+			if ((p1->vy > 0)){
+				double dt2 = (-p1->vy + sqrt(p1->vy*p1->vy - 2*field*(p1->y - (Ly - p1->rad))))/field;
+				if (!isnan(dt2) && (dt2 < dt)){
+					dt = dt2;
+					type = WALL;
+					xy = 1;
+				}
+			}
 		}
-		else if ((Y == Nycells - 1) && (p1->vy > 0)){
+		else{
+			if ((Y == 0) && (p1->vy < 0)){
+				dt = logTime(-(p1->y - p1->rad)/p1->vy);
+				type = WALL;
+				xy = 1;
+			}
+			else if ((Y == Nycells - 1) && (p1->vy > 0)){
 
-			dt = logTime((Ly - p1->y - p1->rad)/p1->vy);
-			type = WALL;
-			xy = 1;
+				dt = logTime((Ly - p1->y - p1->rad)/p1->vy);
+				type = WALL;
+				xy = 1;
+			}
 		}
-
 	}
 	if (addWallx){
 		if ((X == 0) && (p1->vx < 0)){
@@ -1386,7 +1429,16 @@ void doTheWall(){
 	}
 	else if (xy == 1){
 		dp += fabs((resW + 1)*pi->m*pi->vy);
+		/*
+		if (pi->y + 2*pi->rad > Ly){
+			pi->vy = drand(-3, 0);
+		}
+		else{
+			pi->vy = drand(0, 5);
+		}
+		*/
 		pi->vy = -resW*pi->vy;
+		//pi->vy = drand(-50, 50);
 	}
 	else{
 		double theta = atan2(pi->y - halfLx, pi->x - halfLx);
@@ -1851,16 +1903,21 @@ void updateT(){
 void freeFly(particle* p){
     double dt = t - p->t;
     p->t = t;
-	if (damping == 0){
+	if (addField == 1){
 		p->x += dt*p->vx;
-		p->y += dt*p->vy;
+		p->y += dt*p->vy + 0.5*field*dt*dt;
+		p->vy += dt*field;
 	}
-	else{
+	else if (damping == 1){
 		double ex = exp(-gamm*dt);
 		p->x += p->vx/gamm*(1 - ex);
 		p->y += p->vy/gamm*(1 - ex);
 		p->vx *= ex;
 		p->vy *= ex;
+	}
+	else{
+		p->x += dt*p->vx;
+		p->y += dt*p->vy;
 	}
 
 	PBCpost(&(p->x), 1);
@@ -1876,13 +1933,13 @@ void saveTXT(){
 		}
 	}
 	else{
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m synchro\n", t, N, Lx, Ly);
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
-
+			/*
             int synchro = 0;
             if (t - particles[i].lastColl > ts)
-                synchro = 1;
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
+                synchro = 1;*/
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %f\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, (float)particles[i].coll/ncol);
 		}
 	}
 }

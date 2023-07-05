@@ -75,10 +75,10 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 10;
+double tmax = 100;
 //time between each screenshots
-double dtime = 1;
-double dtimeThermo = 100;
+double dtime = 1100;
+double dtimeThermo = 1000;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -95,13 +95,13 @@ const int noise = 0;
 const int updating = 0;
 
 //add damping
-const int damping = 0;
+const int damping = 1;
 
 //activate the delta model
 const int addDelta = 0;
 
 //activate double delta model
-const int addDoubleDelta = 0;
+const int addDoubleDelta = 1;
 
 //activate evoling delta model
 const int addEvolvingDelta = 0;
@@ -112,19 +112,19 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 
 //add a wall at y = Ly and y = 0
-const int addWally = 1;
+const int addWally = 0;
 //add a wall at x = Lx and x = 0
-const int addWallx = 1;
+const int addWallx = 0;
 //add a wall at x = Lx/2
 const int addMidWall = 0;
 //add a circular wall
 const int addCircularWall = 0;
 
 //add square potential
-const int addWell = 1;
+const int addWell = 0;
 
 //add field 
-const int addField = 1;
+const int addField = 0;
 
 
 
@@ -142,9 +142,9 @@ const int reduce = 0;
 double delta = 0.01;
 
 //values for double delta model
-double deltaM = 0.03;
+double deltaM = 0.05;
 double deltam = 0;
-double ts = 6;
+double ts = 14;
 
 //value for evolving delta model
 double tau = 5;
@@ -162,13 +162,13 @@ double U = 5;
 double field = -0.6; 
 
 //Initial temperature
-double Einit = 0.06387651143466333;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
 double gamm = 0.01;
@@ -1530,10 +1530,17 @@ void doTheCollision(){
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
-			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts))
+			if (t - pi->lastColl > ts)
+				pi->synchro = 1;
+			if (t - pj->lastColl > ts)
+				pj->synchro = 1;
+			if ((pi->synchro == 1) && (pj->synchro == 1))
 				delta = deltam;
-			else
+			else{
 				delta = deltaM;
+				pi->synchro = 0;
+				pj->synchro = 0;
+			}
 		}
 		else if (addEvolvingDelta){
 			double dti = t - pi->lastColl;

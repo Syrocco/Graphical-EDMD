@@ -9,26 +9,21 @@
 
 typedef struct particle particle;
 struct particle{
-	double rad, x, y, vx, vy, m;
+	double rad, x, y, vx, vy, m, lastColl, t;
 	particle *prv, *nxt;
-	int cell[2]; //very stupid
-	int num, type;
-	unsigned long int coll; //coll = counter of collision at collision
-	double t;
-	int crossX, crossY;
-	double lastColl;
+	int num, type, numberOfParticlesInWell, cell[2], crossX, crossY, synchro;
 	unsigned int* particlesInWell;
-	int numberOfParticlesInWell;
+
+	unsigned long int coll; //coll = counter of collision at collision
 };
 
 typedef struct node node;
 struct node{
 	node *lft, *rgt, *top;
-	int i, j; 
-	int type;
-	unsigned long int collActual; //collActual = counter of collision at event prediciton
+	int i, j, type, q; 
 	double t;
-	int q;
+
+	unsigned long int collActual; //collActual = counter of collision at event prediciton
 };
 
 void doOut();

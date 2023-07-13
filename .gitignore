@@ -5,4 +5,8 @@
 !EDMD.c
 !EDMD.h
 !mersenne.c
+!Makefile
+!raygui.h
+!raymath.h
+!color.h
 # etc...

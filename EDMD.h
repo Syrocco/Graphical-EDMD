@@ -7,6 +7,20 @@
 #include<sys/stat.h>
 #include<sys/types.h>
 
+#include <getopt.h>
+#include<time.h>
+
+#define G 1
+
+#if G
+#include "raylib.h"
+#define RAYGUI_IMPLEMENTATION
+#include "raygui.h" 
+#include<stdbool.h>
+#include "raymath.h"
+#endif
+
+
 typedef struct particle particle;
 struct particle{
 	double rad, x, y, vx, vy, m, lastColl, t;
@@ -64,7 +78,7 @@ void addCollisionEvent(int i, int j, double tColl);
 void doTheCollision();
 
 void addEventScreenshot(double tscreen);
-void takeAScreenshot();
+void takeAScreenshot(int argc, char *argv[]);
 
 void addEventThermo(double tscreen);
 void takeAThermo();
@@ -106,5 +120,18 @@ void pairsInit();
 void addParticleInWellList(particle* p1, int num);
 void removeParticleInWellList(particle* p1, int num);
 int isParticleInWellList(particle* p1, int num);
+
+#if G
+void getInput();
+void draw(int argc, char *argv[]);
+void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
+int getParticleUnderClick();
+void addEventInput(double tin);
+Color colorSelect(double value);
+#endif
+
+
+
+
 
 

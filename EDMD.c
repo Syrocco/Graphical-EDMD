@@ -227,7 +227,10 @@ Camera2D cam = { 0 };
 int thermostat = 1;
 bool colorEditing = false;
 int colorParam = 0;
+bool colorEditing2 = false;
+int colorParam2 = 0;
 Color* colorArray;
+double (*colorFunction)(particle*);
 #endif
 
 int main(int argc, char *argv[]){
@@ -244,6 +247,7 @@ int main(int argc, char *argv[]){
 	load = 0;
 	N = 200;
 	phi = 0.5;
+	colorFunction = &colorCollision;
 	const int screenWidth = 1800;
     const int screenHeight = 900;
 
@@ -2479,7 +2483,6 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 
 void draw(int argc, char *argv[]){
 
-
 	
 	BeginDrawing();
 
@@ -2494,7 +2497,7 @@ void draw(int argc, char *argv[]){
 	if (colorParam != 0){
 		
 		for (int i = 0; i < N; i++){
-			double v = sqrt(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+			double v = colorFunction(particles + i);
 			if (min > v){
 				min = v;
 			}
@@ -2506,7 +2509,7 @@ void draw(int argc, char *argv[]){
 	for (int i = 0; i < N; i++)
 	{	
 		if (colorParam != 0){
-			double v = sqrt(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+			double v = colorFunction(particles + i);
 			particleColor = colorSelect((v - min)/(max - min));
 		}
 		Vector2 ballPosition = {particles[i].x*factor, (Ly - particles[i].y)*factor};
@@ -2536,13 +2539,31 @@ void draw(int argc, char *argv[]){
 		}
 
 	}	
-	
-	GuiUnlock();
+	if (leftClicked == 0)
+		GuiUnlock();
+
+		
+	if (colorEditing2) 
+		GuiLock();
+
+	if (GuiDropdownBox((Rectangle){start  + 200, 540, 120, 24 }, "Coll. Based; Vel. Based", &colorParam2, colorEditing2)){
+		colorEditing2 = !colorEditing2;
+		if (colorParam2 == 0){
+			colorFunction = &colorCollision;
+		}
+		else if (colorParam2 == 1){
+			colorFunction = &colorVelocity;
+		}
+
+	}	
+
+	if (leftClicked == 0)
+		GuiUnlock();
 	
 	char name[200];		
 	
 	int dirtyNoise = noise;
-	GuiToggleGroup((Rectangle){start  + 100, 40, 100, 40}, "No Thermostat;Langevin;Anderson", &noise); 
+	GuiToggleGroup((Rectangle){start  + 100, 40, 100, 40}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
 	
 	if (dirtyNoise != noise){
 
@@ -2694,8 +2715,13 @@ void draw(int argc, char *argv[]){
 }
 
 
+double colorVelocity(particle* p){
+	return sqrt(p->vx*p->vx + p->vy*p->vy); 
+}
 
-
+double colorCollision(particle* p){
+	return (double)p->coll;
+}
 
 Color colorSelect(double value){
 	return colorArray[(int)(value*color_size)];

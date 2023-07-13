@@ -128,6 +128,8 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 int getParticleUnderClick();
 void addEventInput(double tin);
 Color colorSelect(double value);
+double colorVelocity(particle* p);
+double colorCollision(particle* p);
 #endif
 
 

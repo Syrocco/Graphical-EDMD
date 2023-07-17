@@ -18,7 +18,6 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h" 
 #include<stdbool.h>
-#include "raymath.h"
 #include "color.h"
 
 #endif
@@ -152,6 +151,7 @@ void awaitStructFactor();
 void asyncStructFactor();
 void threadPoolInit();
 void reset(int argc, char *argv[]);
+int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 #endif
 
 

@@ -221,10 +221,12 @@ node* nextEvent;
 
 #if  G
 double factor;
+int start;
 Color particleColor = MAROON;
 int leftClicked = 0;
-particle* particleUnderClick;
-Camera2D cam = { 0 };
+int rightClicked = 0;
+particle* particleUnderClick = NULL;
+Camera2D cam = {0};
 int thermostat = 1;
 bool colorEditing = false;
 int colorParam = 0;
@@ -240,6 +242,14 @@ position* positions;
 int counter = 0;
 pthread_t threads[NUM_THREADS];
 threadArg threadArgs[NUM_THREADS];
+bool running = true;
+bool spacePressed = false;
+
+bool editVx = false;
+bool editVy = false;
+bool editM = false;
+
+
 #endif
 
 
@@ -265,14 +275,14 @@ int main(int argc, char *argv[]){
 	
     InitWindow(screenWidth, screenHeight, "EDMD");
 	cam.zoom = 1;
-	SetTargetFPS(144);
 
 	for (int i = 0; i < qN; i++){
 		qx[i] = -10 + 20.0*i/(double)qN;
 	}
-
+	start = GetScreenHeight();
 	threadPoolInit();
-	
+
+	SetTargetFPS(144);
 	#endif
 	
 	
@@ -301,59 +311,62 @@ int main(int argc, char *argv[]){
 	while (t <= tmax){
 	#else
 	while (!WindowShouldClose()){
+		if (running){
 	#endif
+			nextEvent = findNextEvent();
+			t = nextEvent->t;
+			removeEventFromQueue(nextEvent);
+			switch(nextEvent->type){
+				case COLLISION:
+					doTheCollision();
+					break;
+				case WALL:
+					doTheWall();
+					break;
+				case CELLCROSS:
+					ncross++;
+					doTheCrossing();
+					break;
+				case ADDINGNOISE:
+					addNoise();
+					break;
+				case SCREENSHOT:
+					takeAScreenshot(argc, argv);
+					fflush(stdout);
+					#if G != 1
+					if (noise == 0 && E < 1e-10){// && addWell == 0){
+						goto exiting;
+					}
+					#endif
+					break;
+				case THERMO:
+					takeAThermo();
+					fflush(stdout);
+					#if G != 1
+					if (noise == 0 && E < 1e-10){// && addWell == 0){
+						saveTXT();
+						goto exiting;
+					}
+					#endif
+					break;
+				case UPDATE:
+					updateT();
+					break;
 
-		
-		
-		
-		nextEvent = findNextEvent();
-		t = nextEvent->t;
-		removeEventFromQueue(nextEvent);
-		switch(nextEvent->type){
-			case COLLISION:
-				doTheCollision();
-				break;
-			case WALL:
-				doTheWall();
-				break;
-			case CELLCROSS:
-				ncross++;
-				doTheCrossing();
-				break;
-			case ADDINGNOISE:
-				addNoise();
-				break;
-			case SCREENSHOT:
-				takeAScreenshot(argc, argv);
-   				fflush(stdout);
-				#if G != 1
-				if (noise == 0 && E < 1e-10){// && addWell == 0){
-					goto exiting;
-				}
-				#endif
-				break;
-			case THERMO:
-				takeAThermo();
-				fflush(stdout);
-				#if G != 1
-				if (noise == 0 && E < 1e-10){// && addWell == 0){
-					saveTXT();
-					goto exiting;
-				}
-				#endif
-				break;
-			case UPDATE:
-				updateT();
-				break;
-
-			case IN:
-				doIn();
-				break;
-			case OUT:
-				doOut();
-				break;
+				case IN:
+					doIn();
+					break;
+				case OUT:
+					doOut();
+					break;
+			}
+		#if G
 		}
-		
+		else{
+			draw(argc, argv);
+			getInput();
+		}
+		#endif
 	}
 
 	exiting:
@@ -1906,7 +1919,6 @@ void takeAScreenshot(int argc, char *argv[]){
 	#if  G == 1
 	getInput();
 	draw(argc, argv);
-	
 	#else
 	saveTXT();
 	#endif
@@ -2400,8 +2412,11 @@ void runningCheck(){
 
 // visuals //
 #if G
-int getparticleUnderClick(){
-	Vector2 pos = GetScreenToWorld2D(GetMousePosition(), cam);;
+int getParticleUnderClick(){
+	Vector2 pos = GetScreenToWorld2D(GetMousePosition(), cam);
+	if (GetMousePosition().x > start){
+		return 2;
+	}
 	double x = pos.x/factor;
 	double y = Ly - pos.y/factor; 
 	if ((x < Lx) && (y < Ly)){
@@ -2427,9 +2442,19 @@ int getparticleUnderClick(){
 
 
 void getInput(){
+
+	if (IsKeyPressed(KEY_SPACE) && !spacePressed){
+		spacePressed = true;
+		running = !running;
+		
+	}
+
+	if (IsKeyReleased(KEY_SPACE)){
+		spacePressed = false;
+	}
+
 	float wheel = GetMouseWheelMove();
-	if (wheel != 0)
-	{
+	if (wheel != 0){
 		
 		Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), cam);
 		
@@ -2454,7 +2479,7 @@ void getInput(){
 		cam.target = (Vector2){0, 0};
 	}
 
-	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && (!(addWell && U == 0))){
+	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
 		
 		if (leftClicked > 0){
 			freeFly(particleUnderClick);
@@ -2480,17 +2505,23 @@ void getInput(){
 			collisionEvent(particleUnderClick->num);
 		}
 		else{
-			int resultat = getparticleUnderClick();
+			int resultat = getParticleUnderClick();
 
-			if (resultat){
+			if (resultat == 1){
 				GuiLock();
 				leftClicked = 1;
+			}
+			else if (resultat == 0){
+				rightClicked = 0;
 			}
 		}
 	}
 	else{
 		GuiUnlock();
 		leftClicked = 0;
+	}
+	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
+		rightClicked = getParticleUnderClick();
 	}
 }
 
@@ -2507,7 +2538,6 @@ void draw(int argc, char *argv[]){
 
 	ClearBackground(RAYWHITE);
 
-	int start = GetScreenHeight();
 	char name[200];	
 	
 	double min = 10000000000;
@@ -2535,16 +2565,31 @@ void draw(int argc, char *argv[]){
 			double v = colorFunction(particles + i);
 			particleColor = colorSelect((v - min)/(max - min));
 		}
-		Vector2 ballPosition = {particles[i].x*factor, (Ly - particles[i].y)*factor};
-		DrawCircleV(ballPosition, (float)particles[i].rad*factor, particleColor);
+		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, particleColor);
 		
+	}
+	if (rightClicked){
+		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
 	}
 	EndMode2D();
 
 	DrawRectangle(start, 0, GetScreenWidth() - GetScreenHeight(), GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
 
+	if (rightClicked){
+		int changes = 0;
+		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40, 700, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40, 724, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40, 748, 120, 24 });
+		if (changes){
+			particleUnderClick->coll++;
 
-		
+			removeEventFromQueue(eventList[N + particleUnderClick->num]);
+			collisionEvent(particleUnderClick->num);
+			removeEventFromQueue(eventList[particleUnderClick->num]);
+			crossingEvent(particleUnderClick->num);
+		}
+	}
+
 	if (colorEditing2) 
 		GuiLock();
 
@@ -2719,7 +2764,7 @@ void draw(int argc, char *argv[]){
 		}
 	}
 	if (structFactorActivated){
-		if (counter%10 == 0){
+		if ((counter%10 == 0) && (running)){
 			awaitStructFactor();
 			
 			for (int i = 0; i < N; i++){
@@ -2858,6 +2903,8 @@ void reset(int argc, char *argv[]){
 	ncross = 0;
 	paulTime = 0;
 	actualPaulList = 0;
+	rightClicked = 0;
+	leftClicked = 0;
 	
 
 	
@@ -2878,6 +2925,40 @@ void reset(int argc, char *argv[]){
 			positions[i].y = p->y;
 		}
 		asyncStructFactor();
+	}
+}
+
+int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
+	char textBuffer[128] = {0};
+	char textBuffer2[128] = {0};
+	sprintf(textBuffer, "%lf", *ptr);
+	sprintf(textBuffer2, "%lf", *ptr);
+	if (GuiTextBox(position, textBuffer, sizeof(textBuffer), *activate)){
+		*activate = !(*activate);
+	}
+	Rectangle textBounds = {0};
+	textBounds.width = (float)GetTextWidth(text);
+	textBounds.height = (float)GuiGetStyle(DEFAULT, TEXT_SIZE);
+	textBounds.x = position.x - textBounds.width - GuiGetStyle(SLIDER, TEXT_PADDING);
+	textBounds.y = position.y + position.height/2 - GuiGetStyle(DEFAULT, TEXT_SIZE)/2;
+
+	GuiDrawText(text, textBounds, TEXT_ALIGN_RIGHT, Fade(GetColor(GuiGetStyle(SLIDER, TEXT + (STATE_NORMAL*3))), guiAlpha));
+
+	if (strcmp(textBuffer, textBuffer2) == 0){
+		return 0;
+	}
+	int conversion = sscanf(textBuffer, "%lf", ptr);
+	//awful dumb trick because sscanf "says" that the conversion is successful even when the number is -0
+	if (conversion == 1){
+		if (*ptr == -0.0 && textBuffer[0] == '-'){
+            *ptr = 0.0;
+        }
+
+		return 1;
+	}
+	else{
+		sscanf(textBuffer2, "%lf", ptr);
+		return 0;
 	}
 }
 #endif

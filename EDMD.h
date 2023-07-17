@@ -18,6 +18,8 @@
 #include "raygui.h" 
 #include<stdbool.h>
 #include "raymath.h"
+#include "color.h"
+
 #endif
 
 
@@ -130,6 +132,8 @@ void addEventInput(double tin);
 Color colorSelect(double value);
 double colorVelocity(particle* p);
 double colorCollision(particle* p);
+void computeStructureFactor();
+void heatMap(double* arr, int size, int width, int height, int start);
 #endif
 
 

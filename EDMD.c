@@ -6,6 +6,7 @@
 #endif
 
 
+
    
 #define MAX_BATCH_ELEMENTS  8192
 
@@ -27,10 +28,7 @@
 #define ERROR 0
 
 #define G 1
-
-#if G
-#include "color.h"
-#endif
+#define qN 100
 
 //Values if no load file
 int N = 100;
@@ -134,7 +132,7 @@ const int addCircularWall = 0;
 #if G
 bool addWell = 1;
 #else
-const int addWell = 0;
+const int addWell = 1;
 #endif
 //add field 
 const int addField = 0;
@@ -231,7 +229,13 @@ bool colorEditing2 = false;
 int colorParam2 = 0;
 Color* colorArray;
 double (*colorFunction)(particle*);
+double qx[qN];
+double structFactor[qN][qN];
+bool structFactorActivated = 0;
 #endif
+
+
+
 
 int main(int argc, char *argv[]){
 
@@ -245,15 +249,20 @@ int main(int argc, char *argv[]){
 	Einit = 0.01;
 	dtnoise = 1;
 	load = 0;
-	N = 200;
-	phi = 0.5;
+	N = 2000;
+	phi = 0.75;
 	colorFunction = &colorCollision;
 	const int screenWidth = 1800;
     const int screenHeight = 900;
+	
 
     InitWindow(screenWidth, screenHeight, "EDMD");
 	cam.zoom = 1;
-	SetTargetFPS(144); 
+	SetTargetFPS(144);
+
+	for (int i = 0; i < qN; i++){
+		qx[i] = -10 + 20.0*i/(double)qN;
+	}
 	#endif
 	
 	
@@ -276,6 +285,8 @@ int main(int argc, char *argv[]){
 	if ((ther) || (addWallx) || (addWally)){
 		thermo = fopen(thermoName, "w");
 	}
+	
+
 	
 	while (t <= tmax){
 	#else
@@ -2488,7 +2499,7 @@ void draw(int argc, char *argv[]){
 
 	ClearBackground(RAYWHITE);
 
-	int start = ceil((Lx + 1)*factor);
+	int start = GetScreenHeight();
 	
 	double min = 10000000000;
 	double max = -1;
@@ -2504,6 +2515,9 @@ void draw(int argc, char *argv[]){
 			if (max < v){
 				max = v;
 			}
+		}
+		if (min == max){
+			max += 1;
 		}
 	}
 	for (int i = 0; i < N; i++)
@@ -2546,7 +2560,7 @@ void draw(int argc, char *argv[]){
 	if (colorEditing2) 
 		GuiLock();
 
-	if (GuiDropdownBox((Rectangle){start  + 200, 540, 120, 24 }, "Coll. Based; Vel. Based", &colorParam2, colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 220, 540, 120, 24 }, "Coll. Based; Vel. Based", &colorParam2, colorEditing2)){
 		colorEditing2 = !colorEditing2;
 		if (colorParam2 == 0){
 			colorFunction = &colorCollision;
@@ -2659,6 +2673,8 @@ void draw(int argc, char *argv[]){
 	sprintf(name, "%d", N);
 	GuiSliderBar((Rectangle){ start  + 100, 440, 200, 50}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
 	if ((int)Ntemp != N){
+
+		freeArrays();
 		N = (int)Ntemp;
 		t = 0;
 		ncol = 0;
@@ -2695,6 +2711,8 @@ void draw(int argc, char *argv[]){
 		actualPaulList = 0;
 		
 
+		freeArrays();
+
 		
 		constantInit(argc, argv);
 		runningCheck();
@@ -2707,7 +2725,14 @@ void draw(int argc, char *argv[]){
 		physicalQ();
 		format();
 	}
-		
+
+
+
+	GuiCheckBox((Rectangle){ start  + 500, 40, 40, 40}, "Struct. Factor", &structFactorActivated);
+	if (structFactorActivated){
+		computeStructureFactor();
+		heatMap(&structFactor[0][0], qN, 400, 400, start);
+	}
 
 	DrawFPS(GetScreenWidth() - 100, 10);
 	
@@ -2725,5 +2750,68 @@ double colorCollision(particle* p){
 
 Color colorSelect(double value){
 	return colorArray[(int)(value*color_size)];
+}
+
+void computeStructureFactor(){
+	particle* p;
+	double max = 0;
+	//FILE* fichier3 = fopen("data.txt", "w");
+
+	# pragma omp parallel for
+	for (int i = 0; i < qN; i++)
+	{
+		for (int j = 0; j < qN; j++)
+		{
+			double im = 0;
+			double re = 0;
+
+			for (int n = 0; n < N; n++)
+			{
+				p = particles + n;
+				double qr = qx[i] * p->x + qx[j] * p->y;
+
+				re += cos(qr);
+				im += sin(qr);
+
+			}
+			structFactor[i][j] = (re * re + im * im) / N;
+			structFactor[i][j] = log(structFactor[i][j]*structFactor[i][j] + 1);
+			if ((i <= qN/2 + 5) && (i >= qN/2 - 5) && (j >= qN/2 - 5) && (j <= qN/2 + 5)){
+				structFactor[i][j] = 0;
+			}
+		}
+	}
+
+	for (int i = 0; i < qN; i++){
+		for (int j = 0; j < qN; j++){
+			if (structFactor[i][j] > max){
+				max = structFactor[i][j];
+			}
+		}
+	}
+	for (int i = 0; i < qN; i++){
+		for (int j = 0; j < qN; j++){
+			structFactor[i][j] = structFactor[i][j]/max;
+		}
+	}
+}
+
+
+void heatMap(double* arr, int size, int width, int height, int start){
+
+
+	int cellWidth = (double)width / size;
+	int cellHeight = (double)height / size;
+
+	for (int i = 0; i < size; i++)
+	{
+		for (int j = 0; j < size; j++)
+		{
+			int intensity = arr[i*size + j] * 255;
+			Color color = (Color){ intensity, 0, 0, 255 };
+
+			DrawRectangle(start + 400 + i * cellWidth, 400 + j * cellHeight, cellWidth, cellHeight, color);
+		}
+	}
 }
 #endif

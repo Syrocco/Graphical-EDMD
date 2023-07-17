@@ -6,6 +6,7 @@
 #include<time.h>
 #include<sys/stat.h>
 #include<sys/types.h>
+#include<pthread.h>
 
 #include <getopt.h>
 #include<time.h>
@@ -22,6 +23,18 @@
 
 #endif
 
+#if G
+typedef struct position position;
+struct position{
+	double x, y;
+};
+
+typedef struct threadArg threadArg;
+struct threadArg{
+    int start;
+    int end;
+};
+#endif
 
 typedef struct particle particle;
 struct particle{
@@ -132,8 +145,13 @@ void addEventInput(double tin);
 Color colorSelect(double value);
 double colorVelocity(particle* p);
 double colorCollision(particle* p);
-void computeStructureFactor();
+void* computeStructureFactor(void* arg);
+void normalizeStruct();
 void heatMap(double* arr, int size, int width, int height, int start);
+void awaitStructFactor();
+void asyncStructFactor();
+void threadPoolInit();
+void reset(int argc, char *argv[]);
 #endif
 
 

@@ -28,8 +28,11 @@
 #define ERROR 0
 
 #define G 1
-#define qN 100
 
+#if G
+#define qN 100
+#define NUM_THREADS 6
+#endif
 //Values if no load file
 int N = 100;
 double phi = 0.1;
@@ -42,8 +45,8 @@ double lastCollNum = 0;
 
 
 
-int Nycells = -1;
-int Nxcells = -1;
+int Nycells;
+int Nxcells;
 double halfLx; // = Lx/2
 double halfLy; // = Ly/2
 double cellxSize; // L/Ncells
@@ -227,11 +230,16 @@ bool colorEditing = false;
 int colorParam = 0;
 bool colorEditing2 = false;
 int colorParam2 = 0;
-Color* colorArray;
+Color* colorArray = Plasma;
 double (*colorFunction)(particle*);
 double qx[qN];
 double structFactor[qN][qN];
+double structFactor2[qN][qN];
 bool structFactorActivated = 0;
+position* positions;
+int counter = 0;
+pthread_t threads[NUM_THREADS];
+threadArg threadArgs[NUM_THREADS];
 #endif
 
 
@@ -250,12 +258,11 @@ int main(int argc, char *argv[]){
 	dtnoise = 1;
 	load = 0;
 	N = 2000;
-	phi = 0.75;
+	phi = 0.5;
 	colorFunction = &colorCollision;
 	const int screenWidth = 1800;
     const int screenHeight = 900;
 	
-
     InitWindow(screenWidth, screenHeight, "EDMD");
 	cam.zoom = 1;
 	SetTargetFPS(144);
@@ -263,6 +270,9 @@ int main(int argc, char *argv[]){
 	for (int i = 0; i < qN; i++){
 		qx[i] = -10 + 20.0*i/(double)qN;
 	}
+
+	threadPoolInit();
+	
 	#endif
 	
 	
@@ -476,15 +486,13 @@ void constantInit(int argc, char *argv[]){
 		firstScreen = tmax - 1;
 	halfLx = Lx/2;
 	halfLy = Ly/2;
-	if ((Nxcells == -1) || (Nycells == -1)){
-		if (addWell){
-			Nycells = (int)(halfLy/sig);
-			Nxcells = (int)(halfLx/sig);
-		}
-		else{
-			Nycells = (int)(halfLy);
-			Nxcells = (int)(halfLx);
-		}
+	if (addWell){
+		Nycells = (int)(halfLy/sig);
+		Nxcells = (int)(halfLx/sig);
+	}
+	else{
+		Nycells = (int)(halfLy);
+		Nxcells = (int)(halfLx);
 	}
 
 	cellxSize = Lx/Nxcells;
@@ -2500,12 +2508,13 @@ void draw(int argc, char *argv[]){
 	ClearBackground(RAYWHITE);
 
 	int start = GetScreenHeight();
+	char name[200];	
 	
 	double min = 10000000000;
 	double max = -1;
 	BeginMode2D(cam);
 	
-	if (colorParam != 0){
+	if (colorParam2 != 0){
 		
 		for (int i = 0; i < N; i++){
 			double v = colorFunction(particles + i);
@@ -2522,7 +2531,7 @@ void draw(int argc, char *argv[]){
 	}
 	for (int i = 0; i < N; i++)
 	{	
-		if (colorParam != 0){
+		if (colorParam2 != 0){
 			double v = colorFunction(particles + i);
 			particleColor = colorSelect((v - min)/(max - min));
 		}
@@ -2534,38 +2543,20 @@ void draw(int argc, char *argv[]){
 
 	DrawRectangle(start, 0, GetScreenWidth() - GetScreenHeight(), GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
 
-	if (colorEditing) 
-		GuiLock();
-
-	if (GuiDropdownBox((Rectangle){start  + 100, 540, 120, 24 }, "No Color;Plasma;Viridis;Copper", &colorParam, colorEditing)){
-		colorEditing = !colorEditing;
-		if (colorParam == 0){
-			particleColor = MAROON;
-		}
-		else if (colorParam == 1){
-			colorArray = Plasma;
-		}
-		else if (colorParam == 2){
-			colorArray = Viridis;
-		}
-		else{
-			colorArray = Copper;
-		}
-
-	}	
-	if (leftClicked == 0)
-		GuiUnlock();
 
 		
 	if (colorEditing2) 
 		GuiLock();
 
-	if (GuiDropdownBox((Rectangle){start  + 220, 540, 120, 24 }, "Coll. Based; Vel. Based", &colorParam2, colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 100, 540, 120, 24 }, "Uniform; Coll. Based; Vel. Based", &colorParam2, colorEditing2)){
 		colorEditing2 = !colorEditing2;
 		if (colorParam2 == 0){
+			particleColor = MAROON;
+		}
+		if (colorParam2 == 1){
 			colorFunction = &colorCollision;
 		}
-		else if (colorParam2 == 1){
+		else if (colorParam2 == 2){
 			colorFunction = &colorVelocity;
 		}
 
@@ -2573,8 +2564,28 @@ void draw(int argc, char *argv[]){
 
 	if (leftClicked == 0)
 		GuiUnlock();
-	
-	char name[200];		
+
+	if (colorParam2){
+		if (colorEditing) 
+			GuiLock();
+
+		if (GuiDropdownBox((Rectangle){start  + 220, 540, 120, 24 }, "Plasma;Viridis;Copper", &colorParam, colorEditing)){
+			colorEditing = !colorEditing;
+			if (colorParam == 0){
+				colorArray = Plasma;
+			}
+			else if (colorParam == 1){
+				colorArray = Viridis;
+			}
+			else{
+				colorArray = Copper;
+			}
+		}	
+
+		if (leftClicked == 0)
+			GuiUnlock();
+	}		
+		
 	
 	int dirtyNoise = noise;
 	GuiToggleGroup((Rectangle){start  + 100, 40, 100, 40}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
@@ -2617,8 +2628,6 @@ void draw(int argc, char *argv[]){
 					free(cellList[i]);
 			}
 			free(cellList);
-			Nxcells = -1;
-			Nycells = -1;
 			constantInit(argc, argv);
 			cellListInit();
 			pairsInit();
@@ -2631,6 +2640,7 @@ void draw(int argc, char *argv[]){
 			crossingEvent(p->num);
 		}
 	}
+
 	if (addWell){
 		sprintf(name, "%.3f", U);
 		GuiSliderBarDouble((Rectangle){ start + 100, 220, 505, 40 }, "U", name, &U, -0.3f, 0.3f);
@@ -2642,8 +2652,6 @@ void draw(int argc, char *argv[]){
 					free(cellList[i]);
 			}
 			free(cellList);
-			Nxcells = -1;
-			Nycells = -1;
 			constantInit(argc, argv);
 			cellListInit();
 			for(int i = 0; i < N; i++){
@@ -2673,70 +2681,65 @@ void draw(int argc, char *argv[]){
 	sprintf(name, "%d", N);
 	GuiSliderBar((Rectangle){ start  + 100, 440, 200, 50}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
 	if ((int)Ntemp != N){
-
+		if (structFactorActivated)
+			free(positions);
 		freeArrays();
 		N = (int)Ntemp;
-		t = 0;
-		ncol = 0;
-		ncross = 0;
-		Nycells = -1;
-		Nxcells = -1;
-		paulTime = 0;
-		actualPaulList = 0;
+		reset(argc, argv);
 		
-
-		
-		constantInit(argc, argv);
-		runningCheck();
-		particlesInit();
-		cellListInit();
-		if (addWell)
-			pairsInit();
-		
-		eventListInit();
-		physicalQ();
-		format();
 	}
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
 	GuiSliderBarDouble((Rectangle){ start  + 100, 490, 200, 50}, "Packing fraction", name, &phi, 0.1, 0.7);
 	if (phiTemp != phi){
-		t = 0;
-		ncol = 0;
-		ncross = 0;
-		Nycells = -1;
-		Nxcells = -1;
-		paulTime = 0;
-		actualPaulList = 0;
-		
 
+		if (structFactorActivated)
+			free(positions);
 		freeArrays();
 
-		
-		constantInit(argc, argv);
-		runningCheck();
-		particlesInit();
-		cellListInit();
-		if (addWell)
-			pairsInit();
-		
-		eventListInit();
-		physicalQ();
-		format();
+		reset(argc, argv);
 	}
 
-
-
+	
+	bool tempStruct = structFactorActivated;
 	GuiCheckBox((Rectangle){ start  + 500, 40, 40, 40}, "Struct. Factor", &structFactorActivated);
+	if (tempStruct != structFactorActivated){
+		if (structFactorActivated){
+			positions = calloc(N, sizeof(position));
+			for (int i = 0; i < N; i++){
+				particle* p = particles + i;
+				positions[i].x = p->x;
+				positions[i].y = p->y;
+			}
+			asyncStructFactor();
+		}
+		else{
+			free(positions);
+		}
+	}
 	if (structFactorActivated){
-		computeStructureFactor();
-		heatMap(&structFactor[0][0], qN, 400, 400, start);
+		if (counter%10 == 0){
+			awaitStructFactor();
+			
+			for (int i = 0; i < N; i++){
+				particle* p = particles + i;
+				positions[i].x = p->x;
+				positions[i].y = p->y;
+			}
+			memcpy(structFactor2, structFactor, sizeof(structFactor));
+			
+			normalizeStruct();
+			asyncStructFactor();
+			counter = 0;
+		}
+		heatMap(&structFactor2[0][0], qN, 400, 400, start);
 	}
 
 	DrawFPS(GetScreenWidth() - 100, 10);
 	
 	EndDrawing();
+	counter++;
 }
 
 
@@ -2752,13 +2755,13 @@ Color colorSelect(double value){
 	return colorArray[(int)(value*color_size)];
 }
 
-void computeStructureFactor(){
-	particle* p;
-	double max = 0;
-	//FILE* fichier3 = fopen("data.txt", "w");
+void* computeStructureFactor(void* arg){
+	threadArg* threadArgument = (threadArg*)arg;
+    int start = threadArgument->start;
+    int end = threadArgument->end;
+	position* p;
 
-	# pragma omp parallel for
-	for (int i = 0; i < qN; i++)
+	for (int i = start; i < end; i++)
 	{
 		for (int j = 0; j < qN; j++)
 		{
@@ -2767,7 +2770,7 @@ void computeStructureFactor(){
 
 			for (int n = 0; n < N; n++)
 			{
-				p = particles + n;
+				p = positions + n;
 				double qr = qx[i] * p->x + qx[j] * p->y;
 
 				re += cos(qr);
@@ -2776,26 +2779,33 @@ void computeStructureFactor(){
 			}
 			structFactor[i][j] = (re * re + im * im) / N;
 			structFactor[i][j] = log(structFactor[i][j]*structFactor[i][j] + 1);
-			if ((i <= qN/2 + 5) && (i >= qN/2 - 5) && (j >= qN/2 - 5) && (j <= qN/2 + 5)){
+			if ((i <= qN/2 + 3) && (i >= qN/2 - 3) && (j >= qN/2 - 3) && (j <= qN/2 + 3)){
 				structFactor[i][j] = 0;
 			}
 		}
 	}
 
+	
+	pthread_exit(NULL);
+}
+
+void normalizeStruct(){
+	double max = 0;
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
-			if (structFactor[i][j] > max){
-				max = structFactor[i][j];
+			if (structFactor2[i][j] > max){
+				max = structFactor2[i][j];
 			}
 		}
 	}
+
+	#pragma omp parallel for
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
-			structFactor[i][j] = structFactor[i][j]/max;
+			structFactor2[i][j] = structFactor2[i][j]/max;
 		}
 	}
 }
-
 
 void heatMap(double* arr, int size, int width, int height, int start){
 
@@ -2812,6 +2822,62 @@ void heatMap(double* arr, int size, int width, int height, int start){
 
 			DrawRectangle(start + 400 + i * cellWidth, 400 + j * cellHeight, cellWidth, cellHeight, color);
 		}
+	}
+}
+
+void threadPoolInit(){
+
+    int iterationsPerThread = qN / NUM_THREADS;
+    int remainingIterations = qN % NUM_THREADS;
+    
+    for (int i = 0; i < NUM_THREADS; i++) {
+        threadArgs[i].start = i * iterationsPerThread;
+        threadArgs[i].end = (i + 1) * iterationsPerThread;
+        
+        // Distribute remaining iterations among threads
+        if (i == NUM_THREADS - 1)
+            threadArgs[i].end += remainingIterations;
+	}
+}
+
+void asyncStructFactor(){
+	for (int i = 0; i < NUM_THREADS; i++){
+		pthread_create(&threads[i], NULL, computeStructureFactor, (void*)&threadArgs[i]);
+	}
+}
+
+void awaitStructFactor(){
+    for (int i = 0; i < NUM_THREADS; i++) {
+        pthread_join(threads[i], NULL);
+    }
+}
+
+void reset(int argc, char *argv[]){
+	t = 0;
+	ncol = 0;
+	ncross = 0;
+	paulTime = 0;
+	actualPaulList = 0;
+	
+
+	
+	constantInit(argc, argv);
+	particlesInit();
+	cellListInit();
+	if (addWell)
+		pairsInit();
+	
+	eventListInit();
+	physicalQ();
+	format();
+	if (structFactorActivated){
+		positions = calloc(N, sizeof(position));
+		for (int i = 0; i < N; i++){
+			particle* p = particles + i;
+			positions[i].x = p->x;
+			positions[i].y = p->y;
+		}
+		asyncStructFactor();
 	}
 }
 #endif

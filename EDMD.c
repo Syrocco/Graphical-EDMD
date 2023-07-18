@@ -103,12 +103,12 @@ int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
 #else
-const int addWell = 1;
+const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
-const int addCircularWall = 1;
+const int addCircularWall = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -252,6 +252,9 @@ Texture2D texture;
 
 bool wallEditing = false;
 int wallParam = 0;
+
+int nSym = 6;
+
 #endif
 
 
@@ -643,8 +646,7 @@ void particlesInit(){
 		}
 		N = count;
 		free(particles);
-		particles = particlesTemp;
-		realloc(particles, N*sizeof(particle));
+		particles = realloc(particlesTemp, N*sizeof(particle));
 		paulListN = N;
 		dtPaul = 100/(double)N;
 	}
@@ -1094,20 +1096,22 @@ void crossingEvent(int i){
 	if (p.vx < 0){
 		travelTimeX = logTime(PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx);
 		xx = 1;
+		
 	}
 	else{
 		travelTimeX = logTime(PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx);
 		xx = 2;
+		
 	}
 
 
 	if (addField){
 		double vy = p.vy;
-		
 		double dy = PBCinsideCell(p.y - (1 + p.cell[1])*cellySize, 0);
 		if (vy > sqrt(2*field*dy)){
 			travelTimeY = (-vy + sqrt(vy*vy - 2*field*dy))/field;
 			yy = 4;
+			
 		}
 		else{
 			dy = PBCinsideCell(p.y - p.cell[1]*cellySize, 0);
@@ -1422,7 +1426,6 @@ void collisionEvent(int i){
 			double B = 2*(v0x*x0 + v0y*y0);
 			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
 			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
-			
 			type = WALL;
 			xy = 2;
 
@@ -2634,7 +2637,7 @@ void draw(int argc, char *argv[]){
 	if (colorEditing2) 
 		GuiLock();
 
-	if (GuiDropdownBox((Rectangle){start  + 100, 740, 120, 24 }, "Uniform; Coll. Based; Vel. Based; Sym. Based", &colorParam2, colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 100, 740, 120, 24 }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &colorParam2, colorEditing2)){
 		colorEditing2 = !colorEditing2;
 		if (colorParam2 == 0){
 			particleColor = MAROON;
@@ -2646,6 +2649,11 @@ void draw(int argc, char *argv[]){
 			colorFunction = &colorVelocity;
 		}
 		else if (colorParam2 == 3){
+			nSym = 6;
+			colorFunction = &colorBOOP;
+		}
+		else if (colorParam2 == 4){
+			nSym = 4;
 			colorFunction = &colorBOOP;
 		}
 
@@ -2711,16 +2719,15 @@ void draw(int argc, char *argv[]){
 			}
 			
 		}
-		
-		if (addWell){
-			for (int i = 0; i < Nxcells; i++){
-					free(cellList[i]);
-			}
-			free(cellList);
-			boxConstantHelper();
-			cellListInit();
-			pairsInit();
+		for (int i = 0; i < Nxcells; i++){
+			free(cellList[i]);
 		}
+		free(cellList);
+		boxConstantHelper();
+		cellListInit();
+		if (addWell)
+			pairsInit();
+		
 		for (int i = 0; i < N; i++){
 			particle* p = particles + i;
 			removeEventFromQueue(eventList[N + p->num]);
@@ -2787,7 +2794,6 @@ void draw(int argc, char *argv[]){
 				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
-				
 
 			}
 		}
@@ -2849,11 +2855,32 @@ void draw(int argc, char *argv[]){
 				addWally = 0;
 				addCircularWall = 1;
 			}
-			if (structFactorActivated)
-				free(positions);
-			freeArrays();
+			if (wallParam != 0){
+				if (structFactorActivated)
+					free(positions);
+				freeArrays();
 
-			reset(argc, argv);
+				reset(argc, argv);
+			}
+			else{
+				if (addWell){
+					//To take care of the boundary conditions
+					for (int i = 0; i < N; i++){
+						free(particles[i].particlesInWell);
+					}
+					pairsInit();
+				}
+				for (int i = 0; i < N; i++){
+					particle* p = particles + i;
+					freeFly(p);
+					p->coll++;
+					removeEventFromQueue(eventList[N + p->num]);
+					collisionEvent(p->num);
+					removeEventFromQueue(eventList[p->num]);
+					crossingEvent(p->num);
+
+				}
+			}
 		}
 	}	
 
@@ -2916,12 +2943,10 @@ double colorCollision(particle* p){
 }
 
 double colorBOOP(particle* p1){
-	double treshold = 1.5;
+	double treshold = 2;
 	if ((addWell) && (U < 0)){
-		treshold = 1.5*sig;
-		printf("2 ");
+		treshold = 2*sig;
 	}
-	int n = 6;
 	int count = 0;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
@@ -2935,11 +2960,11 @@ double colorBOOP(particle* p1){
 					double dy = p1->y - p2->y;
 					double dx = p1->x - p2->x;
 					PBC(&dx, &dy);
-					if (dx*dx + dy*dy < 1.3*pow(p1->rad + p2->rad, 2)){
+					if (dx*dx + dy*dy < treshold*pow(p1->rad + p2->rad, 2)){
 						count++;
-						double theta = atan2(dx, dy);
-						re += cos(n*theta);
-						im += cos(n*theta);
+						double theta = atan2(dy, dx);
+						re += cos(nSym*theta);
+						im += sin(nSym*theta);
 					}
 				}
 				p2 = p2->nxt;
@@ -2948,7 +2973,6 @@ double colorBOOP(particle* p1){
 	}
 	if (count >= 1)
 		return (re*re + im*im)/count;
-	printf("ET MERDE:!\n");
 	return 0;
 }
 

@@ -6,8 +6,6 @@
 #endif
 
 
-
-   
 #define MAX_BATCH_ELEMENTS  8192
 
 #define CELLCROSS 0
@@ -32,7 +30,7 @@
 #if G
 #define qN 200
 #define SIZE 400
-#define NUM_THREADS 11
+#define NUM_THREADS 6
 #endif
 //Values if no load file
 int N = 100;
@@ -218,21 +216,25 @@ node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
 
+pthread_t mainThread;
 #if  G
 double factor;
 int start;
-Color particleColor = MAROON;
+
 int leftClicked = 0;
 int rightClicked = 0;
 particle* particleUnderClick = NULL;
 Camera2D cam = {0};
-int thermostat = 1;
+
+Color particleColor = MAROON;
 bool colorEditing = false;
 int colorParam = 0;
 bool colorEditing2 = false;
 int colorParam2 = 0;
 Color* colorArray = Plasma;
 double (*colorFunction)(particle*);
+double* colorFunctionArray;
+
 double qx[qN];
 float structFactor[qN][qN];
 bool structFactorActivated = 0;
@@ -257,11 +259,13 @@ int nSym = 6;
 
 #endif
 
+typedef struct arguments arguments;
+struct arguments{
+	int argc;
+	char **argv;
+};
 
-
-
-int main(int argc, char *argv[]){
-
+void* computeEvolution(void *arg){
 	#if  G
 	dtime = 1;
 	res = 1;
@@ -279,7 +283,6 @@ int main(int argc, char *argv[]){
 	const int screenWidth = 1800;
     const int screenHeight = 900;
 
-	
 	
     InitWindow(screenWidth, screenHeight, "EDMD");
 
@@ -300,11 +303,9 @@ int main(int argc, char *argv[]){
 
 	SetTargetFPS(144);
 	#endif
-	
-	
-
-	//init_genrand(time(NULL));
-	init_genrand(666);
+	arguments* argument = (arguments*)arg;
+	int argc = argument->argc;
+	char** argv = argument->argv;
 
 	constantInit(argc, argv);
 	runningCheck();
@@ -315,15 +316,11 @@ int main(int argc, char *argv[]){
 	eventListInit();
 	physicalQ();
 	format();
-
 	#if G != 1
 	fichier = fopen(fileName, "w");
 	if ((ther) || (addWallx) || (addWally)){
 		thermo = fopen(thermoName, "w");
 	}
-	
-
-	
 	while (t <= tmax){
 	#else
 	while (!WindowShouldClose()){
@@ -331,10 +328,10 @@ int main(int argc, char *argv[]){
 	#endif
 			nextEvent = findNextEvent();
 			
-			if (nextEvent->t - t < -0.0001){
-				printf("event: %lf %d %d\n", nextEvent->t - t, nextEvent->type, nextEvent->i);
-				exit(3);
-			}
+			//if (nextEvent->t - t < -0.0001){
+			//	printf("event: %lf %d %d\n", nextEvent->t - t, nextEvent->type, nextEvent->i);
+			//	exit(3);
+			//}
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
@@ -399,6 +396,19 @@ int main(int argc, char *argv[]){
 			fclose(thermo);
 		#endif
 		freeArrays();
+	pthread_exit(NULL);
+}
+
+
+int main(int argc, char *argv[]){
+
+	
+	init_genrand(666);
+
+	pthread_create(&mainThread, NULL, computeEvolution, &(arguments){argc, argv});
+	pthread_join(mainThread, NULL);
+
+
 	return 0;
 }
 
@@ -528,6 +538,7 @@ void constantInit(int argc, char *argv[]){
 		}
 	}
 
+
 	if (load){
 		file = fopen(filename, "r");
 		mygetline(buffer, file);
@@ -536,6 +547,9 @@ void constantInit(int argc, char *argv[]){
 			Ly = Lx;
 	}
 	else{
+		if (addCircularWall){
+			N = (4/M_PI)*N;
+		}
 		Lx = sqrt(M_PI*N/phi);
 		Ly = Lx;
 	}
@@ -637,7 +651,7 @@ void particlesInit(){
 		int count = 0;
 		for(int i  = 0; i < N; i++){
 			particle* p = particles + i;
-			if (pow(p->x - Lx/2, 2) + pow(p->y - Ly/2, 2) <= (Lx - 2*p->rad)*(Lx - 2*p->rad)/4){
+			if (pow(p->x - Lx/2, 2) + pow(p->y - Ly/2, 2) < (Lx - 2.01*p->rad)*(Lx - 2.01*p->rad)/4){
 				p->num = count;
 				particlesTemp[count] = *p;
 				
@@ -2575,23 +2589,15 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 	*value = (double)floatValue;
 }
 
-void draw(int argc, char *argv[]){
-
-	
-	BeginDrawing();
-
-	ClearBackground(RAYWHITE);
-
-	char name[200];	
-	
-	double min = 10000000000;
+void drawParticles(){
+	double min = 1000000000000;
 	double max = -1;
-	BeginMode2D(cam);
-	
+
 	if (colorParam2 != 0){
 		
 		for (int i = 0; i < N; i++){
 			double v = colorFunction(particles + i);
+			colorFunctionArray[i] = v;
 			if (min > v){
 				min = v;
 			}
@@ -2603,11 +2609,9 @@ void draw(int argc, char *argv[]){
 			max += 1;
 		}
 	}
-	for (int i = 0; i < N; i++)
-	{	
+	for (int i = 0; i < N; i++){	
 		if (colorParam2 != 0){
-			double v = colorFunction(particles + i);
-			particleColor = colorSelect((v - min)/(max - min));
+			particleColor = colorSelect((colorFunctionArray[i] - min)/(max - min));
 		}
 		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, particleColor);
 		
@@ -2615,15 +2619,31 @@ void draw(int argc, char *argv[]){
 	if (rightClicked){
 		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
 	}
+}
+
+void draw(int argc, char *argv[]){
+
+	
+	BeginDrawing();
+
+	ClearBackground(RAYWHITE);
+
+	char name[200];	
+	
+	
+	BeginMode2D(cam);
+	
+	drawParticles();
+	
 	EndMode2D();
 
 	DrawRectangle(start, 0, GetScreenWidth() - GetScreenHeight(), GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
 
 	if (rightClicked){
 		int changes = 0;
-		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40, 700, 120, 24 });
-		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40, 724, 120, 24 });
-		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40, 748, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40, 800, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40, 824, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40, 848, 120, 24 });
 		if (changes){
 			particleUnderClick->coll++;
 
@@ -2637,6 +2657,7 @@ void draw(int argc, char *argv[]){
 	if (colorEditing2) 
 		GuiLock();
 
+	int dirtyColorParam2 = colorParam2;
 	if (GuiDropdownBox((Rectangle){start  + 100, 740, 120, 24 }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &colorParam2, colorEditing2)){
 		colorEditing2 = !colorEditing2;
 		if (colorParam2 == 0){
@@ -2656,7 +2677,12 @@ void draw(int argc, char *argv[]){
 			nSym = 4;
 			colorFunction = &colorBOOP;
 		}
-
+		if ((dirtyColorParam2 == 0) && (colorParam2 != 0)){
+			colorFunctionArray = calloc(N, sizeof(double));
+		}
+		else if ((dirtyColorParam2 != 0) && (colorParam2 == 0)){
+			free(colorFunctionArray);
+		}
 	}	
 
 	if (leftClicked == 0)
@@ -2809,23 +2835,25 @@ void draw(int argc, char *argv[]){
 		if (structFactorActivated)
 			free(positions);
 		freeArrays();
+		if (colorParam2)
+			free(colorFunctionArray);
 		N = (int)Ntemp;
 		reset(argc, argv);
-		
+		if (colorParam2)
+			colorFunctionArray = calloc(N, sizeof(double));
 	}
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
 	GuiSliderBarDouble((Rectangle){ start  + 100, 690, 200, 50}, "Packing fraction", name, &phi, 0.1, 0.7);
 	if (phiTemp != phi){
-
 		if (structFactorActivated)
 			free(positions);
 		freeArrays();
 
 		reset(argc, argv);
 	}
-
+	
 	int dirtyWallParam = wallParam;
 	if (GuiDropdownBox((Rectangle){start  + 100, 400, 120, 24 }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
 		wallEditing = !wallEditing;
@@ -2904,22 +2932,40 @@ void draw(int argc, char *argv[]){
 	}
 	if (structFactorActivated){
 		if ((counter%10 == 0) && (running)){
+			//clock_t begin = clock();
 			awaitStructFactor();
-			
-			#pragma omp parallel for
+			//clock_t end = clock();
+			//double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+			//printf("time took await: %lf\n", time_spent);
+
+			//begin = clock();
 			for (int i = 0; i < N; i++){
 				particle* p = particles + i;
 				positions[i].x = p->x;
 				positions[i].y = p->y;
 			}
+			//end = clock();
+			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+			//printf("time took FILL: %lf\n", time_spent);
 
 			
-			
+			//begin = clock();
 			normalizeStruct();
+			//end = clock();
+			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+			//printf("time took NORMALIZE: %lf\n", time_spent);
 
-
+			//begin = clock();
 			UpdateTexture(texture, structFactor);
+			//end = clock();
+			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+			//printf("time took UPDATE: %lf\n", time_spent);
+
+			//begin = clock();
 			asyncStructFactor();
+			//end = clock();
+			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
+			//printf("time took ASYNC: %lf\n", time_spent);
 			counter = 0;
 		}
 		DrawTexturePro(texture,
@@ -3021,7 +3067,6 @@ void normalizeStruct(){
 		}
 	}
 
-	#pragma omp parallel for
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
 			structFactor[i][j] = structFactor[i][j]/max;
@@ -3079,12 +3124,16 @@ void reset(int argc, char *argv[]){
 	format();
 	if (structFactorActivated){
 		positions = calloc(N, sizeof(position));
+
+		/*
+		Make the sim go laggy when changing N or phi continuously
+		Not needed.
 		for (int i = 0; i < N; i++){
 			particle* p = particles + i;
 			positions[i].x = p->x;
 			positions[i].y = p->y;
 		}
-		asyncStructFactor();
+		asyncStructFactor();*/
 	}
 }
 

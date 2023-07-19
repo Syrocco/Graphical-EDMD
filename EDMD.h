@@ -43,6 +43,7 @@ struct particle{
 	unsigned int* particlesInWell;
 
 	unsigned long int coll; //coll = counter of collision at collision
+
 };
 
 typedef struct node node;
@@ -137,6 +138,7 @@ int isParticleInWellList(particle* p1, int num);
 
 #if G
 void getInput();
+void drawParticles();
 void draw(int argc, char *argv[]);
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
 int getParticleUnderClick();

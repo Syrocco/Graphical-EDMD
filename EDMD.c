@@ -218,8 +218,12 @@ node* nextEvent;
 
 pthread_t mainThread;
 #if  G
+int screenWidth;
+int screenHeight;
 double factor;
 int start;
+double xGUI = 1;
+double yGUI = 1;
 
 int leftClicked = 0;
 int rightClicked = 0;
@@ -280,12 +284,11 @@ void* computeEvolution(void *arg){
 	phi = 0.5;
 	field = -0.001;
 	colorFunction = &colorCollision;
-	const int screenWidth = 1800;
-    const int screenHeight = 900;
+	screenWidth = 1800;
+    screenHeight = 900;
 
-	
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(screenWidth, screenHeight, "EDMD");
-
 	image = GenImageColor(qN, qN, BLANK);
 
     image.data = structFactor;
@@ -2506,10 +2509,57 @@ void getInput(){
 		running = !running;
 		
 	}
-
+	
 	if (IsKeyReleased(KEY_SPACE)){
 		spacePressed = false;
 	}
+
+	 if (IsWindowResized() && !IsWindowFullscreen()){
+            screenWidth = GetScreenWidth();
+            screenHeight = GetScreenHeight();
+			factor = GetScreenHeight()/Lx;
+            start = GetScreenHeight();
+			xGUI = GetScreenWidth()/1800.;
+			yGUI = GetScreenHeight()/900.;
+        }
+
+        // check for alt + enter
+ 		if (IsKeyPressed(KEY_F))
+ 		{
+            // see what display we are on right now
+ 			int display = GetCurrentMonitor();
+ 
+            
+            if (IsWindowFullscreen())
+            {
+                // if we are full screen, then go back to the windowed size
+                SetWindowSize(screenWidth, screenHeight);
+            }
+            else
+            {
+                // if we are not full screen, set the window size to match the monitor we are on
+                SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
+            }
+ 
+            // toggle the state
+ 			ToggleFullscreen();
+ 		}
+
+
+
+	if (IsKeyPressed(KEY_F)){
+			if (!IsWindowFullscreen()){
+				int display = GetCurrentMonitor();
+				factor = GetMonitorHeight(display)/Lx;
+				start = GetMonitorHeight(display);
+				xGUI = GetMonitorWidth(display)/1800.;
+				yGUI = GetMonitorHeight(display)/900.;
+				
+				SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
+				
+				//ToggleFullscreen();
+			}    
+    }
 
 	float wheel = GetMouseWheelMove();
 	if (wheel != 0){
@@ -2589,7 +2639,7 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 	*value = (double)floatValue;
 }
 
-void drawParticles(){
+void drawParticlesAndBox(){
 	double min = 1000000000000;
 	double max = -1;
 
@@ -2619,6 +2669,17 @@ void drawParticles(){
 	if (rightClicked){
 		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
 	}
+	if (addWallx){
+		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor} , 0.3*factor, BLACK);
+		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor, BLACK);
+	}
+	if (addWally){
+		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0} , 0.3*factor, BLACK);
+		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor, BLACK);
+	}
+	else if (addCircularWall){
+		DrawRing((Vector2){Lx/2*factor, Lx/2*factor}, Lx/2*factor, (Lx/2 + 1)*factor, 0, 360, 360, BLACK);
+	}
 }
 
 void draw(int argc, char *argv[]){
@@ -2633,7 +2694,7 @@ void draw(int argc, char *argv[]){
 	
 	BeginMode2D(cam);
 	
-	drawParticles();
+	drawParticlesAndBox();
 	
 	EndMode2D();
 
@@ -2641,9 +2702,9 @@ void draw(int argc, char *argv[]){
 
 	if (rightClicked){
 		int changes = 0;
-		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40, 800, 120, 24 });
-		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40, 824, 120, 24 });
-		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40, 848, 120, 24 });
+		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40*xGUI, 800*yGUI, 120*xGUI, 24*yGUI});
+		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40*xGUI, 824*yGUI, 120*xGUI, 24*yGUI});
+		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40*xGUI, 848*yGUI, 120*xGUI, 24*yGUI});
 		if (changes){
 			particleUnderClick->coll++;
 
@@ -2658,7 +2719,8 @@ void draw(int argc, char *argv[]){
 		GuiLock();
 
 	int dirtyColorParam2 = colorParam2;
-	if (GuiDropdownBox((Rectangle){start  + 100, 740, 120, 24 }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &colorParam2, colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &colorParam2, colorEditing2)){
+		
 		colorEditing2 = !colorEditing2;
 		if (colorParam2 == 0){
 			particleColor = MAROON;
@@ -2692,7 +2754,7 @@ void draw(int argc, char *argv[]){
 		if (colorEditing) 
 			GuiLock();
 
-		if (GuiDropdownBox((Rectangle){start  + 220, 740, 120, 24 }, "Plasma;Viridis;Copper", &colorParam, colorEditing)){
+		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Plasma;Viridis;Copper", &colorParam, colorEditing)){
 			colorEditing = !colorEditing;
 			if (colorParam == 0){
 				colorArray = Plasma;
@@ -2711,7 +2773,7 @@ void draw(int argc, char *argv[]){
 		
 	
 	int dirtyNoise = noise;
-	GuiToggleGroup((Rectangle){start  + 100, 40, 100, 40}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
+	GuiToggleGroup((Rectangle){start  + 100*xGUI, 40*yGUI, 100*xGUI, 40*yGUI}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
 	
 	if (dirtyNoise != noise){
 
@@ -2726,16 +2788,16 @@ void draw(int argc, char *argv[]){
 
 	if (noise){
 		sprintf(name, "%.3f", T);
-		GuiSliderBarDouble((Rectangle){ start  + 100, 80, 505, 40}, "Temperature", name, &T, 0.0000000001f, 0.1f);
+		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 0.1f);
 		if (noise == 1){
 			sprintf(name, "%.3f", gamm);
-			GuiSliderBarDouble((Rectangle){ start + 100, 130, 505, 40 }, "Gamma", name, &gamm, 0.001f, 0.1f);
+			GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 130*yGUI, 505*xGUI, 40*yGUI }, "Gamma", name, &gamm, 0.001f, 0.1f);
 		}
 	}
 	
 
 	bool dirtyWell = addWell;
-	GuiCheckBox((Rectangle){ start  + 100, 180, 40, 40}, "Potential", &addWell);
+	GuiCheckBox((Rectangle){ start  + 100*xGUI, 180*yGUI, 40*xGUI, 40*yGUI}, "Potential", &addWell);
 	if (dirtyWell != addWell){
 		for(int i = 0; i < N; i++){
 			particle* p = particles + i;
@@ -2765,10 +2827,10 @@ void draw(int argc, char *argv[]){
 
 	if (addWell){
 		sprintf(name, "%.3f", U);
-		GuiSliderBarDouble((Rectangle){ start + 100, 220, 505, 40 }, "U", name, &U, -0.3f, 0.3f);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -0.3f, 0.3f);
 		sprintf(name, "%.3f", sig);
 		float sigTemp = sig;
-		GuiSliderBarDouble((Rectangle){ start  + 100, 270, 505, 40}, "Pot. rad.", name, &sig, 1.01f, 2.5f);
+		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI}, "Pot. rad.", name, &sig, 1.01f, 2.5f);
 		if (sig != sigTemp){
 			for (int i = 0; i < Nxcells; i++){
 					free(cellList[i]);
@@ -2796,7 +2858,7 @@ void draw(int argc, char *argv[]){
 	}
 
 	bool dirtyField = addField;
-	GuiCheckBox((Rectangle){ start  + 100, 320, 40, 40}, "Const. Field", &addField);
+	GuiCheckBox((Rectangle){ start  + 100*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Const. Field", &addField);
 	if (dirtyField != addField){
 		for(int i = 0; i < N; i++){			
 			particle* p = particles + i;
@@ -2811,7 +2873,7 @@ void draw(int argc, char *argv[]){
 	if (addField){
 		double fieldTemp = field;
 		sprintf(name, "%.3f", field);
-		GuiSliderBarDouble((Rectangle){ start + 100, 360, 505, 40 }, "g", name, &field, -0.03, -0.0001);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 40*yGUI}, "g", name, &field, -0.03, -0.0001);
 		if (fieldTemp != field){
 			for (int i = 0; i < N; i++){
 				particle* p = particles + i;
@@ -2826,11 +2888,11 @@ void draw(int argc, char *argv[]){
 	}
 	
 	sprintf(name, "%.3f", res);
-	GuiSliderBarDouble((Rectangle){ start  + 100, 580, 200, 40}, "Coeff of res.", name, &res, 0.3f, 1.f);
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.3f, 1.f);
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){ start  + 100, 640, 200, 50}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
+	GuiSliderBar((Rectangle){ start  + 100*xGUI, 640*yGUI, 200*xGUI, 50*yGUI}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
 	if ((int)Ntemp != N){
 		if (structFactorActivated)
 			free(positions);
@@ -2845,7 +2907,7 @@ void draw(int argc, char *argv[]){
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){ start  + 100, 690, 200, 50}, "Packing fraction", name, &phi, 0.1, 0.7);
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 50*yGUI}, "Packing fraction", name, &phi, 0.1, 0.7);
 	if (phiTemp != phi){
 		if (structFactorActivated)
 			free(positions);
@@ -2855,7 +2917,7 @@ void draw(int argc, char *argv[]){
 	}
 	
 	int dirtyWallParam = wallParam;
-	if (GuiDropdownBox((Rectangle){start  + 100, 400, 120, 24 }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
+	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
 		wallEditing = !wallEditing;
 		if (dirtyWallParam != wallParam){
 			if (wallParam == 0){
@@ -2914,7 +2976,7 @@ void draw(int argc, char *argv[]){
 
 	
 	bool tempStruct = structFactorActivated;
-	GuiCheckBox((Rectangle){start  + 500, 40, 40, 40}, "Struct. Factor", &structFactorActivated);
+	GuiCheckBox((Rectangle){start  + 500*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Struct. Factor", &structFactorActivated);
 	if (tempStruct != structFactorActivated){
 		if (structFactorActivated){
 			positions = calloc(N, sizeof(position));
@@ -2970,7 +3032,7 @@ void draw(int argc, char *argv[]){
 		}
 		DrawTexturePro(texture,
             (Rectangle){ 0, 0, qN, qN },
-            (Rectangle){ 400 + start, 450, SIZE, SIZE},
+            (Rectangle){ 400 + start*xGUI, 450*yGUI, SIZE*xGUI, SIZE*yGUI},
             (Vector2){ 0, 0 }, 0.0f, (Color){255, 255, 255, 255});
 	}
 	DrawFPS(GetScreenWidth() - 100, 10);

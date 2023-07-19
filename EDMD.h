@@ -138,7 +138,7 @@ int isParticleInWellList(particle* p1, int num);
 
 #if G
 void getInput();
-void drawParticles();
+void drawParticlesAndBox();
 void draw(int argc, char *argv[]);
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
 int getParticleUnderClick();

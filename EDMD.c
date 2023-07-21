@@ -5,6 +5,9 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
+#ifndef G
+#define G 1
+#endif
 
 #define MAX_BATCH_ELEMENTS  8192
 
@@ -17,15 +20,14 @@
 #define UPDATE 5
 #define OUT 8
 #define IN 7
+#define GROWSTOP 9
 
-
-#define GREEN printf("\033[1;32m")
-#define WHITE printf("\033[0;37m")
-#define CYAN printf("\033[1;96m")
+#define CGREEN printf("\033[1;32m")
+#define CWHITE printf("\033[0;37m")
+#define CCYAN printf("\033[1;96m")
 
 #define ERROR 0
 
-#define G 1
 
 #if G
 #define qN 200
@@ -35,6 +37,8 @@
 //Values if no load file
 int N = 100;
 double phi = 0.1;
+double sizeratio = 1;
+double fractionSmallN = 0;
 
 int Nbig, Nsmall;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep;
@@ -94,7 +98,7 @@ double nextScreen = -1;
 
 
 #if G
-bool addWell = 1;
+bool addWell = true;
 bool addField = 0;
 int noise = 1;
 int addWally = 0;
@@ -135,9 +139,11 @@ const int addMidWall = 0;
 //add a circular wall
 
 
-
-
-
+void (*collisionEvent)(int);
+void (*doTheCollision)(void);
+void (*freeFly)(particle*);
+void (*doTheWall)(void);
+void (*crossingEvent)(int);
 
 //if noise use euler solver
 const int euler = 0;
@@ -183,7 +189,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.1;
-double T = 0.1;
+double T = 0.01;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -192,7 +198,7 @@ double dtnoise = 0.3;
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
 double updateTime = 100;
 double updateTimeMax = 2000;
-
+double vr = 0.03;
 
 
 double sizeRat;
@@ -216,21 +222,22 @@ node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
 
-pthread_t mainThread;
-#if  G
-int screenWidth;
-int screenHeight;
+
+#if G
+int screenWidth = 1800;
+int screenHeight = 900;
 double factor;
 int start;
 double xGUI = 1;
 double yGUI = 1;
 
 int leftClicked = 0;
-int rightClicked = 0;
+int selected = 0;
 particle* particleUnderClick = NULL;
 Camera2D cam = {0};
 
-Color particleColor = MAROON;
+Color particleArray[2] = {GRAY, MAROON};
+Color particleColor;
 bool colorEditing = false;
 int colorParam = 0;
 bool colorEditing2 = false;
@@ -239,8 +246,8 @@ Color* colorArray = Plasma;
 double (*colorFunction)(particle*);
 double* colorFunctionArray;
 
-double qx[qN];
-float structFactor[qN][qN];
+double qx[qN] = {0};
+float structFactor[qN][qN] = {0};
 bool structFactorActivated = 0;
 position* positions;
 int counter = 0;
@@ -260,52 +267,14 @@ bool wallEditing = false;
 int wallParam = 0;
 
 int nSym = 6;
-
 #endif
 
-typedef struct arguments arguments;
-struct arguments{
-	int argc;
-	char **argv;
-};
-
 void* computeEvolution(void *arg){
-	#if  G
-	dtime = 1;
-	res = 1;
-	sig = 2;
-	U = -0.15;
-	gamm = 0.1;
-	T = 0.01;
-	Einit = 0.01;
-	dtnoise = 1;
-	load = 0;
-	N = 2000;
-	phi = 0.5;
-	field = -0.001;
-	colorFunction = &colorCollision;
-	screenWidth = 1800;
-    screenHeight = 900;
-
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
-    InitWindow(screenWidth, screenHeight, "EDMD");
-	image = GenImageColor(qN, qN, BLANK);
-
-    image.data = structFactor;
-	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
-
-    texture = LoadTextureFromImage(image);
-
-	cam.zoom = 1;
-
-	for (int i = 0; i < qN; i++){
-		qx[i] = -10 + 20.0*i/(double)qN;
-	}
-	start = GetScreenHeight();
-	threadPoolInit();
-
-	SetTargetFPS(144);
+	
+	#if G
+	graphicalInit();
 	#endif
+
 	arguments* argument = (arguments*)arg;
 	int argc = argument->argc;
 	char** argv = argument->argv;
@@ -314,12 +283,14 @@ void* computeEvolution(void *arg){
 	runningCheck();
 	particlesInit();
 	cellListInit();
-	if (addWell)
+	if (addWell){
 		pairsInit();
+	}
 	eventListInit();
 	physicalQ();
 	format();
 	#if G != 1
+	customName();
 	fichier = fopen(fileName, "w");
 	if ((ther) || (addWallx) || (addWally)){
 		thermo = fopen(thermoName, "w");
@@ -329,14 +300,11 @@ void* computeEvolution(void *arg){
 	while (!WindowShouldClose()){
 		if (running){
 	#endif
+
 			nextEvent = findNextEvent();
-			
-			//if (nextEvent->t - t < -0.0001){
-			//	printf("event: %lf %d %d\n", nextEvent->t - t, nextEvent->type, nextEvent->i);
-			//	exit(3);
-			//}
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
+
 			switch(nextEvent->type){
 				case COLLISION:
 					doTheCollision();
@@ -380,6 +348,9 @@ void* computeEvolution(void *arg){
 				case OUT:
 					doOut();
 					break;
+				case GROWSTOP:
+					stopGrow();				
+					break;
 			}
 		#if G
 		}
@@ -407,10 +378,11 @@ int main(int argc, char *argv[]){
 
 	
 	init_genrand(666);
-	
-	pthread_create(&mainThread, NULL, computeEvolution, &(arguments){argc, argv});
-	pthread_join(mainThread, NULL);
+	pthread_t mainThread;
 
+	pthread_create(&mainThread, NULL, computeEvolution,&(arguments){argc, argv});
+	pthread_join(mainThread, NULL);
+	//computeEvolution(&(arguments){argc, argv});
 
 	return 0;
 }
@@ -474,13 +446,15 @@ void constantInit(int argc, char *argv[]){
 		{"well-radius", required_argument, NULL, 'R'},
 		{"field", required_argument, NULL, 'f'},
 		{"ts", required_argument, NULL, 's'},
+		{"xs", required_argument, NULL, 'x'},
+		{"sizeratio", required_argument, NULL, 'q'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -497,6 +471,14 @@ void constantInit(int argc, char *argv[]){
 			case 'p':
 				load = 0;
 				sscanf(optarg, "%lf", &phi);
+				break;
+			case 'x':
+				load = 0;
+				sscanf(optarg, "%lf", &fractionSmallN);
+				break;
+			case 'q':
+				load = 0;
+				sscanf(optarg, "%lf", &sizeratio);
 				break;
 			case 'r':
 				sscanf(optarg, "%lf", &res);
@@ -551,9 +533,11 @@ void constantInit(int argc, char *argv[]){
 	}
 	else{
 		if (addCircularWall){
-			N = (4/M_PI)*N;
+			Lx = sqrt(4*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
 		}
-		Lx = sqrt(M_PI*N/phi);
+		else{
+			Lx = sqrt(M_PI*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
+		}
 		Ly = Lx;
 	}
 
@@ -563,11 +547,13 @@ void constantInit(int argc, char *argv[]){
 		nextScreen = dtime;
 	if (firstScreen == -1)
 		firstScreen = tmax - 1;
-
+	if (load == 0){
+		tmax += 1/vr;
+	}
 	boxConstantHelper();
 
-	#if G == 1
-	factor = GetScreenHeight()/Ly;
+	#if G
+	factor = screenHeight/Ly;
 	#endif
 }
 
@@ -600,109 +586,57 @@ void particlesInit(){
 		}
 		fclose(file);
 		Nsmall = N - Nbig;
+		sizeratio = particles[N-1].rad;
 	}
 	else{
-		Nbig = N;
-		Nsmall = 0;
-		double x = 1.001;
-		double y = 1.001;
+		Nsmall= (int)(N*fractionSmallN);
+		Nbig = N - Nsmall;
+
+		
 		particle* p;
-		int j = 0;
-		int sqrtN = (int)ceil(sqrt((double)N)) ;
-		while (i < N){
+		for (int i = 0; i < N; i++){
 			p = particles + i;
-			p->x = x*(Lx - 1)/(sqrtN*2)*0.999;
-			p->y = y*(Lx - 1)/(sqrtN*2)*0.999;
-			p->m = 1;
+			if (addCircularWall){
+				do{
+					p->x = drand(0.1, Lx - 0.1); //0.1 for walls if walls but not necessary...
+					p->y = drand(0.1, Ly - 0.1);
+				}
+				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > 0.2*halfLx*halfLx); //0.2 because so cool effect !!
+			}
+			else{
+				p->x = drand(0.1, Lx - 0.1); //0.1 for walls if walls but not necessary...
+				p->y = drand(0.1, Ly - 0.1);
+			}
+			p->num = i;
+			p->rad = 0;
+			if (i < Nbig){
+				p->type = 1;
+				p->m = 1;
+			}
+			else{
+				p->type = 0;
+				p->m = pow(sizeratio, 3);
+			}
+			
+			p->t = 0;
+			p->coll = 0;
+
 			double U1 = drand(0, 1);
 			double U2 = drand(0, 1);
 			p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
 			p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
-			p->num = i;
-			p->rad = 1;
-			p->type = 1;
-			p->t = 0;
-			p->coll = 0;
 
 			p->lastColl = 0;
-			i++;
-			x += 2 + 0.001;
-			if (i%sqrtN == 0){
-				j++;
-				y += 2;
-				if (j%2 == 0){
-					x = 1;
-				}
-				else{
-					x = 2;
-				} 
-			}
 		}
 	}
 
-	sizeRat = particles[N-1].rad;
 	if (load == 1){
 		if (addCircularWall)
-			phi = (sizeRat*sizeRat*Nsmall + Nbig)/(halfLx*halfLx);
+			phi = (sizeratio*sizeratio*Nsmall + Nbig)/(halfLx*halfLx);
 		else
-			phi = M_PI*(sizeRat*sizeRat*Nsmall + Nbig)/(Lx*Ly);
+			phi = M_PI*(sizeratio*sizeratio*Nsmall + Nbig)/(Lx*Ly);
 	}
-	customName();
-
-	if ((addCircularWall) && (load == 0)){
-		particle* particlesTemp = calloc(N, sizeof(particle));
-		int count = 0;
-		for(int i  = 0; i < N; i++){
-			particle* p = particles + i;
-			if (pow(p->x - Lx/2, 2) + pow(p->y - Ly/2, 2) < (Lx - 2.01*p->rad)*(Lx - 2.01*p->rad)/4){
-				p->num = count;
-				particlesTemp[count] = *p;
-				
-				count++;
-			}
-		}
-		N = count;
-		free(particles);
-		particles = realloc(particlesTemp, N*sizeof(particle));
-		paulListN = N;
-		dtPaul = 100/(double)N;
-	}
-
-	if (addCircularWall != 1){
-		physicalQ();
-		for (int i = 0; i < N; i++){
-			particles[i].vx -= px/(N*particles[i].m);
-			particles[i].vy -= py/(N*particles[i].m);
-		}
-	}
-	else{
-
-		double dvT = 0;
-		double dvM = 0;
-		for (int i = 0; i < N; i ++){
-			particle* p = particles + i;
-			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
-			dvT -= p->m*(-p->vx*(p->y - halfLx) + p->vy*(p->x - halfLx));
-			dvM += p->m*r;
-		}
-
-		double dv = dvT/dvM;
-
-		for(int i = 0; i < N; i++){
-			particle* p = particles + i;
-			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
-			p->vx += -dv*(p->y - halfLx)/r;
-			p->vy += dv*(p->x - halfLx)/r;
-		}
-	}
-
-
-	physicalQ();
-	for (int i = 0; i < N; i++){
-		particles[i].vx /= sqrt(E/N/Einit);
-		particles[i].vy /= sqrt(E/N/Einit);
-	}
-
+	
 }
 
 
@@ -798,6 +732,11 @@ void eventListInit(){
 	root->lft = NULL;
 	root->top = NULL;
 
+	collisionEvent = &collisionEventGrow;
+	doTheCollision = &doTheCollisionGrow;
+	freeFly = &freeFlyGrow;
+	doTheWall = &doTheWallGrow;
+	crossingEvent = &crossingEventGrow;
 
 	for (int i = 0; i < N; i++){
 		eventList[i]->i = i;
@@ -807,18 +746,27 @@ void eventListInit(){
 	}
 
 
-	addEventScreenshot(firstScreen);
+	
+	
 
 	
 	#if G != 1
 	addEventThermo(dtimeThermo);
+	if (load == 0){
+		if (firstScreen < 1/vr){
+			firstScreen = 1/vr + 0.00000001;
+		}
+	}
 	#endif
+	if (load == 0){
+		addEventGrow(1/vr);
+	}
+	addEventScreenshot(firstScreen);
 	if (noise)
 		addEventNoise(dtnoise);
 	if (updating)
 		addEventUpdate(updateTime);
-
-
+	
 
 }
 
@@ -1099,7 +1047,47 @@ node* findNextEvent(){
 
 
 
-void crossingEvent(int i){
+void crossingEventGrow(int i){
+
+	particle p = particles[i];
+	double travelTimeX = 10000000;
+	double travelTimeY = 10000000;
+
+	int xx;
+	int yy = 1;
+
+	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
+	//printf("p: %d %lf |||", p.num, p.vx);
+	if (p.vx < 0){
+		travelTimeX = PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx;
+		xx = 1;
+		
+	}
+	else{
+		travelTimeX = PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx;
+		xx = 2;
+		
+	}
+
+		
+
+	if (p.vy < 0){
+		travelTimeY = PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy;
+		yy = 3;
+	}
+	else{
+		travelTimeY = PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy;
+		yy = 4;
+	}
+	
+
+	if (travelTimeX < travelTimeY)
+		addCrossingEvent(i, xx, t + travelTimeX);
+	else
+		addCrossingEvent(i, yy, t + travelTimeY);
+}
+
+void crossingEventNormal(int i){
 
 	particle p = particles[i];
 	double travelTimeX = 10000000;
@@ -1154,7 +1142,6 @@ void crossingEvent(int i){
 	else
 		addCrossingEvent(i, yy, t + travelTimeY);
 }
-
 /* ---------------------------------------------
 	Creates the crossing event and adds it
 	to the BST.
@@ -1238,9 +1225,56 @@ void doTheCrossing(){
 	Calculates the time of collision
 	of p1 and p2
 --------------------------------------- */
-double collisionTime(particle* p1, particle* p2){
+double collisionTimeGrow(particle* p1, particle* p2){
 
-	//return 10000000; //to deactivate collisions
+
+	if ((damping == 1) || (addField == 1)){
+		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
+	}   
+
+	double lat2 = t - p2->t;
+
+	double dvx = p2->vx - p1->vx;
+	double dvy = p2->vy - p1->vy;
+	double vr1 = vr;
+	double vr2 = vr;
+	if (p1->type == 0){
+		vr1 = vr*sizeratio;
+	}
+	if (p2->type == 0){
+		vr2 = vr*sizeratio;
+	}
+	double dvr = vr1 + vr2;
+	double dx = (p2->x + lat2*p2->vx) - p1->x;
+	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*vr));
+	PBC(&dx, &dy);
+	double b = dx*dvx + dy*dvy - dvr*dr;
+
+	//no collision.
+	if (b > 0)
+		return 1000000000000;
+
+
+	double v2 = dvx*dvx + dvy*dvy;
+	double distOfSquare = dx*dx + dy*dy;
+	double det = pow(b, 2) - (v2 - dvr*dvr)*(distOfSquare - dr*dr);
+
+
+	//to delete when confident with life decisions...
+	if (distOfSquare < -0.01){
+		printf("\nERROR:\033[0;31m Overlaps detected between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
+		exit(3);
+	}
+
+	if (det < 0)
+		return 1000000000000;
+	return logTime((-b - sqrt(det))/(v2 - dvr*dvr));
+
+}
+
+double collisionTime(particle* p1, particle* p2){
+	
 
 	if ((damping == 1) || (addField == 1)){
 		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
@@ -1346,7 +1380,7 @@ double separateTime(particle* p1, particle* p2){
 	by calculating collision time of i with
 	its surrouding (using the cellList)
 --------------------------------------------- */
-void collisionEvent(int i){
+void collisionEventNormal(int i){
 	int finalPartner = 0;
 	double dt = 10000000;
 	int type = COLLISION;
@@ -1498,6 +1532,109 @@ void collisionEvent(int i){
 
 }
 
+void collisionEventGrow(int i){
+	int finalPartner = 0;
+	double dt = 10000000;
+	int type = COLLISION;
+	particle* p1 = particles + i;
+	int X = p1->cell[0];
+	int Y = p1->cell[1];
+	int xy = 2;
+	double dtTemp;
+	int typeTemp;
+
+
+	double vrParticle;
+	if (p1->type == 0){
+		vrParticle = vr*sizeratio;
+	}
+	else{
+		vrParticle = vr;
+	}
+	
+	if (addWally){
+		double vyPlus = p1->vy + vrParticle;
+		double vyMinus = p1->vy - vrParticle;
+		if ((Y == 0) && (vyMinus < 0)){
+			dt = logTime(-(p1->y - p1->rad)/vyMinus);
+			type = WALL;
+			xy = 1;
+			}
+		else if ((Y == Nycells - 1) && (vyPlus > 0)){
+
+			dt = logTime((Ly - p1->y - p1->rad)/vyPlus);
+			type = WALL;
+			xy = 1;
+		}
+	}
+	if (addWallx){
+		double vxPlus = p1->vx + vrParticle;
+		double vxMinus = p1->vx - vrParticle;
+		if ((X == 0) && (p1->vx < 0)){
+			dtTemp = logTime(-(p1->x - p1->rad)/vxMinus);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
+
+		else if ((X == Nxcells - 1) && (vxPlus > 0)){
+
+			dtTemp = logTime((Lx - p1->x - p1->rad)/vxPlus);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
+	}
+
+	if (addCircularWall){
+		
+			double y0 = p1->y - halfLx;
+			double x0 = p1->x - halfLx;
+			double v0x = p1->vx;
+			double v0y = p1->vy;
+			double rad = p1->rad;
+
+			double A = v0x*v0x + v0y*v0y - vrParticle*vrParticle;
+			double B = 2*(v0x*x0 + v0y*y0 + (halfLx - rad)*vrParticle);
+			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
+			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
+			type = WALL;
+			xy = 2;
+
+	}
+
+	for (int j = -1; j <= 1; j++){
+		for (int k = -1; k <= 1; k++){
+			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+				if (p1->num != p2->num){
+					dtTemp = collisionTimeGrow(p1, p2);
+					typeTemp = COLLISION;
+					
+
+			 		if (dt > dtTemp){ //get min
+						finalPartner = p2->num;
+						dt = dtTemp;
+						type = typeTemp;
+					}
+				}
+				p2 = p2->nxt;
+	 		}
+	 	}
+	}
+	//printf("%lf %d\n", dt, type);
+	if (type == COLLISION){
+		addCollisionEvent(i, finalPartner, t + dt);
+	}
+	else
+		addWallEvent(i, xy, t + dt);
+
+}
+
 
 /* ---------------------------------------------
 	Updates the Well List
@@ -1564,6 +1701,7 @@ void addOutEvent(int i, int j, double tColl){
 	toAdd->collActual = particles[j].coll; //the collision trick of the article
 	addEventToQueue(toAdd);
 }
+
 void addWallEvent(int i, int xy, double tColl){
 	node* toAdd;
 
@@ -1575,7 +1713,59 @@ void addWallEvent(int i, int xy, double tColl){
 	addEventToQueue(toAdd);
 }
 
-void doTheWall(){
+
+void doTheWallGrow(){
+	int i = nextEvent->i;
+	int xy = nextEvent->j;
+	ncol++;
+	particle* pi = particles + i;
+	freeFly(pi);
+
+
+	//hacky
+	if (xy == 0){
+		if (pi->x + 2 > Lx - 5){
+			pi->vx = -5;
+		}
+		else{
+			pi->vx = 5;
+		}
+	}
+	else if (xy == 1){
+		dp += fabs((resW + 1)*pi->m*pi->vy);
+
+		//pi->vy = -resW*pi->vy;
+		if (pi->y > Ly - 5){
+			pi->vy = -5;
+		}
+		else{
+			pi->vy = 5;
+		}
+		//pi->vy += ((pi->vy > 0) - (pi->vy < 0))*vr;
+
+	}
+	else{
+		double theta = atan2(pi->y - halfLx, pi->x - halfLx);
+		double nx = cos(theta);
+		double ny = sin(theta);
+		double vx = pi->vx;
+		double vy = pi->vy;
+		double signvx = (vx < 0) ? -1 : (vx > 0);
+		double signvy = (vy < 0) ? -1 : (vy > 0);
+		double mix = -(1 + resW)*(signvx*5*nx + signvy*5*ny);
+
+		pi->vx = mix*nx;
+		pi->vy = mix*ny;
+		dp += fabs(pi->m*mix);
+	}
+
+	pi->coll++;
+	removeEventFromQueue(eventList[i]);
+	crossingEvent(i);
+	collisionEvent(i);
+}
+
+void doTheWallNormal(){
 	int i = nextEvent->i;
 	int xy = nextEvent->j;
 	ncol++;
@@ -1633,11 +1823,13 @@ void doTheWall(){
 	crossingEvent(i);
 	collisionEvent(i);
 }
-
 /* -----------------------------------
 	Performs the collision event
 ----------------------------------- */
-void doTheCollision(){
+void doTheCollisionGrow(){
+
+	double delta = 0.03;
+	double res = 0.8;
 
 	int i = nextEvent->i;
 	int j = nextEvent->j;
@@ -1646,22 +1838,97 @@ void doTheCollision(){
 	particle* pj = particles + j;
 
 
-	freeFly(pi); //might put it on top?
+	freeFly(pi);
 	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
         collisionEvent(i);
         return;
     }
 
-	/*
-    if ((pi->type == 1) && (pj->type == 1)){
-    	ncolbb += 1;
+    ncol++;
+	freeFly(pj);
+
+	pi->coll++;
+	pj->coll++;
+
+	double dx = pj->x - pi->x;
+	double dy = pj->y - pi->y;
+	double dr = 2*sqrt(pi->rad*pj->rad);
+
+	double dvx = pj->vx - pi->vx;
+	double dvy = pj->vy - pi->vy;
+	double vri = vr;
+	double vrj = vr;
+	if (pi->type == 0){
+		vri = vr*sizeratio;
+	}
+	if (pj->type == 0){
+		vrj = vr*sizeratio;
+	}
+	double dvr = vri + vrj;
+
+
+	PBC(&dx, &dy);
+
+
+
+	if (addExpo)
+		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
+
+	double invMass = 1/(pi->m + pj->m);
+	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy - dr*dvr);
+
+
+
+	collTerm += pi->m*pj->m*collKernel;
+	
+
+	dist = sqrt(dx*dx + dy*dy);
+	collTerm -= pi->m*pj->m*invMass*2*delta*dist;
+	dxr = dx/dist;
+	dyr = dy/dist;
+	
+
+
+	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
+
+
+
+
+
+	pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
+	pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
+	pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
+	pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
+
+
+    pi->lastColl = t;
+    pj->lastColl = t;
+	//recomputes crossing and collision of pi and pj
+	removeEventFromQueue(eventList[i]);
+	removeEventFromQueue(eventList[j]);
+	crossingEvent(i);
+	crossingEvent(j);
+
+	removeEventFromQueue(eventList[N + j]);
+	collisionEvent(i);
+	collisionEvent(j);
+}
+
+void doTheCollisionNormal(){
+
+	int i = nextEvent->i;
+	int j = nextEvent->j;
+
+	particle* pi = particles + i;
+	particle* pj = particles + j;
+
+
+	freeFly(pi); 
+	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
+        collisionEvent(i);
+        return;
     }
-    else if ((pi->type == 0) && (pj->type == 0)){
-    	ncolss += 1;
-    }
-    else{
-    	ncolsb += 1;
-    }*/
+
     ncol++;
 	freeFly(pj);
 
@@ -1965,7 +2232,7 @@ void addEventThermo(double tscreen){
 	the system. Also schedules a new
 	screenshot event.
 --------------------------------------------- */
-void takeAScreenshot(int argc, char *argv[]){
+void takeAScreenshot(int argc __attribute__((unused)), char *argv[]__attribute__((unused))){
 
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
@@ -2007,7 +2274,7 @@ void printInfo(){
 	int size = 29;
 	int place = (int)(size*t)/(int)tmax;
 	printf("\r│\033[1;32m%.2e\033[0;37m/%.2e ", t, tmax);
-	CYAN;
+	CCYAN;
 	for (int i = 0; i < size; i++){
 		if (i < place - 1)
 			printf("█");
@@ -2020,12 +2287,58 @@ void printInfo(){
 		else
 			printf(" ");
 	}
-	WHITE;
+	CWHITE;
 	
 
 
 	printf(" │ n° coll = \033[1;32m%.2e\033[0;37m  Energy = \033[1;32m%.3lf\033[0;37m  Pressure = \033[1;32m%.3lf\033[0;37m │", (float)ncol, E/N, pressure);
 
+}
+
+void stopGrow(){
+	particle* p;
+	for (int i = 0; i < N; i++){
+		p = particles + i;
+		freeFly(p);
+		p->coll = 0;
+		ncol = 0;
+		ncross = 0;
+		p = 0;
+	}
+	collisionEvent = &collisionEventNormal;
+	doTheCollision = &doTheCollisionNormal;
+	freeFly = &freeFlyNormal;
+	doTheWall = &doTheWallNormal;
+	crossingEvent = &crossingEventNormal;
+	normalizePhysicalQ();
+	
+	if (addWell){
+		for (int i  = 0; i < N; i++){
+			p = particles + i;
+			free(p->particlesInWell);
+		} 
+		pairsInit();
+	}
+	
+
+	
+	for (int i = 0; i < N; i++){
+		p = particles + i;
+		p->coll++;
+		removeEventFromQueue(eventList[N + p->num]);
+		collisionEvent(p->num);
+		removeEventFromQueue(eventList[p->num]);
+		crossingEvent(p->num);
+	}
+}
+
+void addEventGrow(double time){
+	node* toAdd;
+	toAdd = eventList[2*N + 5];
+	toAdd->type = GROWSTOP;
+	toAdd->t = time;
+	toAdd->j = 0; 
+	addEventToQueue(toAdd);
 }
 /* ---------------------------------------------
 	Creates the event responsible for
@@ -2105,7 +2418,7 @@ void updateT(){
 /--------------------------------*/
 
 
-void freeFly(particle* p){
+void freeFlyNormal(particle* p){
     double dt = t - p->t;
     p->t = t;
 	if (addField == 1){
@@ -2123,12 +2436,27 @@ void freeFly(particle* p){
 	else{
 		p->x += dt*p->vx;
 		p->y += dt*p->vy;
+		
 	}
 
 	PBCpost(&(p->x), 1);
 	PBCpost(&(p->y), 0);
 }
 
+void freeFlyGrow(particle* p){
+    double dt = t - p->t;
+    p->t = t;
+
+	p->x += dt*p->vx;
+	p->y += dt*p->vy;
+	if (p->type == 0)
+		p->rad += sizeratio*dt*vr;
+	else{
+		p->rad += dt*vr;
+	}
+	PBCpost(&(p->x), 1);
+	PBCpost(&(p->y), 0);
+}
 
 void saveTXT(){
 	if (reduce){
@@ -2254,6 +2582,43 @@ inline double logTime(double time){
 		return time;
 }
 
+void normalizePhysicalQ(){
+	if (addCircularWall != 1){
+		physicalQ();
+		for (int i = 0; i < N; i++){
+			particles[i].vx -= px/(N*particles[i].m);
+			particles[i].vy -= py/(N*particles[i].m);
+		}
+	}
+	else{
+
+		double dvT = 0;
+		double dvM = 0;
+		for (int i = 0; i < N; i ++){
+			particle* p = particles + i;
+			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
+			dvT -= p->m*(-p->vx*(p->y - halfLx) + p->vy*(p->x - halfLx));
+			dvM += p->m*r;
+		}
+
+		double dv = dvT/dvM;
+
+		for(int i = 0; i < N; i++){
+			particle* p = particles + i;
+			double r = sqrt((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLx)*(p->y - halfLx));
+			p->vx += -dv*(p->y - halfLx)/r;
+			p->vy += dv*(p->x - halfLx)/r;
+		}
+	}
+
+
+	physicalQ();
+	for (int i = 0; i < N; i++){
+		particles[i].vx /= sqrt(E/N/Einit);
+		particles[i].vy /= sqrt(E/N/Einit);
+	}
+}
+
 void randomGaussian(particle* p){
 	double u1 = genrand_real3();
 	double u2 = genrand_real3();
@@ -2353,12 +2718,12 @@ void physicalQ(){
 void customName(){
 	mkdir("dump/", 0777);
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, ts, phi, sizeRat, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){
@@ -2382,7 +2747,7 @@ double resCoeff(double v){
 
 void format(){
 	printf("BOUNDARY CONDITIONS: ");
-	GREEN;
+	CGREEN;
 	if ((addWallx) || (addWally)){
 		if (resW == 1)
 			printf("HARD WALLS");
@@ -2391,23 +2756,23 @@ void format(){
 		}
 	else
 		printf("PERIODICS");
-	WHITE;
+	CWHITE;
 	printf("\nTHERMOSTAT: ");
-	GREEN;
+	CGREEN;
 	if (noise)
 		printf("ON");
 	else
 		printf("OFF");
-	WHITE;
+	CWHITE;
 	printf("\nDISSIPATION: ");
-	GREEN;
+	CGREEN;
 	if ((res < 1) || (addExpo))
 		printf("ON");
 	else
 		printf("OFF");
-	WHITE;
+	CWHITE;
 	printf("\nCOLLISION ENERGY INPUT: ");
-	GREEN;
+	CGREEN;
 	if ((addDelta) && (addExpo))
 		printf("Δ AND e^");
 	else if (addExpo)
@@ -2416,15 +2781,15 @@ void format(){
 		printf("Δ");
 	else
 		printf("NONE");
-	WHITE;
+	CWHITE;
 	printf("\nBOX SHAPE: ");
-	GREEN;
+	CGREEN;
 	if (Lx == Ly)
 		printf("SQUARE");
 	else
 		printf("RECTANGULAR");
-	WHITE;
-	printf("\n┌───────────────────────────────────────────────────────────────────────────────────────────────────────┐\n│\t N = \033[1;32m%d\033[0;37m Δt = \033[1;32m%.3lf\033[0;37m α = \033[1;32m%.3lf\033[0;37m γ = \033[1;32m%.3lf\033[0;37m T = \033[1;32m%.3lf\033[0;37m Φ = \033[1;32m%.3lf\033[0;37m rat = \033[1;32m%.3lf\033[0;37m L = \033[1;32m%.3lf\033[0;37m\t\t│ \n├────────────────────────────────────────────────┬──────────────────────────────────────────────────────┤\n", N, dtnoise, res, gamm, T, phi, sizeRat, Lx);
+	CWHITE;
+	printf("\n┌───────────────────────────────────────────────────────────────────────────────────────────────────────┐\n│\t N = \033[1;32m%d\033[0;37m Δt = \033[1;32m%.3lf\033[0;37m α = \033[1;32m%.3lf\033[0;37m γ = \033[1;32m%.3lf\033[0;37m T = \033[1;32m%.3lf\033[0;37m Φ = \033[1;32m%.3lf\033[0;37m rat = \033[1;32m%.3lf\033[0;37m L = \033[1;32m%.3lf\033[0;37m\t\t│ \n├────────────────────────────────────────────────┬──────────────────────────────────────────────────────┤\n", N, dtnoise, res, gamm, T, phi, sizeratio, Lx);
 }
 
 void printClose(){
@@ -2548,17 +2913,17 @@ void getInput(){
 
 
 	if (IsKeyPressed(KEY_F)){
-			if (!IsWindowFullscreen()){
-				int display = GetCurrentMonitor();
-				factor = GetMonitorHeight(display)/Lx;
-				start = GetMonitorHeight(display);
-				xGUI = GetMonitorWidth(display)/1800.;
-				yGUI = GetMonitorHeight(display)/900.;
-				
-				SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
-				
-				//ToggleFullscreen();
-			}    
+		if (!IsWindowFullscreen()){
+			int display = GetCurrentMonitor();
+			factor = GetMonitorHeight(display)/Lx;
+			start = GetMonitorHeight(display);
+			xGUI = GetMonitorWidth(display)/1800.;
+			yGUI = GetMonitorHeight(display)/900.;
+			
+			SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
+			
+			//ToggleFullscreen();
+		}    
     }
 
 	float wheel = GetMouseWheelMove();
@@ -2618,9 +2983,10 @@ void getInput(){
 			if (resultat == 1){
 				GuiLock();
 				leftClicked = 1;
+				selected = 1;
 			}
 			else if (resultat == 0){
-				rightClicked = 0;
+				selected = 0;
 			}
 		}
 	}
@@ -2628,9 +2994,7 @@ void getInput(){
 		GuiUnlock();
 		leftClicked = 0;
 	}
-	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
-		rightClicked = getParticleUnderClick();
-	}
+
 }
 
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue){
@@ -2659,14 +3023,17 @@ void drawParticlesAndBox(){
 			max += 1;
 		}
 	}
-	for (int i = 0; i < N; i++){	
+	for (int i = N - 1; i > 0; i--){	
 		if (colorParam2 != 0){
 			particleColor = colorSelect((colorFunctionArray[i] - min)/(max - min));
+		}
+		else{
+			particleColor = particleArray[particles[i].type];
 		}
 		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, particleColor);
 		
 	}
-	if (rightClicked){
+	if (selected){
 		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
 	}
 	if (addWallx){
@@ -2700,7 +3067,7 @@ void draw(int argc, char *argv[]){
 
 	DrawRectangle(start, 0, GetScreenWidth() - GetScreenHeight(), GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
 
-	if (rightClicked){
+	if (selected){
 		int changes = 0;
 		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40*xGUI, 800*yGUI, 120*xGUI, 24*yGUI});
 		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40*xGUI, 824*yGUI, 120*xGUI, 24*yGUI});
@@ -2892,7 +3259,7 @@ void draw(int argc, char *argv[]){
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){ start  + 100*xGUI, 640*yGUI, 200*xGUI, 50*yGUI}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
+	GuiSliderBar((Rectangle){ start  + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 5000.f);
 	if ((int)Ntemp != N){
 		if (structFactorActivated)
 			free(positions);
@@ -2905,10 +3272,22 @@ void draw(int argc, char *argv[]){
 			colorFunctionArray = calloc(N, sizeof(double));
 	}
 
+
+	double sizeratioTemp = sizeratio;
+	sprintf(name, "%.3lf", sizeratio);
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI}, "Sizeratio", name, &sizeratio, 0.25, 1);
+
+
+	double fractionSmallNTemp = fractionSmallN;
+	sprintf(name, "%.3lf", fractionSmallN);
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI}, "Frac. Of Small.", name, &fractionSmallN, 0, 1);
+
+	
+
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 50*yGUI}, "Packing fraction", name, &phi, 0.1, 0.7);
-	if (phiTemp != phi){
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.83);
+	if ((phiTemp != phi) || (fractionSmallNTemp != fractionSmallN) || (sizeratioTemp != sizeratio)){
 		if (structFactorActivated)
 			free(positions);
 		freeArrays();
@@ -2956,6 +3335,8 @@ void draw(int argc, char *argv[]){
 				if (addWell){
 					//To take care of the boundary conditions
 					for (int i = 0; i < N; i++){
+						particle* p = particles + i;
+						freeFly(p);
 						free(particles[i].particlesInWell);
 					}
 					pairsInit();
@@ -2979,9 +3360,9 @@ void draw(int argc, char *argv[]){
 	GuiCheckBox((Rectangle){start  + 500*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Struct. Factor", &structFactorActivated);
 	if (tempStruct != structFactorActivated){
 		if (structFactorActivated){
-			positions = calloc(N, sizeof(position));
+			positions = calloc((N - (int)(N*fractionSmallN)), sizeof(position));
 			#pragma omp parallel for
-			for (int i = 0; i < N; i++){
+			for (int i = 0; i < N - (int)(N*fractionSmallN); i++){
 				particle* p = particles + i;
 				positions[i].x = p->x;
 				positions[i].y = p->y;
@@ -3001,7 +3382,7 @@ void draw(int argc, char *argv[]){
 			//printf("time took await: %lf\n", time_spent);
 
 			//begin = clock();
-			for (int i = 0; i < N; i++){
+			for (int i = 0; i < N - (int)(N*fractionSmallN); i++){
 				particle* p = particles + i;
 				positions[i].x = p->x;
 				positions[i].y = p->y;
@@ -3063,8 +3444,8 @@ double colorBOOP(particle* p1){
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
 			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
-			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-				if (p1->num != p2->num){
+			while ((p2 != NULL) && (p2->type == 1)){ //while there is a particle in the doubly linked list of the cellList do...
+				if ((p1->num != p2->num) && (p1->type == 1)){
 					double dy = p1->y - p2->y;
 					double dx = p1->x - p2->x;
 					PBC(&dx, &dy);
@@ -3100,7 +3481,7 @@ void* computeStructureFactor(void* arg){
 			double im = 0;
 			double re = 0;
 
-			for (int n = 0; n < N; n++)
+			for (int n = 0; n < N - (int)(N*fractionSmallN); n++)
 			{
 				p = positions + n;
 				double qr = qx[i]*p->x + qx[j]*p->y;
@@ -3170,7 +3551,7 @@ void reset(int argc, char *argv[]){
 	ncross = 0;
 	paulTime = 0;
 	actualPaulList = 0;
-	rightClicked = 0;
+	selected = 0;
 	leftClicked = 0;
 	counter = 1;
 
@@ -3178,6 +3559,7 @@ void reset(int argc, char *argv[]){
 	constantInit(argc, argv);
 	particlesInit();
 	cellListInit();
+	//stupid allocation to be able to change sig and sigtemp in the graphical mode even though we don't need it yet!
 	if (addWell)
 		pairsInit();
 	
@@ -3185,7 +3567,7 @@ void reset(int argc, char *argv[]){
 	physicalQ();
 	format();
 	if (structFactorActivated){
-		positions = calloc(N, sizeof(position));
+		positions = calloc((N - (int)(N*fractionSmallN)), sizeof(position));
 
 		/*
 		Make the sim go laggy when changing N or phi continuously
@@ -3220,16 +3602,56 @@ int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
 	}
 	int conversion = sscanf(textBuffer, "%lf", ptr);
 	//awful dumb trick because sscanf "says" that the conversion is successful even when the number is -0
-	if (conversion == 1){
-		if (*ptr == -0.0 && textBuffer[0] == '-'){
-            *ptr = 0.0;
-        }
 
+	if (*ptr == -0.0){
+			//for some reason *ptr = 0 doesn't work :) the compiler might optimize it out
+            *ptr = 0.000000000000000001;
+    }
+
+	if (conversion == 1){
 		return 1;
 	}
 	else{
 		sscanf(textBuffer2, "%lf", ptr);
 		return 0;
 	}
+}
+
+void graphicalInit(){
+
+	dtime = 1;
+	res = 1;
+	sig = 1.5;
+	U = -0.15;
+	gamm = 0.1;
+	T = 0.01;
+	Einit = 0.01;
+	dtnoise = 1;
+	load = 0;
+	N = 2000;
+	phi = 0.5;
+	field = -0.001;
+	firstScreen = 0;
+	colorFunction = &colorCollision;
+
+
+	cam.zoom = 1;
+
+	for (int i = 0; i < qN; i++){
+		qx[i] = -10 + 20.0*i/(double)qN;
+	}
+	
+	threadPoolInit();
+
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    InitWindow(screenWidth, screenHeight, "EDMD");
+	SetTargetFPS(144);
+	start = GetScreenHeight();
+	image = GenImageColor(qN, qN, BLANK);
+	image.data = structFactor;
+	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
+	texture = LoadTextureFromImage(image);
+
+
 }
 #endif

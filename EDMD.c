@@ -1,6 +1,8 @@
 #include "EDMD.h"
-#include "mersenne.c"
-                
+#include "mersenne.c" 
+#include "quartic.c" 
+
+
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
 #endif
@@ -106,11 +108,11 @@ int addWallx = 0;
 int addCircularWall = 0;
 #else
 const int addWell = 0;
-const int addField = 0;
+const int addField = 1;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
-const int addCircularWall = 0;
+const int addCircularWall = 1;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -176,7 +178,7 @@ double sig = 2;
 double U = -1;
 
 //value for the field, must be < 0
-double field = -0.6; 
+double field = -0.1; 
 
 //Initial temperature
 double Einit = 1;
@@ -629,6 +631,13 @@ void particlesInit(){
 			p->lastColl = 0;
 		}
 	}
+	
+
+	normalizePhysicalQ();
+	particles[0].x = halfLx;
+	particles[0].y = halfLx;
+	particles[0].vx = 1;
+	particles[0].vy = 0;
 
 	if (load == 1){
 		if (addCircularWall)
@@ -732,24 +741,6 @@ void eventListInit(){
 	root->lft = NULL;
 	root->top = NULL;
 
-	collisionEvent = &collisionEventGrow;
-	doTheCollision = &doTheCollisionGrow;
-	freeFly = &freeFlyGrow;
-	doTheWall = &doTheWallGrow;
-	crossingEvent = &crossingEventGrow;
-
-	for (int i = 0; i < N; i++){
-		eventList[i]->i = i;
-		eventList[N + i]->i = i;
-		crossingEvent(i);
-		collisionEvent(i);
-	}
-
-
-	
-	
-
-	
 	#if G != 1
 	addEventThermo(dtimeThermo);
 	if (load == 0){
@@ -760,12 +751,32 @@ void eventListInit(){
 	#endif
 	if (load == 0){
 		addEventGrow(1/vr);
+		collisionEvent = &collisionEventGrow;
+		doTheCollision = &doTheCollisionGrow;
+		freeFly = &freeFlyGrow;
+		doTheWall = &doTheWallGrow;
+		crossingEvent = &crossingEventGrow;
+
+	}
+	else{
+		collisionEvent = &collisionEventNormal;
+		doTheCollision = &doTheCollisionNormal;
+		freeFly = &freeFlyNormal;
+		doTheWall = &doTheWallNormal;
+		crossingEvent = &crossingEventNormal;
 	}
 	addEventScreenshot(firstScreen);
 	if (noise)
 		addEventNoise(dtnoise);
 	if (updating)
 		addEventUpdate(updateTime);
+
+	for (int i = 0; i < N; i++){
+		eventList[i]->i = i;
+		eventList[N + i]->i = i;
+		crossingEvent(i);
+		collisionEvent(i);
+	}
 	
 
 }
@@ -1466,7 +1477,24 @@ void collisionEventNormal(int i){
 
 
 	if (addCircularWall){
-		
+		if (addField){
+			double y0 = p1->y - halfLy;
+			double x0 = p1->x - halfLx;
+			double v0x = p1->vx;
+			double v0y = p1->vy;
+			double rad = p1->rad;
+
+			double a = field*field/4;
+			double b = field*v0y;
+			double c = v0x*v0x + v0y*v0y + field*y0;
+			double d = 2*v0x*x0 + 2*v0y*y0;
+			double e = x0*x0 + y0*y0 - (halfLx - rad)*(halfLx - rad);
+			dt = smallestRoot(a, b, c, d, e);
+			xy = 2;	
+			type = WALL;
+				
+		}	
+		else{
 			double y0 = p1->y - halfLx;
 			double x0 = p1->x - halfLx;
 			double v0x = p1->vx;
@@ -1479,7 +1507,7 @@ void collisionEventNormal(int i){
 			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
 			type = WALL;
 			xy = 2;
-
+		}
 	}
 
 	for (int j = -1; j <= 1; j++){
@@ -1527,8 +1555,9 @@ void collisionEventNormal(int i){
 		addOutEvent(i, finalPartner, t + dt);
 	else if (type == IN)
 		addInEvent(i, finalPartner, t + dt);
-	else
+	else{
 		addWallEvent(i, xy, t + dt);
+	}
 
 }
 
@@ -1812,7 +1841,6 @@ void doTheWallNormal(){
 		double nx = cos(theta);
 		double ny = sin(theta);
 		double mix = -(1 + resW)*(pi->vx*nx + pi->vy*ny);
-
 		pi->vx += mix*nx;
 		pi->vy += mix*ny;
 		dp += fabs(pi->m*mix);
@@ -3604,7 +3632,7 @@ int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
 	//awful dumb trick because sscanf "says" that the conversion is successful even when the number is -0
 
 	if (*ptr == -0.0){
-			//for some reason *ptr = 0 doesn't work :) the compiler might optimize it out
+			//for some reason *ptr = 0 doesn't work :) the compiler optimize it out with -Ofast
             *ptr = 0.000000000000000001;
     }
 

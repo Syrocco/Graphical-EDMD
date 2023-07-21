@@ -8,5 +8,5 @@ else
 endif
 
 EDMD: EDMD.c
-	$(CC) EDMD.c $(CFLAGS) -DG=$(G)
+	$(CC) EDMD.c quartic_real.c $(CFLAGS) -g -DG=$(G)
 

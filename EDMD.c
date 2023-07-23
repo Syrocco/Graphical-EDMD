@@ -2,7 +2,6 @@
 #include "mersenne.c" 
 #include "quartic.c" 
 
-
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
 #endif
@@ -304,9 +303,12 @@ void* computeEvolution(void *arg){
 	#endif
 
 			nextEvent = findNextEvent();
+
+
+			double dtEventMerde = nextEvent->t - t;
+
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
-
 			switch(nextEvent->type){
 				case COLLISION:
 					doTheCollision();
@@ -593,21 +595,20 @@ void particlesInit(){
 	else{
 		Nsmall= (int)(N*fractionSmallN);
 		Nbig = N - Nsmall;
-
 		
 		particle* p;
 		for (int i = 0; i < N; i++){
 			p = particles + i;
 			if (addCircularWall){
 				do{
-					p->x = drand(0.1, Lx - 0.1); //0.1 for walls if walls but not necessary...
+					p->x = drand(0.1, Lx - 0.1);
 					p->y = drand(0.1, Ly - 0.1);
 				}
-				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > 0.2*halfLx*halfLx); //0.2 because so cool effect !!
+				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > 0.7*halfLx*halfLx); //0.2 because so cool effect !!
 			}
 			else{
-				p->x = drand(0.1, Lx - 0.1); //0.1 for walls if walls but not necessary...
-				p->y = drand(0.1, Ly - 0.1);
+				p->x = drand(2.5, Lx - 2.5); 
+				p->y = drand(2.5, Ly - 2.5);
 			}
 			p->num = i;
 			p->rad = 0;
@@ -634,10 +635,6 @@ void particlesInit(){
 	
 
 	normalizePhysicalQ();
-	particles[0].x = halfLx;
-	particles[0].y = halfLx;
-	particles[0].vx = 1;
-	particles[0].vy = 0;
 
 	if (load == 1){
 		if (addCircularWall)
@@ -1247,18 +1244,13 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 	double dvx = p2->vx - p1->vx;
 	double dvy = p2->vy - p1->vy;
-	double vr1 = vr;
-	double vr2 = vr;
-	if (p1->type == 0){
-		vr1 = vr*sizeratio;
-	}
-	if (p2->type == 0){
-		vr2 = vr*sizeratio;
-	}
+	double vr1 = growthSpeed(p1);
+	double vr2 = growthSpeed(p2);
 	double dvr = vr1 + vr2;
+
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
-	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*vr));
+	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*vr2));
 	PBC(&dx, &dy);
 	double b = dx*dvx + dy*dvy - dvr*dr;
 
@@ -1480,33 +1472,40 @@ void collisionEventNormal(int i){
 		if (addField){
 			double y0 = p1->y - halfLy;
 			double x0 = p1->x - halfLx;
-			double v0x = p1->vx;
-			double v0y = p1->vy;
 			double rad = p1->rad;
-
-			double a = field*field/4;
-			double b = field*v0y;
-			double c = v0x*v0x + v0y*v0y + field*y0;
-			double d = 2*v0x*x0 + 2*v0y*y0;
 			double e = x0*x0 + y0*y0 - (halfLx - rad)*(halfLx - rad);
-			dt = smallestRoot(a, b, c, d, e);
-			xy = 2;	
-			type = WALL;
+			if (e > -100){ //arbitrary, have to think about it
+				double v0x = p1->vx;
+				double v0y = p1->vy;
 				
+
+				double a = field*field/4;
+				double b = field*v0y;
+				double c = v0x*v0x + v0y*v0y + field*y0;
+				double d = 2*v0x*x0 + 2*v0y*y0;
+				
+				dt = smallestRoot(a, b, c, d, e);
+				xy = 2;	
+				type = WALL;
+			}	
 		}	
 		else{
 			double y0 = p1->y - halfLx;
 			double x0 = p1->x - halfLx;
-			double v0x = p1->vx;
-			double v0y = p1->vy;
 			double rad = p1->rad;
-
-			double A = (v0x*v0x + v0y*v0y);
-			double B = 2*(v0x*x0 + v0y*y0);
 			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
-			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
-			type = WALL;
-			xy = 2;
+			if (C > -100){
+				double v0x = p1->vx;
+				double v0y = p1->vy;
+				
+
+				double A = (v0x*v0x + v0y*v0y);
+				double B = 2*(v0x*x0 + v0y*y0);
+				
+				dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
+				type = WALL;
+				xy = 2;
+			}
 		}
 	}
 
@@ -1573,13 +1572,7 @@ void collisionEventGrow(int i){
 	int typeTemp;
 
 
-	double vrParticle;
-	if (p1->type == 0){
-		vrParticle = vr*sizeratio;
-	}
-	else{
-		vrParticle = vr;
-	}
+	double vrParticle = growthSpeed(p1);
 	
 	if (addWally){
 		double vyPlus = p1->vy + vrParticle;
@@ -1750,27 +1743,26 @@ void doTheWallGrow(){
 	particle* pi = particles + i;
 	freeFly(pi);
 
+	double vrParticle = growthSpeed(pi);
 
 	//hacky
 	if (xy == 0){
-		if (pi->x + 2 > Lx - 5){
-			pi->vx = -5;
+		if (pi->x + 2*pi->rad > Lx - 5){
+			pi->vx = -2*vrParticle;
 		}
 		else{
-			pi->vx = 5;
+			pi->vx = 2*vrParticle;
 		}
 	}
 	else if (xy == 1){
-		dp += fabs((resW + 1)*pi->m*pi->vy);
 
-		//pi->vy = -resW*pi->vy;
-		if (pi->y > Ly - 5){
-			pi->vy = -5;
+		if (pi->y  + 2*pi->rad > Ly - 5){
+			pi->vy = -2*vrParticle;
 		}
 		else{
-			pi->vy = 5;
+			pi->vy = 2*vrParticle;
 		}
-		//pi->vy += ((pi->vy > 0) - (pi->vy < 0))*vr;
+
 
 	}
 	else{
@@ -1781,7 +1773,7 @@ void doTheWallGrow(){
 		double vy = pi->vy;
 		double signvx = (vx < 0) ? -1 : (vx > 0);
 		double signvy = (vy < 0) ? -1 : (vy > 0);
-		double mix = -(1 + resW)*(signvx*5*nx + signvy*5*ny);
+		double mix = -(1 + resW)*(signvx*2*vrParticle*nx + signvy*vrParticle*ny);
 
 		pi->vx = mix*nx;
 		pi->vy = mix*ny;
@@ -2647,6 +2639,14 @@ void normalizePhysicalQ(){
 	}
 }
 
+
+double growthSpeed(particle* p){
+	if (p->type == 0){
+		return vr*sizeratio;
+	}
+	return vr;
+	
+}
 void randomGaussian(particle* p){
 	double u1 = genrand_real3();
 	double u2 = genrand_real3();
@@ -3051,7 +3051,7 @@ void drawParticlesAndBox(){
 			max += 1;
 		}
 	}
-	for (int i = N - 1; i > 0; i--){	
+	for (int i = N - 1; i >= 0; i--){	
 		if (colorParam2 != 0){
 			particleColor = colorSelect((colorFunctionArray[i] - min)/(max - min));
 		}
@@ -3356,7 +3356,7 @@ void draw(int argc, char *argv[]){
 				if (structFactorActivated)
 					free(positions);
 				freeArrays();
-
+				printf("HERE!\n");
 				reset(argc, argv);
 			}
 			else{

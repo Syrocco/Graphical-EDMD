@@ -199,7 +199,7 @@ double dtnoise = 0.3;
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
 double updateTime = 100;
 double updateTimeMax = 2000;
-double vr = 0.03;
+double vr;
 
 
 double sizeRat;
@@ -261,13 +261,14 @@ bool editVx = false;
 bool editVy = false;
 bool editM = false;
 
-Image image;
-Texture2D texture;
-
 bool wallEditing = false;
 int wallParam = 0;
 
 int nSym = 6;
+
+Image image;
+Texture2D texture;
+
 #endif
 
 void* computeEvolution(void *arg){
@@ -353,6 +354,8 @@ void* computeEvolution(void *arg){
 					doOut();
 					break;
 				case GROWSTOP:
+
+				
 					stopGrow();				
 					break;
 			}
@@ -551,9 +554,7 @@ void constantInit(int argc, char *argv[]){
 		nextScreen = dtime;
 	if (firstScreen == -1)
 		firstScreen = tmax - 1;
-	if (load == 0){
-		tmax += 1/vr;
-	}
+	
 	boxConstantHelper();
 
 	#if G
@@ -738,15 +739,18 @@ void eventListInit(){
 	root->lft = NULL;
 	root->top = NULL;
 
+	optimizeGrowConstant();
+	
 	#if G != 1
 	addEventThermo(dtimeThermo);
 	if (load == 0){
 		if (firstScreen < 1/vr){
-			firstScreen = 1/vr + 0.00000001;
+			firstScreen = 1/vr + firstScreen;
 		}
 	}
 	#endif
 	if (load == 0){
+		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
 		doTheCollision = &doTheCollisionGrow;
@@ -2639,6 +2643,16 @@ void normalizePhysicalQ(){
 	}
 }
 
+void optimizeGrowConstant(){
+	double baseGrow = 0.05;
+	double criticalPhi = 0.8;
+	if (phi < criticalPhi){
+		vr = baseGrow;
+	}
+	else{
+		vr = baseGrow*pow(criticalPhi/phi, 50);
+	}
+}
 
 double growthSpeed(particle* p){
 	if (p->type == 0){
@@ -2647,6 +2661,7 @@ double growthSpeed(particle* p){
 	return vr;
 	
 }
+
 void randomGaussian(particle* p){
 	double u1 = genrand_real3();
 	double u2 = genrand_real3();
@@ -3314,13 +3329,51 @@ void draw(int argc, char *argv[]){
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.83);
+	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.86);
 	if ((phiTemp != phi) || (fractionSmallNTemp != fractionSmallN) || (sizeratioTemp != sizeratio)){
+	/*
+		if ((phiTemp > phi) && (t > 1/vr)){
+			double mult = sqrt(phiTemp/phi);
+			Lx = Lx*mult;
+			Ly = Lx;
+			for (int i = 0; i < N; i++){
+				particle* p = particles + i;
+				freeFly(p);
+				p->x = p->x*mult;
+				p->y = p->y*mult;
+			}
+			printf("Lx = %lf\n", Lx);
+			for (int i = 0; i < Nxcells; i++){
+				free(cellList[i]);
+			}
+			free(cellList);
+			boxConstantHelper();
+			cellListInit();
+			factor = screenHeight/Ly;
+			if (addWell){
+				for (int i = 0; i < N; i++){
+					particle* p = particles + i;
+					free(particles[i].particlesInWell);
+				}
+				pairsInit();
+			}
+			for (int i = 0; i < N; i++){
+				particle* p = particles + i;
+				p->coll++;
+				removeEventFromQueue(eventList[N + p->num]);
+				collisionEvent(p->num);
+				removeEventFromQueue(eventList[p->num]);
+				crossingEvent(p->num);
+			}
+		}
+		else{
+		*/
 		if (structFactorActivated)
 			free(positions);
 		freeArrays();
 
 		reset(argc, argv);
+		//}
 	}
 	
 	int dirtyWallParam = wallParam;
@@ -3356,7 +3409,6 @@ void draw(int argc, char *argv[]){
 				if (structFactorActivated)
 					free(positions);
 				freeArrays();
-				printf("HERE!\n");
 				reset(argc, argv);
 			}
 			else{
@@ -3377,7 +3429,6 @@ void draw(int argc, char *argv[]){
 					collisionEvent(p->num);
 					removeEventFromQueue(eventList[p->num]);
 					crossingEvent(p->num);
-
 				}
 			}
 		}

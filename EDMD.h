@@ -129,6 +129,7 @@ double logTime(double time);
 double drand(double min, double max);
 void randomGaussian(particle* p);
 double growthSpeed(particle* p);
+void optimizeGrowConstant();
 void PBC(double* dx, double* dy);
 void PBCpost(double* val, int x);
 double PBCinsideCell(double dx, int x);

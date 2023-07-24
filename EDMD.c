@@ -87,7 +87,7 @@ int load = 1;
 //duration of simulation
 double tmax = 1000000;
 //time between each screenshots
-double dtime = 10000000000;
+double dtime = 100;
 
 double dtimeThermo = 100;
 double firstScreen = 0;
@@ -105,20 +105,22 @@ int noise = 1;
 int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
+const int damping = 0;
 #else
 const int addWell = 0;
-const int addField = 1;
+const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
-const int addCircularWall = 1;
+const int addCircularWall = 0;
+const int damping = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
 
 //add damping
-const int damping = 0;
+
 
 //activate the delta model
 const int addDelta = 0;
@@ -160,9 +162,9 @@ const int reduce = 0;
 double delta = 0.01;
 
 //values for double delta model
-double deltaM = 0.05;
+double deltaM = 0.03;
 double deltam = 0;
-double ts = 14;
+double ts = 6;
 
 //value for evolving delta model
 double tau = 5;
@@ -186,10 +188,10 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.1;
+double gamm = 0.01;
 double T = 0.01;
 double expE = 1;
 //time between kicks
@@ -305,9 +307,12 @@ void* computeEvolution(void *arg){
 
 			nextEvent = findNextEvent();
 
-
+			/*
 			double dtEventMerde = nextEvent->t - t;
-
+			if (dtEventMerde < -0.01){
+				printf("%lf %d %d %d | ", dtEventMerde, nextEvent->type, nextEvent->i, nextEvent->j);
+			}
+			*/
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
@@ -1251,6 +1256,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	double vr1 = growthSpeed(p1);
 	double vr2 = growthSpeed(p2);
 	double dvr = vr1 + vr2;
+	
 
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
@@ -1276,7 +1282,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 	if (det < 0)
 		return 1000000000000;
-	return logTime((-b - sqrt(det))/(v2 - dvr*dvr));
+	return (-b - sqrt(det))/(v2 - dvr*dvr);
 
 }
 
@@ -1512,6 +1518,7 @@ void collisionEventNormal(int i){
 			}
 		}
 	}
+
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
@@ -1777,7 +1784,7 @@ void doTheWallGrow(){
 		double vy = pi->vy;
 		double signvx = (vx < 0) ? -1 : (vx > 0);
 		double signvy = (vy < 0) ? -1 : (vy > 0);
-		double mix = -(1 + resW)*(signvx*2*vrParticle*nx + signvy*vrParticle*ny);
+		double mix = -(1 + resW)*(signvx*2*vrParticle*nx + signvy*2*vrParticle*ny);
 
 		pi->vx = mix*nx;
 		pi->vy = mix*ny;
@@ -1853,7 +1860,7 @@ void doTheWallNormal(){
 void doTheCollisionGrow(){
 
 	double delta = 0.03;
-	double res = 0.8;
+	double res = 0.95;
 
 	int i = nextEvent->i;
 	int j = nextEvent->j;
@@ -1876,57 +1883,35 @@ void doTheCollisionGrow(){
 
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
-	double dr = 2*sqrt(pi->rad*pj->rad);
 
 	double dvx = pj->vx - pi->vx;
 	double dvy = pj->vy - pi->vy;
-	double vri = vr;
-	double vrj = vr;
-	if (pi->type == 0){
-		vri = vr*sizeratio;
-	}
-	if (pj->type == 0){
-		vrj = vr*sizeratio;
-	}
+	double vri = growthSpeed(pi);
+	double vrj = growthSpeed(pj);
 	double dvr = vri + vrj;
 
 
 	PBC(&dx, &dy);
-
-
-
-	if (addExpo)
-		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
-
-	double invMass = 1/(pi->m + pj->m);
-	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy - dr*dvr);
-
-
-
-	collTerm += pi->m*pj->m*collKernel;
-	
-
 	dist = sqrt(dx*dx + dy*dy);
-	collTerm -= pi->m*pj->m*invMass*2*delta*dist;
 	dxr = dx/dist;
 	dyr = dy/dist;
+
+	double invMass = 1/(pi->m + pj->m);
+	double collKernel = invMass*(1 + res)*(dxr*dvx + dyr*dvy - dvr);
+
+
+
 	
 
-
-	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
-
-
-
-
-
-	pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
-	pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
-	pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
-	pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
+	pi->vx += collKernel*pj->m*dxr - 2*pj->m*invMass*delta*dxr;
+	pi->vy += collKernel*pj->m*dyr - 2*pj->m*invMass*delta*dyr;
+	pj->vx -= collKernel*pi->m*dxr - 2*pi->m*invMass*delta*dxr;
+	pj->vy -= collKernel*pi->m*dyr - 2*pi->m*invMass*delta*dyr;
 
 
     pi->lastColl = t;
     pj->lastColl = t;
+
 	//recomputes crossing and collision of pi and pj
 	removeEventFromQueue(eventList[i]);
 	removeEventFromQueue(eventList[j]);
@@ -2473,11 +2458,14 @@ void freeFlyGrow(particle* p){
 
 	p->x += dt*p->vx;
 	p->y += dt*p->vy;
+	
 	if (p->type == 0)
 		p->rad += sizeratio*dt*vr;
 	else{
 		p->rad += dt*vr;
 	}
+
+
 	PBCpost(&(p->x), 1);
 	PBCpost(&(p->y), 0);
 }
@@ -2644,13 +2632,14 @@ void normalizePhysicalQ(){
 }
 
 void optimizeGrowConstant(){
-	double baseGrow = 0.05;
+	//baseGrow > 0.03 doesn't work! Reflect on that later!
+	double baseGrow = 0.01;
 	double criticalPhi = 0.8;
 	if (phi < criticalPhi){
 		vr = baseGrow;
 	}
 	else{
-		vr = baseGrow*pow(criticalPhi/phi, 50);
+		vr = baseGrow*pow(criticalPhi/phi, 30);
 	}
 }
 

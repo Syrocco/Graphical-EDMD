@@ -1,40 +1,9 @@
-#include<math.h>
-#include<stdlib.h>
-#include<string.h>
-#include<unistd.h>
-#include<stdio.h>
-#include<time.h>
-#include<sys/stat.h>
-#include<sys/types.h>
-#include<pthread.h>
+#ifndef EDMD
+#define EDMD
 
-#include <getopt.h>
-#include<time.h>
+#include <stdbool.h>
+#include <stdio.h>
 
-#ifndef G
-#define G 1
-#endif
-
-#if G
-#include "raylib.h"
-#define RAYGUI_IMPLEMENTATION
-#include "raygui.h" 
-#include<stdbool.h>
-#include "color.h"
-
-
-typedef struct position position;
-struct position{
-	double x, y;
-};
-
-typedef struct threadArg threadArg;
-struct threadArg{
-    int start;
-    int end;
-};
-
-#endif
 
 typedef struct arguments arguments;
 struct arguments{
@@ -62,6 +31,7 @@ struct node{
 	unsigned long int collActual; //collActual = counter of collision at event prediciton
 };
 
+
 void doOut();
 void doIn();
 
@@ -72,6 +42,7 @@ void doTheWallNormal();
 void constantInit(int argc, char *argv[]);
 void particlesInit();
 void cellListInit();
+void boxConstantHelper();
 void eventListInit();
 void freeArrays();
 
@@ -155,25 +126,6 @@ void addParticleInWellList(particle* p1, int num);
 void removeParticleInWellList(particle* p1, int num);
 int isParticleInWellList(particle* p1, int num);
 
-#if G
-void getInput();
-void drawParticlesAndBox();
-void draw(int argc, char *argv[]);
-void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
-int getParticleUnderClick();
-void addEventInput(double tin);
-Color colorSelect(double value);
-double colorVelocity(particle* p);
-double colorCollision(particle* p);
-double colorBOOP(particle* p1);
-void* computeStructureFactor(void* arg);
-void normalizeStruct();
-void awaitStructFactor();
-void asyncStructFactor();
-void threadPoolInit();
-void reset(int argc, char *argv[]);
-int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
-void graphicalInit();
 #endif
 
 

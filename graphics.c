@@ -10,17 +10,10 @@
 #define SIZE 400
 #define NUM_THREADS 6
 
-int screenWidth = 1800;
-int screenHeight = 900;
-double factor;
-int start;
-double xGUI = 1;
-double yGUI = 1;
 
 int leftClicked = 0;
 int selected = 0;
 particle* particleUnderClick = NULL;
-Camera2D cam = {0};
 
 Color particleArray[2] = {GRAY, MAROON};
 Color particleColor;
@@ -56,9 +49,11 @@ Texture2D texture;
 
 
 
-int getParticleUnderClick(){
-	Vector2 pos = GetScreenToWorld2D(GetMousePosition(), cam);
-	if (GetMousePosition().x > start){
+int getParticleUnderClick(window* screenWindow){
+    double factor = screenWindow->factor;
+    
+	Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
+	if (GetMousePosition().x > screenWindow->start){
 		return 2;
 	}
 	double x = pos.x/factor;
@@ -84,7 +79,8 @@ int getParticleUnderClick(){
 
 
 
-void getInput(){
+void getInput(window* screenWindow){
+
 
 	if (IsKeyPressed(KEY_SPACE) && !spacePressed){
 		spacePressed = true;
@@ -97,12 +93,12 @@ void getInput(){
 	}
 
 	 if (IsWindowResized() && !IsWindowFullscreen()){
-            screenWidth = GetScreenWidth();
-            screenHeight = GetScreenHeight();
-			factor = GetScreenHeight()/Lx;
-            start = GetScreenHeight();
-			xGUI = GetScreenWidth()/1800.;
-			yGUI = GetScreenHeight()/900.;
+            screenWindow->screenWidth = GetScreenWidth();
+            screenWindow->screenHeight = GetScreenHeight();
+			screenWindow->factor = GetScreenHeight()/Lx;
+            screenWindow->start = GetScreenHeight();
+			screenWindow->xGUI = GetScreenWidth()/1800.;
+			screenWindow->yGUI = GetScreenHeight()/900.;
         }
 
         // check for alt + enter
@@ -115,7 +111,7 @@ void getInput(){
             if (IsWindowFullscreen())
             {
                 // if we are full screen, then go back to the windowed size
-                SetWindowSize(screenWidth, screenHeight);
+                SetWindowSize(screenWindow->screenWidth, screenWindow->screenHeight);
             }
             else
             {
@@ -132,10 +128,10 @@ void getInput(){
 	if (IsKeyPressed(KEY_F)){
 		if (!IsWindowFullscreen()){
 			int display = GetCurrentMonitor();
-			factor = GetMonitorHeight(display)/Lx;
-			start = GetMonitorHeight(display);
-			xGUI = GetMonitorWidth(display)/1800.;
-			yGUI = GetMonitorHeight(display)/900.;
+			screenWindow->factor = GetMonitorHeight(display)/Lx;
+			screenWindow->start = GetMonitorHeight(display);
+			screenWindow->xGUI = GetMonitorWidth(display)/1800.;
+			screenWindow->yGUI = GetMonitorHeight(display)/900.;
 			
 			SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
 			
@@ -146,39 +142,39 @@ void getInput(){
 	float wheel = GetMouseWheelMove();
 	if (wheel != 0){
 		
-		Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), cam);
+		Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
 		
 
-		cam.offset = GetMousePosition();
+		screenWindow->cam.offset = GetMousePosition();
 
-		cam.target = mouseWorldPos;
+		screenWindow->cam.target = mouseWorldPos;
 
 		// evil trick
 		double speed = 0.0625f*100/Lx;
 		
-		cam.zoom += wheel * speed*(cam.zoom*cam.zoom);
-		if (cam.zoom < 0.2)
-			cam.zoom = 0.2;
-		if (cam.zoom > 10)
-			cam.zoom = 10;
+		screenWindow->cam.zoom += wheel * speed*(screenWindow->cam.zoom*screenWindow->cam.zoom);
+		if (screenWindow->cam.zoom < 0.2)
+			screenWindow->cam.zoom = 0.2;
+		if (screenWindow->cam.zoom > 10)
+			screenWindow->cam.zoom = 10;
 	}
 
 	if (IsKeyDown(KEY_R)){
-		cam.zoom = 1;
-		cam.offset = (Vector2){0, 0};
-		cam.target = (Vector2){0, 0};
+		screenWindow->cam.zoom = 1;
+		screenWindow->cam.offset = (Vector2){0, 0};
+		screenWindow->cam.target = (Vector2){0, 0};
 	}
 
 	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
 		
 		if (leftClicked > 0){
 			freeFly(particleUnderClick);
-			Vector2 pos = GetScreenToWorld2D(GetMousePosition(), cam);
+			Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
 
 			particleUnderClick->coll++;
 		
-			double x = pos.x/factor;
-			double y = Ly - pos.y/factor; 
+			double x = pos.x/screenWindow->factor;
+			double y = Ly - pos.y/screenWindow->factor; 
 			double dx = (particleUnderClick->x - x);
 			double dy = (particleUnderClick->y - y);
 			PBC(&dx, &dy);
@@ -195,7 +191,7 @@ void getInput(){
 			collisionEvent(particleUnderClick->num);
 		}
 		else{
-			int resultat = getParticleUnderClick();
+			int resultat = getParticleUnderClick(screenWindow);
 
 			if (resultat == 1){
 				GuiLock();
@@ -220,7 +216,7 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 	*value = (double)floatValue;
 }
 
-void drawParticlesAndBox(){
+void drawParticlesAndBox(double factor){
 	double min = 1000000000000;
 	double max = -1;
 
@@ -266,9 +262,11 @@ void drawParticlesAndBox(){
 	}
 }
 
-void draw(int argc, char *argv[]){
-
-	
+void draw(int argc, char *argv[], window* screenWindow){
+    int start = screenWindow->start;
+	double xGUI = screenWindow->xGUI;
+    double yGUI = screenWindow->yGUI;
+    double factor = screenWindow->factor;
 	BeginDrawing();
 
 	ClearBackground(RAYWHITE);
@@ -276,9 +274,9 @@ void draw(int argc, char *argv[]){
 	char name[200];	
 	
 	
-	BeginMode2D(cam);
+	BeginMode2D(screenWindow->cam);
 	
-	drawParticlesAndBox();
+	drawParticlesAndBox(factor);
 	
 	EndMode2D();
 
@@ -485,6 +483,7 @@ void draw(int argc, char *argv[]){
 			free(colorFunctionArray);
 		N = (int)Ntemp;
 		reset(argc, argv);
+        screenWindow->factor = GetScreenHeight()/Ly;
 		if (colorParam2)
 			colorFunctionArray = calloc(N, sizeof(double));
 	}
@@ -547,6 +546,7 @@ void draw(int argc, char *argv[]){
 		freeArrays();
 
 		reset(argc, argv);
+        screenWindow->factor = GetScreenHeight()/Ly;
 		//}
 	}
 	
@@ -584,6 +584,7 @@ void draw(int argc, char *argv[]){
 					free(positions);
 				freeArrays();
 				reset(argc, argv);
+                screenWindow->factor = GetScreenHeight()/Ly;
 			}
 			else{
 				if (addWell){
@@ -870,7 +871,7 @@ int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
 	}
 }
 
-void graphicalInit(){
+window graphicalInit(){
 
 	dtime = 1;
 	res = 1;
@@ -887,8 +888,8 @@ void graphicalInit(){
 	firstScreen = 0;
 	colorFunction = &colorCollision;
 
-
-	cam.zoom = 1;
+    Camera2D cam = {0};
+    cam.zoom = 1;
 
 	for (int i = 0; i < qN; i++){
 		qx[i] = -10 + 20.0*i/(double)qN;
@@ -897,13 +898,20 @@ void graphicalInit(){
 	threadPoolInit();
 
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
-    InitWindow(screenWidth, screenHeight, "EDMD");
+    InitWindow(1800, 900, "EDMD");
 	SetTargetFPS(144);
-	start = GetScreenHeight();
 	image = GenImageColor(qN, qN, BLANK);
 	image.data = structFactor;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);
 
-
+    return (window){
+        .screenWidth = 1800,
+        .screenHeight = 900,
+        .factor = 1,
+        .start = GetScreenHeight(),
+        .xGUI = 1,
+        .yGUI = 1,
+        .cam = cam,
+    };
 }

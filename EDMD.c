@@ -237,7 +237,7 @@ node* nextEvent;
 void* computeEvolution(void *arg){
 	
 	#if G
-	graphicalInit();
+	window screenWindow = graphicalInit();
 	#endif
 
 	arguments* argument = (arguments*)arg;
@@ -262,6 +262,7 @@ void* computeEvolution(void *arg){
 	}
 	while (t <= tmax){
 	#else
+	screenWindow.factor = GetScreenHeight()/Ly;
 	while (!WindowShouldClose()){
 		if (running){
 	#endif
@@ -291,8 +292,13 @@ void* computeEvolution(void *arg){
 					addNoise();
 					break;
 				case SCREENSHOT:
-					takeAScreenshot(argc, argv);
+					takeAScreenshot();
+					#if G
+					draw(argc, argv, &screenWindow);
+					getInput(&screenWindow);
 					fflush(stdout);
+					#endif
+
 					#if G != 1
 					if (noise == 0 && E < 1e-10){// && addWell == 0){
 						goto exiting;
@@ -328,8 +334,8 @@ void* computeEvolution(void *arg){
 		#if G
 		}
 		else{
-			draw(argc, argv);
-			getInput();
+			draw(argc, argv, &screenWindow);
+			getInput(&screenWindow);
 		}
 		#endif
 	}
@@ -522,10 +528,6 @@ void constantInit(int argc, char *argv[]){
 		firstScreen = tmax - 1;
 	
 	boxConstantHelper();
-
-	#if G
-	factor = screenHeight/Ly;
-	#endif
 }
 
 /* ------------------------------------------
@@ -2202,7 +2204,7 @@ void addEventThermo(double tscreen){
 	the system. Also schedules a new
 	screenshot event.
 --------------------------------------------- */
-void takeAScreenshot(int argc __attribute__((unused)), char *argv[]__attribute__((unused))){
+void takeAScreenshot(){
 
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
@@ -2216,10 +2218,7 @@ void takeAScreenshot(int argc __attribute__((unused)), char *argv[]__attribute__
 	on = 1;
 	addEventScreenshot(t + nextScreen);
 
-	#if  G == 1
-	getInput();
-	draw(argc, argv);
-	#else
+	#if G == 0
 	saveTXT();
 	#endif
 	

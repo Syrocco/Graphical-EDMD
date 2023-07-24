@@ -76,7 +76,7 @@ void doTheCollisionNormal();
 void doTheCollisionGrow();
 
 void addEventScreenshot(double tscreen);
-void takeAScreenshot(int argc, char *argv[]);
+void takeAScreenshot();
 
 void addEventThermo(double tscreen);
 void takeAThermo();

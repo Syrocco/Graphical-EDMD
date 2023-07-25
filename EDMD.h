@@ -96,6 +96,7 @@ void freeFlyNormal(particle* p);
 void saveTXT();
 void saveThermo();
 void initializeThermo();
+double sign(double x);
 double logTime(double time);
 double drand(double min, double max);
 void randomGaussian(particle* p);

@@ -147,8 +147,8 @@ double smallestRoot(double a, double b, double c, double d, double e){
     solve_quartic(A, B, C, D);
     double toSend = 10000000000;
     for (int i = 0; i < 4; i++){
-        if ((retval[i].imag == 0) && (retval[i].real > 0.0000000001) && (retval[i].real < toSend)){
-            toSend = retval[i].real;
+        if ((retval[i].imag == 0) && (retval[i].real > 0.000000001) && (retval[i].real < toSend)){
+            toSend = retval[i].real;//                 ^ magic number
         }
     }
     return toSend;

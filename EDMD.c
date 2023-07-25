@@ -112,7 +112,7 @@ double nextScreen = -1;
 
 #if G
 bool addWell = true;
-bool addField = 0;
+bool addField = false;
 int noise = 1;
 int addWally = 0;
 int addWallx = 0;
@@ -269,12 +269,12 @@ void* computeEvolution(void *arg){
 
 			nextEvent = findNextEvent();
 
-			/*
-			double dtEventM = nextEvent->t - t;
-			if (dtEventM < -0.01){
-				printf("%lf %d %d %d | ", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
-			}
-			*/
+			
+			//double dtEventM = nextEvent->t - t;
+			//if (dtEventM < 0.){
+			//	printf("%lf %d %d %d | ", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
+			//}
+			
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
@@ -560,11 +560,12 @@ void particlesInit(){
 		fclose(file);
 		Nsmall = N - Nbig;
 		sizeratio = particles[N-1].rad;
+		normalizePhysicalQ();
 	}
 	else{
 		Nsmall= (int)(N*fractionSmallN);
 		Nbig = N - Nsmall;
-		
+		double EinitGrow = 0.5;
 		particle* p;
 		for (int i = 0; i < N; i++){
 			p = particles + i;
@@ -595,15 +596,15 @@ void particlesInit(){
 
 			double U1 = drand(0, 1);
 			double U2 = drand(0, 1);
-			p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
-			p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+			p->vx = sqrt(-2*log(U1)/p->m*EinitGrow)*cos(2*M_PI*U2);
+			p->vy = sqrt(-2*log(U1)/p->m*EinitGrow)*sin(2*M_PI*U2);
 
 			p->lastColl = 0;
 		}
 	}
 	
 
-	normalizePhysicalQ();
+	
 
 	if (load == 1){
 		if (addCircularWall)
@@ -1447,7 +1448,7 @@ void collisionEventNormal(int i){
 			double x0 = p1->x - halfLx;
 			double rad = p1->rad;
 			double e = x0*x0 + y0*y0 - (halfLx - rad)*(halfLx - rad);
-			if (e > -100){ //arbitrary, have to think about it
+			//if (e > -100){ //arbitrary, have to think about it
 				double v0x = p1->vx;
 				double v0y = p1->vy;
 				
@@ -1460,14 +1461,14 @@ void collisionEventNormal(int i){
 				dt = smallestRoot(a, b, c, d, e);
 				xy = 2;	
 				type = WALL;
-			}	
+			//}	
 		}	
 		else{
 			double y0 = p1->y - halfLx;
 			double x0 = p1->x - halfLx;
 			double rad = p1->rad;
 			double C = (x0*x0 + y0*y0) - (halfLx - rad)*(halfLx - rad);
-			if (C > -100){
+			//if (C > -100){
 				double v0x = p1->vx;
 				double v0y = p1->vy;
 				
@@ -1478,7 +1479,7 @@ void collisionEventNormal(int i){
 				dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
 				type = WALL;
 				xy = 2;
-			}
+			//}
 		}
 	}
 
@@ -1722,19 +1723,19 @@ void doTheWallGrow(){
 	//hacky
 	if (xy == 0){
 		if (pi->x + 2*pi->rad > Lx - 5){
-			pi->vx = -2*vrParticle;
+			pi->vx = -pi->vx - 2*vrParticle;
 		}
 		else{
-			pi->vx = 2*vrParticle;
+			pi->vx = -pi->vx + 2*vrParticle;
 		}
 	}
 	else if (xy == 1){
 
 		if (pi->y  + 2*pi->rad > Ly - 5){
-			pi->vy = -2*vrParticle;
+			pi->vy = -pi->vy -2*vrParticle;
 		}
 		else{
-			pi->vy = 2*vrParticle;
+			pi->vy = -pi->vy + 2*vrParticle;
 		}
 
 
@@ -1745,13 +1746,17 @@ void doTheWallGrow(){
 		double ny = sin(theta);
 		double vx = pi->vx;
 		double vy = pi->vy;
-		double signvx = (vx < 0) ? -1 : (vx > 0);
-		double signvy = (vy < 0) ? -1 : (vy > 0);
-		double mix = -(1 + resW)*(signvx*2*vrParticle*nx + signvy*2*vrParticle*ny);
-
-		pi->vx = mix*nx;
-		pi->vy = mix*ny;
-		dp += fabs(pi->m*mix);
+		
+		if (1){
+			double mix = -(1 + resW)*(sign(vx)*4*vrParticle*nx + sign(vy)*4*vrParticle*ny);
+			pi->vx = mix*nx;
+			pi->vy = mix*ny;
+		}
+		else{
+			double mix = -(1 + resW)*(pi->vx*nx + pi->vy*ny);
+			pi->vx += (mix - vrParticle)*nx;
+			pi->vy += (mix - vrParticle)*ny;
+		}
 	}
 
 	pi->coll++;
@@ -1871,6 +1876,21 @@ void doTheCollisionGrow(){
 	pj->vx -= collKernel*pi->m*dxr - 2*pi->m*invMass*delta*dxr;
 	pj->vy -= collKernel*pi->m*dyr - 2*pi->m*invMass*delta*dyr;
 
+	/*
+	pi->vx = - 2*vr*dxr;
+	pi->vy = - 2*vr*dyr;
+	pj->vx = + 2*vr*dxr;
+	pj->vy = + 2*vr*dyr;
+	
+	if ((sqrt(pi->vx*pi->vx + pi->vy*pi->vy) < vr) || (sqrt(pj->vx*pj->vx + pj->vy*pj->vy) < vr)){
+		printf("%lf et %lf | ", sqrt(pi->vx*pi->vx + pi->vy*pi->vy), sqrt(pj->vx*pj->vx + pj->vy*pj->vy));
+	}
+
+	if (pow(pi->vx - pj->vx, 2) + pow(pi->vy - pj->vy, 2) < vr*vr){
+		printf("WHO");
+	}*/
+
+	
 
     pi->lastColl = t;
     pj->lastColl = t;
@@ -2534,9 +2554,7 @@ double drand(double min, double max){
 }
 
 double sign(double x){
-	if (x > 0) return 1;
-	if (x < 0) return -1;
-	return 0;
+	return (x < 0) ? -1 : (x > 0);
 }
 
 
@@ -2592,8 +2610,14 @@ void normalizePhysicalQ(){
 }
 
 void optimizeGrowConstant(){
-	//baseGrow > 0.03 doesn't work! Reflect on that later!
-	double baseGrow = 0.01;
+	//baseGrow is highly dependent on initial velocity. Reflect on that later
+	double baseGrow;
+	if (addCircularWall){
+		baseGrow = 0.03;
+	}
+	else{
+		baseGrow = 0.03;
+	}
 	double criticalPhi = 0.8;
 	if (phi < criticalPhi){
 		vr = baseGrow;

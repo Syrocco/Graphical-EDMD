@@ -361,7 +361,6 @@ void draw(int argc, char *argv[], window* screenWindow){
 
 		if (noise == 0){
 			removeEventFromQueue(eventList[2*N + 2]);
-
 		}
 		if (dirtyNoise == 0){
 			addEventNoise(t + dtnoise);
@@ -574,7 +573,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 				addWally = 1;
 				addCircularWall = 0;
 			}
-			else{
+			else if (wallParam == 4){
 				addWallx = 0;
 				addWally = 0;
 				addCircularWall = 1;
@@ -584,7 +583,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 					free(positions);
 				freeArrays();
 				reset(argc, argv);
-                screenWindow->factor = GetScreenHeight()/Ly;
+				screenWindow->factor = GetScreenHeight()/Ly;
 			}
 			else{
 				if (addWell){
@@ -873,20 +872,20 @@ int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
 
 window graphicalInit(){
 
+	firstScreen = 0;
+	load = 0;
+	dtnoise = 1;
 	dtime = 1;
+	N = 2000;
+	phi = 0.5;
+	field = -0.001;
+	colorFunction = &colorCollision;
 	res = 1;
 	sig = 1.5;
 	U = -0.15;
 	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;
-	dtnoise = 1;
-	load = 0;
-	N = 2000;
-	phi = 0.5;
-	field = -0.001;
-	firstScreen = 0;
-	colorFunction = &colorCollision;
 
     Camera2D cam = {0};
     cam.zoom = 1;

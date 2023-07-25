@@ -8,5 +8,5 @@ else
 endif
 
 EDMD: EDMD.c
-	$(CC) EDMD.c $(CFLAGS) -pg -DG=$(G)
+	$(CC) EDMD.c $(CFLAGS) -g -DG=$(G)
 

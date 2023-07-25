@@ -99,9 +99,9 @@ int load = 1;
 //duration of simulation
 double tmax = 1000000;
 //time between each screenshots
-double dtime = 100;
+double dtime = 1;
 
-double dtimeThermo = 100;
+double dtimeThermo = 10000;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -118,6 +118,10 @@ int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
 const int damping = 0;
+const int addDelta = 0;
+const int addDoubleDelta = 0;
+const int addEvolvingDelta = 0;
+const int addExpo = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
@@ -125,25 +129,15 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
+const int addDelta = 0;
+const int addDoubleDelta = 1;
+const int addEvolvingDelta = 0;
+const int addExpo = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
-
-//activate the delta model
-const int addDelta = 0;
-
-//activate double delta model
-const int addDoubleDelta = 0;
-
-//activate evoling delta model
-const int addEvolvingDelta = 0;
-
-
-
-//activate the exponential model
-const int addExpo = 0;
 
 
 //add a wall at x = Lx/2
@@ -168,7 +162,7 @@ const int reduce = 0;
 
 
 //value for delta model
-double delta = 0.01;
+double delta = 0.03;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -197,11 +191,11 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
 double gamm = 0.01;
-double T = 0.01;
+double T = 0;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -357,12 +351,15 @@ int main(int argc, char *argv[]){
 
 	
 	init_genrand(666);
-	pthread_t mainThread;
+	
 
+	#if G
+	pthread_t mainThread;
 	pthread_create(&mainThread, NULL, computeEvolution,&(arguments){argc, argv});
 	pthread_join(mainThread, NULL);
-	//computeEvolution(&(arguments){argc, argv});
-
+	#else
+	computeEvolution(&(arguments){argc, argv});
+	#endif
 	return 0;
 }
 
@@ -400,7 +397,7 @@ void boxConstantHelper(){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 100/(double)N;
+	dtPaul = 300/(double)N;
 
     paulListN = N;
 }
@@ -1209,9 +1206,6 @@ void doTheCrossing(){
 double collisionTimeGrow(particle* p1, particle* p2){
 
 
-	if ((damping == 1) || (addField == 1)){
-		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}   
 
 	double lat2 = t - p2->t;
 
@@ -1239,8 +1233,8 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 
 	//to delete when confident with life decisions...
-	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
+	if (distOfSquare - dr*dr< -0.01){
+		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
 		exit(3);
 	}
 
@@ -1261,6 +1255,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	double dvx = p2->vx - p1->vx;
 	double dvy = p2->vy - p1->vy;
+
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
 	PBC(&dx, &dy);
@@ -1951,22 +1946,12 @@ void doTheCollisionNormal(){
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
-			
-			if (t - pi->lastColl > ts)
-				pi->synchro = 1;
-			if (t - pj->lastColl > ts)
-				pj->synchro = 1;
-			
-			//if ((t - pj->lastColl > ts) && (t - pi->lastColl > ts)){}
-			if ((pi->synchro) && (pj->synchro)){
+
+			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts)){
 				delta = deltam;
-				pi->synchro = 0;
-				pj->synchro = 0;
 			}
 			else{
 				delta = deltaM;
-				pi->synchro = 0;
-				pj->synchro = 0;
 			}
 		}
 		else if (addEvolvingDelta){

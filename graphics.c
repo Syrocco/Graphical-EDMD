@@ -267,6 +267,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 	double xGUI = screenWindow->xGUI;
     double yGUI = screenWindow->yGUI;
     double factor = screenWindow->factor;
+
 	BeginDrawing();
 
 	ClearBackground(RAYWHITE);
@@ -469,11 +470,11 @@ void draw(int argc, char *argv[], window* screenWindow){
 	}
 	
 	sprintf(name, "%.3f", res);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.3f, 1.f);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.3f, 1.f);
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){ start  + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 9000.f);
+	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 9000.f);
 	if ((int)Ntemp != N){
 		if (structFactorActivated)
 			free(positions);
@@ -481,8 +482,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 		if (colorParam2)
 			free(colorFunctionArray);
 		N = (int)Ntemp;
-		reset(argc, argv);
-        screenWindow->factor = GetScreenHeight()/Ly;
+		reset(argc, argv, &screenWindow->factor);
 		if (colorParam2)
 			colorFunctionArray = calloc(N, sizeof(double));
 	}
@@ -490,18 +490,18 @@ void draw(int argc, char *argv[], window* screenWindow){
 
 	double sizeratioTemp = sizeratio;
 	sprintf(name, "%.3lf", sizeratio);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI}, "Sizeratio", name, &sizeratio, 0.25, 1);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI}, "Sizeratio", name, &sizeratio, 0.25, 1);
 
 
 	double fractionSmallNTemp = fractionSmallN;
 	sprintf(name, "%.3lf", fractionSmallN);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI}, "Frac. Of Small.", name, &fractionSmallN, 0, 1);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI}, "Frac. Of Small.", name, &fractionSmallN, 0, 1);
 
 	
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.86);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.86);
 	if ((phiTemp != phi) || (fractionSmallNTemp != fractionSmallN) || (sizeratioTemp != sizeratio)){
 	/*
 		if ((phiTemp > phi) && (t > 1/vr)){
@@ -544,13 +544,13 @@ void draw(int argc, char *argv[], window* screenWindow){
 			free(positions);
 		freeArrays();
 
-		reset(argc, argv);
-        screenWindow->factor = GetScreenHeight()/Ly;
+		reset(argc, argv, &screenWindow->factor);
+        
 		//}
 	}
 	
 	int dirtyWallParam = wallParam;
-	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
+	if (GuiDropdownBox((Rectangle){start + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
 		wallEditing = !wallEditing;
 		if (dirtyWallParam != wallParam){
 			if (wallParam == 0){
@@ -582,8 +582,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 				if (structFactorActivated)
 					free(positions);
 				freeArrays();
-				reset(argc, argv);
-				screenWindow->factor = GetScreenHeight()/Ly;
+				reset(argc, argv, &screenWindow->factor);
 			}
 			else{
 				if (addWell){
@@ -610,7 +609,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 
 	
 	bool tempStruct = structFactorActivated;
-	GuiCheckBox((Rectangle){start  + 500*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Struct. Factor", &structFactorActivated);
+	GuiCheckBox((Rectangle){start + 500*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Struct. Factor", &structFactorActivated);
 	if (tempStruct != structFactorActivated){
 		if (structFactorActivated){
 			positions = calloc((N - (int)(N*fractionSmallN)), sizeof(position));
@@ -798,7 +797,7 @@ void awaitStructFactor(){
     }
 }
 
-void reset(int argc, char *argv[]){
+void reset(int argc, char *argv[], double* factor){
 	t = 0;
 	ncol = 0;
 	ncross = 0;
@@ -832,6 +831,8 @@ void reset(int argc, char *argv[]){
 		}
 		asyncStructFactor();*/
 	}
+	
+	*factor = GetScreenHeight()/Ly;
 }
 
 int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){

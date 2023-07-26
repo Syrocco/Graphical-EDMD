@@ -53,6 +53,7 @@ struct window{
     Camera2D cam;
 };
 
+
 typedef struct position position;
 struct position{
 	double x, y;
@@ -80,6 +81,6 @@ void normalizeStruct();
 void awaitStructFactor();
 void asyncStructFactor();
 void threadPoolInit();
-void reset(int argc, char *argv[]);
+void reset(int argc, char* argv[], double* factor);
 int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 window graphicalInit();

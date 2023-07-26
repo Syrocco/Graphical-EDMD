@@ -32,6 +32,7 @@ struct node{
 };
 
 
+
 void doOut();
 void doIn();
 

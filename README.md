@@ -3,7 +3,7 @@
 
 
 Usually, to deal with collisions, one integrates the equation of motion using a small timestep. A notoriously hard task is to deal with object interpenetration. Tricks must be used to supress these overlaps and the resulting dynamics is **always** nonphysical. Artifacts due to these corrections often prevent high densities to be reached. Here, (almost) everything is solved exactly by computing the time before the next collision happening in the system and then advancing the simulation time to this next collision + processing it.
-This type of algorithm is extremely fast but you pay the price of having to deal with an asynchronized evolution of events. Since every action is driven by the scheduling of an "event" (every collision in the future, every cell partitioning, every display of the screen in the game loop becomes an event), one has to implement a fast data structure able to quickly sort these events, retrieve them, delete them, reschedule them. This is achieved by a BST and a buffer queue.
+This type of algorithm is extremely fast but you pay the price of having to deal with an asynchronized evolution of events. Since every action is driven by the scheduling of an "event" (every collision in the future, every cell partitioning, every display of the screen in the game loop becomes an event), one has to implement a fast data structure able to quickly sort these events, retrieve them, delete them, reschedule them. This is achieved by a BST and a buffer/priority queue.
 
 At full speed, and for ~2000 particles the algorithm can perform around $10^6$ collisions/sec.
 

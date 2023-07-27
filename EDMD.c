@@ -233,6 +233,7 @@ void* computeEvolution(void *arg){
 	
 	#if G
 	window screenWindow = graphicalInit();
+	state screenState = GUIinit();
 	#endif
 
 	arguments* argument = (arguments*)arg;
@@ -259,7 +260,7 @@ void* computeEvolution(void *arg){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
 	while (!WindowShouldClose()){
-		if (running){
+		if (!((!screenState.running) || (screenState.wallMoving))){
 	#endif
 
 			nextEvent = findNextEvent();
@@ -289,8 +290,8 @@ void* computeEvolution(void *arg){
 				case SCREENSHOT:
 					takeAScreenshot();
 					#if G
-					draw(argc, argv, &screenWindow);
-					getInput(&screenWindow);
+					draw(argc, argv, &screenWindow, &screenState);
+					getInput(&screenWindow, &screenState);
 					fflush(stdout);
 					#endif
 
@@ -329,8 +330,8 @@ void* computeEvolution(void *arg){
 		#if G
 		}
 		else{
-			draw(argc, argv, &screenWindow);
-			getInput(&screenWindow);
+			draw(argc, argv, &screenWindow, &screenState);
+			getInput(&screenWindow, &screenState);
 		}
 		#endif
 	}

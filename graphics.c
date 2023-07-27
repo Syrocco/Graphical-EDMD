@@ -10,20 +10,7 @@
 #define SIZE 400
 #define NUM_THREADS 6
 
-
-int leftClicked = 0;
-int selected = 0;
-particle* particleUnderClick = NULL;
-
-Color particleArray[2] = {GRAY, MAROON};
-Color particleColor;
-bool colorEditing = false;
-int colorParam = 0;
-bool colorEditing2 = false;
-int colorParam2 = 0;
-Color* colorArray = Plasma;
-double (*colorFunction)(particle*);
-double* colorFunctionArray;
+int nSym = 4; 
 
 double qx[qN] = {0};
 float structFactor[qN][qN] = {0};
@@ -32,44 +19,40 @@ position* positions;
 int counter = 0;
 pthread_t threads[NUM_THREADS];
 threadArg threadArgs[NUM_THREADS];
-bool running = true;
-bool spacePressed = false;
-
-bool editVx = false;
-bool editVy = false;
-bool editM = false;
-
-bool wallEditing = false;
-int wallParam = 0;
-
-int nSym = 6;
 
 Image image;
 Texture2D texture;
 
 
 
-int getParticleUnderClick(window* screenWindow){
+int getWhatsUnderClick(window* screenWindow, state* screenState){
     double factor = screenWindow->factor;
     
 	Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
 	if (GetMousePosition().x > screenWindow->start){
-		return 2;
+		return -1;
 	}
 	double x = pos.x/factor;
 	double y = Ly - pos.y/factor; 
+
+	if ((addWallx) && (x > Lx - 5) && (x < Lx + 5)){
+		return 2;
+	}
+	if ((addWally) && (y > Ly - 5) && (y < Ly + 5)){
+		return 3;
+	}
 	if ((x < Lx) && (y < Ly)){
 		int X = coordToCell(x, 1);
 		int Y = coordToCell(y, 0);
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				particleUnderClick = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
-				while (particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (pow((particleUnderClick->x - x), 2) + pow(particleUnderClick->y - y, 2) < particleUnderClick->rad*particleUnderClick->rad){
+				screenState->particleUnderClick = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+				while (screenState->particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (pow((screenState->particleUnderClick->x - x), 2) + pow(screenState->particleUnderClick->y - y, 2) < screenState->particleUnderClick->rad*screenState->particleUnderClick->rad){
 						return 1;
 					}
-					particleUnderClick = particleUnderClick->nxt;
+					screenState->particleUnderClick = screenState->particleUnderClick->nxt;
 				}
 			}
 		}
@@ -79,18 +62,8 @@ int getParticleUnderClick(window* screenWindow){
 
 
 
-void getInput(window* screenWindow){
-
-
-	if (IsKeyPressed(KEY_SPACE) && !spacePressed){
-		spacePressed = true;
-		running = !running;
-		
-	}
-	
-	if (IsKeyReleased(KEY_SPACE)){
-		spacePressed = false;
-	}
+void getInput(window* screenWindow, state* screenState){
+	particle* particleUnderClick = screenState->particleUnderClick;
 
 	 if (IsWindowResized() && !IsWindowFullscreen()){
             screenWindow->screenWidth = GetScreenWidth();
@@ -128,7 +101,7 @@ void getInput(window* screenWindow){
 	if (IsKeyPressed(KEY_F)){
 		if (!IsWindowFullscreen()){
 			int display = GetCurrentMonitor();
-			screenWindow->factor = GetMonitorHeight(display)/Lx;
+			screenWindow->factor = GetMonitorHeight(display)/Ly;
 			screenWindow->start = GetMonitorHeight(display);
 			screenWindow->xGUI = GetMonitorWidth(display)/1800.;
 			screenWindow->yGUI = GetMonitorHeight(display)/900.;
@@ -150,7 +123,7 @@ void getInput(window* screenWindow){
 		screenWindow->cam.target = mouseWorldPos;
 
 		// evil trick
-		double speed = 0.0625f*100/Lx;
+		double speed = 0.0625f*100/Ly;
 		
 		screenWindow->cam.zoom += wheel * speed*(screenWindow->cam.zoom*screenWindow->cam.zoom);
 		if (screenWindow->cam.zoom < 0.2)
@@ -159,15 +132,24 @@ void getInput(window* screenWindow){
 			screenWindow->cam.zoom = 10;
 	}
 
+	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
+		{
+			Vector2 delta = GetMouseDelta();
+			float scale = -1./screenWindow->cam.zoom;
+			delta.x = delta.x*scale;
+			delta.y = delta.y*scale;
+			screenWindow->cam.target.x += delta.x;
+			screenWindow->cam.target.y += delta.y;
+		}
+
 	if (IsKeyDown(KEY_R)){
 		screenWindow->cam.zoom = 1;
 		screenWindow->cam.offset = (Vector2){0, 0};
 		screenWindow->cam.target = (Vector2){0, 0};
 	}
-
 	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
 		
-		if (leftClicked > 0){
+		if (screenState->leftClicked > 0){
 			freeFly(particleUnderClick);
 			Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
 
@@ -191,23 +173,71 @@ void getInput(window* screenWindow){
 			collisionEvent(particleUnderClick->num);
 		}
 		else{
-			int resultat = getParticleUnderClick(screenWindow);
-
+			int resultat = getWhatsUnderClick(screenWindow, screenState);
+			if (resultat == 2){
+				screenState->wallMoving = true;
+				Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
+				if (Lx < pos.x/screenWindow->factor)
+					Lx = pos.x/screenWindow->factor;
+			}
+			if (resultat == 3){
+				screenState->wallMoving = true;
+				Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
+				if (Ly < (Ly - pos.y/screenWindow->factor)){
+					Ly = (Ly - pos.y/screenWindow->factor);
+					screenWindow->cam.target.y += fabs(pos.y);
+				}
+			}
 			if (resultat == 1){
 				GuiLock();
-				leftClicked = 1;
-				selected = 1;
+				screenState->leftClicked = 1;
+				screenState->selected = 1;
 			}
 			else if (resultat == 0){
-				selected = 0;
+				screenState->selected = 0;
 			}
 		}
 	}
 	else{
 		GuiUnlock();
-		leftClicked = 0;
+		screenState->leftClicked = 0;
+		if (screenState->wallMoving){
+			screenState->wallMoving = false;
+			for(int i = 0; i < N; i++){
+				particle* p = particles + i;
+				freeFly(p);
+				if (addWell){
+					free(p->particlesInWell);
+				}
+				
+			}
+			for (int i = 0; i < Nxcells; i++){
+				free(cellList[i]);
+			}
+			free(cellList);
+			boxConstantHelper();
+			cellListInit();
+			if (addWell)
+				pairsInit();
+			
+			for (int i = 0; i < N; i++){
+				particle* p = particles + i;
+				removeEventFromQueue(eventList[N + p->num]);
+				collisionEvent(p->num);
+				removeEventFromQueue(eventList[p->num]);
+				crossingEvent(p->num);
+			}
+		}
 	}
 
+	if (IsKeyPressed(KEY_SPACE) && !screenState->spacePressed){
+		screenState->spacePressed = true;
+		screenState->running = !screenState->running;
+	}
+	
+	if (IsKeyReleased(KEY_SPACE)){
+		screenState->spacePressed = false;
+	}
 }
 
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue){
@@ -216,15 +246,15 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 	*value = (double)floatValue;
 }
 
-void drawParticlesAndBox(double factor){
+void drawParticlesAndBox(double factor, state* screenState, float zoom){
 	double min = 1000000000000;
 	double max = -1;
-
-	if (colorParam2 != 0){
+	particle* particleUnderClick = screenState->particleUnderClick;
+	if (screenState->colorParam2 != 0){
 		
 		for (int i = 0; i < N; i++){
-			double v = colorFunction(particles + i);
-			colorFunctionArray[i] = v;
+			double v = screenState->colorFunction(particles + i);
+			screenState->colorFunctionArray[i] = v;
 			if (min > v){
 				min = v;
 			}
@@ -237,36 +267,37 @@ void drawParticlesAndBox(double factor){
 		}
 	}
 	for (int i = N - 1; i >= 0; i--){	
-		if (colorParam2 != 0){
-			particleColor = colorSelect((colorFunctionArray[i] - min)/(max - min));
+		if (screenState->colorParam2 != 0){
+			screenState->particleColor = colorSelect((screenState->colorFunctionArray[i] - min)/(max - min), screenState->colorArray);
 		}
 		else{
-			particleColor = particleArray[particles[i].type];
+			screenState->particleColor = screenState->particleArray[particles[i].type];
 		}
-		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, particleColor);
+		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, screenState->particleColor);
 		
 	}
-	if (selected){
+	if (screenState->selected){
 		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
 	}
 	if (addWallx){
-		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor} , 0.3*factor, BLACK);
-		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor, BLACK);
+		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor} , 0.3*factor/zoom, BLACK);
+		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, BLACK);
 	}
 	if (addWally){
-		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0} , 0.3*factor, BLACK);
-		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor, BLACK);
+		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0} , 0.3*factor/zoom, BLACK);
+		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, BLACK);
 	}
 	else if (addCircularWall){
 		DrawRing((Vector2){Lx/2*factor, Lx/2*factor}, Lx/2*factor, (Lx/2 + 1)*factor, 0, 360, 360, BLACK);
 	}
 }
 
-void draw(int argc, char *argv[], window* screenWindow){
+void draw(int argc, char *argv[], window* screenWindow, state* screenState){
     int start = screenWindow->start;
 	double xGUI = screenWindow->xGUI;
     double yGUI = screenWindow->yGUI;
     double factor = screenWindow->factor;
+	particle* particleUnderClick = screenState->particleUnderClick;
 
 	BeginDrawing();
 
@@ -274,20 +305,19 @@ void draw(int argc, char *argv[], window* screenWindow){
 
 	char name[200];	
 	
-	
 	BeginMode2D(screenWindow->cam);
-	
-	drawParticlesAndBox(factor);
+	printf("%f %f\n", screenWindow->cam.target.x, screenWindow->cam.target.y);
+	drawParticlesAndBox(factor, screenState, screenWindow->cam.zoom);
 	
 	EndMode2D();
 
 	DrawRectangle(start, 0, GetScreenWidth() - GetScreenHeight(), GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
 
-	if (selected){
+	if (screenState->selected){
 		int changes = 0;
-		changes += doubleBox(&(particleUnderClick->vx), "vx", &editVx, (Rectangle){ start + 40*xGUI, 800*yGUI, 120*xGUI, 24*yGUI});
-		changes += doubleBox(&(particleUnderClick->vy), "vy", &editVy, (Rectangle){ start + 40*xGUI, 824*yGUI, 120*xGUI, 24*yGUI});
-		changes += doubleBox(&(particleUnderClick->m), "m", &editM, (Rectangle){ start + 40*xGUI, 848*yGUI, 120*xGUI, 24*yGUI});
+		changes += doubleBox(&(particleUnderClick->vx), "vx", &screenState->editVx, (Rectangle){ start + 40*xGUI, 800*yGUI, 120*xGUI, 24*yGUI});
+		changes += doubleBox(&(particleUnderClick->vy), "vy", &screenState->editVy, (Rectangle){ start + 40*xGUI, 824*yGUI, 120*xGUI, 24*yGUI});
+		changes += doubleBox(&(particleUnderClick->m), "m", &screenState->editM, (Rectangle){ start + 40*xGUI, 848*yGUI, 120*xGUI, 24*yGUI});
 		if (changes){
 			particleUnderClick->coll++;
 
@@ -298,59 +328,59 @@ void draw(int argc, char *argv[], window* screenWindow){
 		}
 	}
 
-	if (colorEditing2) 
+	if (screenState->colorEditing2) 
 		GuiLock();
 
-	int dirtyColorParam2 = colorParam2;
-	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &colorParam2, colorEditing2)){
+	int dirtyColorParam2 = screenState->colorParam2;
+	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &screenState->colorParam2, screenState->colorEditing2)){
 		
-		colorEditing2 = !colorEditing2;
-		if (colorParam2 == 0){
-			particleColor = MAROON;
+		screenState->colorEditing2 = !screenState->colorEditing2;
+		if (screenState->colorParam2 == 0){
+			screenState->particleColor = MAROON;
 		}
-		else if (colorParam2 == 1){
-			colorFunction = &colorCollision;
+		else if (screenState->colorParam2 == 1){
+			screenState->colorFunction = &colorCollision;
 		}
-		else if (colorParam2 == 2){
-			colorFunction = &colorVelocity;
+		else if (screenState->colorParam2 == 2){
+			screenState->colorFunction = &colorVelocity;
 		}
-		else if (colorParam2 == 3){
+		else if (screenState->colorParam2 == 3){
 			nSym = 6;
-			colorFunction = &colorBOOP;
+			screenState->colorFunction = &colorBOOP;
 		}
-		else if (colorParam2 == 4){
+		else if (screenState->colorParam2 == 4){
 			nSym = 4;
-			colorFunction = &colorBOOP;
+			screenState->colorFunction = &colorBOOP;
 		}
-		if ((dirtyColorParam2 == 0) && (colorParam2 != 0)){
-			colorFunctionArray = calloc(N, sizeof(double));
+		if ((dirtyColorParam2 == 0) && (screenState->colorParam2 != 0)){
+			screenState->colorFunctionArray = calloc(N, sizeof(double));
 		}
-		else if ((dirtyColorParam2 != 0) && (colorParam2 == 0)){
-			free(colorFunctionArray);
+		else if ((dirtyColorParam2 != 0) && (screenState->colorParam2 == 0)){
+			free(screenState->colorFunctionArray);
 		}
 	}	
 
-	if (leftClicked == 0)
+	if (screenState->leftClicked == 0)
 		GuiUnlock();
 
-	if (colorParam2){
-		if (colorEditing) 
+	if (screenState->colorParam2){
+		if (screenState->colorEditing) 
 			GuiLock();
 
-		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Plasma;Viridis;Copper", &colorParam, colorEditing)){
-			colorEditing = !colorEditing;
-			if (colorParam == 0){
-				colorArray = Plasma;
+		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Plasma;Viridis;Copper", &screenState->colorParam, screenState->colorEditing)){
+			screenState->colorEditing = !screenState->colorEditing;
+			if (screenState->colorParam == 0){
+				screenState->colorArray = Plasma;
 			}
-			else if (colorParam == 1){
-				colorArray = Viridis;
+			else if (screenState->colorParam == 1){
+				screenState->colorArray = Viridis;
 			}
 			else{
-				colorArray = Copper;
+				screenState->colorArray = Copper;
 			}
 		}	
 
-		if (leftClicked == 0)
+		if (screenState->leftClicked == 0)
 			GuiUnlock();
 	}		
 		
@@ -479,12 +509,12 @@ void draw(int argc, char *argv[], window* screenWindow){
 		if (structFactorActivated)
 			free(positions);
 		freeArrays();
-		if (colorParam2)
-			free(colorFunctionArray);
+		if (screenState->colorParam2)
+			free(screenState->colorFunctionArray);
 		N = (int)Ntemp;
-		reset(argc, argv, &screenWindow->factor);
-		if (colorParam2)
-			colorFunctionArray = calloc(N, sizeof(double));
+		reset(argc, argv, &screenWindow->factor, screenState);
+		if (screenState->colorParam2)
+			screenState->colorFunctionArray = calloc(N, sizeof(double));
 	}
 
 
@@ -544,45 +574,45 @@ void draw(int argc, char *argv[], window* screenWindow){
 			free(positions);
 		freeArrays();
 
-		reset(argc, argv, &screenWindow->factor);
+		reset(argc, argv, &screenWindow->factor, screenState);
         
 		//}
 	}
 	
-	int dirtyWallParam = wallParam;
-	if (GuiDropdownBox((Rectangle){start + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &wallParam, wallEditing)){
-		wallEditing = !wallEditing;
-		if (dirtyWallParam != wallParam){
-			if (wallParam == 0){
+	int dirtyWallParam = screenState->wallParam;
+	if (GuiDropdownBox((Rectangle){start + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &screenState->wallParam, screenState->wallEditing)){
+		screenState->wallEditing = !screenState->wallEditing;
+		if (dirtyWallParam != screenState->wallParam){
+			if (screenState->wallParam == 0){
 				addWallx = 0;
 				addWally = 0;
 				addCircularWall = 0;
 			}
-			else if (wallParam == 1){
+			else if (screenState->wallParam == 1){
 				addWallx = 0;
 				addWally = 1;
 				addCircularWall = 0;
 			}
-			else if (wallParam == 2){
+			else if (screenState->wallParam == 2){
 				addWallx = 1;
 				addWally = 0;
 				addCircularWall = 0;
 			}
-			else if (wallParam == 3){
+			else if (screenState->wallParam == 3){
 				addWallx = 1;
 				addWally = 1;
 				addCircularWall = 0;
 			}
-			else if (wallParam == 4){
+			else if (screenState->wallParam == 4){
 				addWallx = 0;
 				addWally = 0;
 				addCircularWall = 1;
 			}
-			if (wallParam != 0){
+			if (screenState->wallParam != 0){
 				if (structFactorActivated)
 					free(positions);
 				freeArrays();
-				reset(argc, argv, &screenWindow->factor);
+				reset(argc, argv, &screenWindow->factor, screenState);
 			}
 			else{
 				if (addWell){
@@ -626,7 +656,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 		}
 	}
 	if (structFactorActivated){
-		if ((counter%10 == 0) && (running)){
+		if ((counter%10 == 0) && (screenState->running)){
 			//clock_t begin = clock();
 			awaitStructFactor();
 			//clock_t end = clock();
@@ -717,7 +747,7 @@ double colorBOOP(particle* p1){
 	return 0;
 }
 
-Color colorSelect(double value){
+Color colorSelect(double value, Color* colorArray){
 	return colorArray[(int)(value*color_size)];
 }
 
@@ -797,14 +827,14 @@ void awaitStructFactor(){
     }
 }
 
-void reset(int argc, char *argv[], double* factor){
+void reset(int argc, char *argv[], double* factor, state* screenState){
 	t = 0;
 	ncol = 0;
 	ncross = 0;
 	paulTime = 0;
 	actualPaulList = 0;
-	selected = 0;
-	leftClicked = 0;
+	screenState->selected = 0;
+	screenState->leftClicked = 0;
 	counter = 1;
 
 	
@@ -880,7 +910,6 @@ window graphicalInit(){
 	N = 2000;
 	phi = 0.5;
 	field = -0.001;
-	colorFunction = &colorCollision;
 	res = 1;
 	sig = 1.5;
 	U = 0.15;
@@ -914,4 +943,29 @@ window graphicalInit(){
         .yGUI = 1,
         .cam = cam,
     };
+}
+
+state GUIinit(){
+	return (state){
+		.leftClicked = 0,
+		.selected = 0,
+		.particleUnderClick = NULL,
+		.particleArray = {GRAY, MAROON},
+		.particleColor = BLACK,
+		.colorEditing = false,
+		.colorParam = 0,
+		.colorEditing2 = false,
+		.colorParam2 = 0,
+		.colorArray = Plasma,
+		.colorFunction = colorCollision,
+		.colorFunctionArray = NULL,
+		.running = true,
+		.wallMoving = false,
+		.spacePressed = false,
+		.editVx = false,
+		.editVy = false,
+		.editM = false,
+		.wallEditing = false,
+		.wallParam = 0,
+	};
 }

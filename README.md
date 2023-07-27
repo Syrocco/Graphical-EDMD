@@ -1,3 +1,5 @@
+You can try it [here on itch.io](https://syrocco.itch.io/graphical-molecular-dynamics)
+
 # Graphical Event Driven Molecular Dynamics
 
 

@@ -20,6 +20,7 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
+
 #ifndef G
 #define G 1
 #endif
@@ -1222,9 +1223,8 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	PBC(&dx, &dy);
 	double b = dx*dvx + dy*dvy - dvr*dr;
 
-	//no collision.
-	if (b > 0)
-		return 1000000000000;
+	
+	
 
 
 	double v2 = dvx*dvx + dvy*dvy;
@@ -1232,15 +1232,29 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	double det = pow(b, 2) - (v2 - dvr*dvr)*(distOfSquare - dr*dr);
 
 
-	//to delete when confident with life decisions...
+
+
+	if (det < 0)
+		return 1000000000000;
+ 
+	double plus = (-b + sqrt(det))/(v2 - dvr*dvr);
+	double minus = (-b - sqrt(det))/(v2 - dvr*dvr);
+	if (((minus > 0) && (plus > 0) && (minus < plus)) || ((minus > 0) && (plus < 0))){
+		return minus;
+	}
+	//hacky
+	else if (((minus > 0) && (plus > 0.0000000001) && (plus < minus)) || (minus < 0) && (plus > 0.0000000001)){
+		return plus;
+	}
+
 	if (distOfSquare - dr*dr< -0.01){
 		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
 		exit(3);
 	}
+	
+	return 1000000000000;
 
-	if (det < 0)
-		return 1000000000000;
-	return (-b - sqrt(det))/(v2 - dvr*dvr);
+	
 
 }
 
@@ -1306,15 +1320,14 @@ double sphereTime(particle* p1, particle* p2){
 
 
 	double v2 = dvx*dvx + dvy*dvy;
-	double distOfSquare = dx*dx + dy*dy -  sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	double distOfSquare = dx*dx + dy*dy - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
 	double det = b*b - v2*distOfSquare;
 
 
 	if (det < 0)
 		return 100000000;
 
-	double logT = logTime((-b - sqrt(det))/v2);
-	return logT;
+	return logTime((-b - sqrt(det))/v2);
 }
 
 
@@ -1727,7 +1740,7 @@ void doTheWallGrow(){
 	else if (xy == 1){
 
 		if (pi->y  + 2*pi->rad > Ly - 5){
-			pi->vy = -pi->vy -2*vrParticle;
+			pi->vy = -pi->vy - 2*vrParticle;
 		}
 		else{
 			pi->vy = -pi->vy + 2*vrParticle;
@@ -2042,18 +2055,18 @@ void doIn(){
 
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 
-	if (U > 0){
+	if (U < 0){
 		addParticleInWellList(pi, j);
 		addParticleInWellList(pj, i);
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*U);
+		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) - 2*mi*mj*(mi + mj)*U);
 		vif = (mi*atroce + horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce - horrible)/(mj*(mi + mj));
 	}
 	else{
-		if (U > -temporary/(2*(mi + mj))){
+		if (U < -temporary/(2*(mi + mj))){
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			addParticleInWellList(pi, j);
@@ -2133,10 +2146,10 @@ void doOut(){
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 	double vif, vjf;
 
-	if (U > 0){
-		if (U < temporary/(2*(mi + mj))){ //leaves the square well
+	if (U < 0){
+		if (U > temporary/(2*(mi + mj))){ //leaves the square well
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
+			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			removeParticleInWellList(pi, j);
@@ -2150,7 +2163,7 @@ void doOut(){
 	}
 	else{
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
+		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
 		vif = (mi*atroce - horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 		removeParticleInWellList(pi, j);
@@ -2595,15 +2608,17 @@ void normalizePhysicalQ(){
 }
 
 void optimizeGrowConstant(){
-	//baseGrow is highly dependent on initial velocity. Reflect on that later
 	double baseGrow;
+	double criticalPhi = 0.8;
 	if (addCircularWall){
 		baseGrow = 0.03;
 	}
 	else{
-		baseGrow = 0.03;
+		baseGrow = 0.1;
 	}
-	double criticalPhi = 0.8;
+	if ((sizeratio > 0.5) && (fractionSmallN < 0.5) && (phi > 0.82)){
+		baseGrow *= 0.3;
+	}
 	if (phi < criticalPhi){
 		vr = baseGrow;
 	}

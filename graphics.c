@@ -501,7 +501,7 @@ void draw(int argc, char *argv[], window* screenWindow){
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.86);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.85);
 	if ((phiTemp != phi) || (fractionSmallNTemp != fractionSmallN) || (sizeratioTemp != sizeratio)){
 	/*
 		if ((phiTemp > phi) && (t > 1/vr)){
@@ -685,8 +685,8 @@ double colorCollision(particle* p){
 
 double colorBOOP(particle* p1){
 	double treshold = 2;
-	if ((addWell) && (U < 0)){
-		treshold = 2*sig;
+	if ((addWell) && (U > 0)){
+		treshold *= sig;
 	}
 	int count = 0;
 	int X = p1->cell[0];
@@ -883,7 +883,7 @@ window graphicalInit(){
 	colorFunction = &colorCollision;
 	res = 1;
 	sig = 1.5;
-	U = -0.15;
+	U = 0.15;
 	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;

@@ -123,6 +123,7 @@ const int addDelta = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
+bool polydispersity = false;
 #else
 const int addWell = 0;
 const int addField = 0;
@@ -135,6 +136,7 @@ const int addDelta = 0;
 const int addDoubleDelta = 1;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
+int polydispersity = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -201,6 +203,9 @@ double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
 
+double a = 2;
+double b = 5;
+
 
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
 double updateTime = 100;
@@ -265,7 +270,6 @@ void* computeEvolution(void *arg){
 
 			nextEvent = findNextEvent();
 
-			
 			//double dtEventM = nextEvent->t - t;
 			//if (dtEventM < 0.){
 			//	printf("%lf %d %d %d | ", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
@@ -513,6 +517,9 @@ void constantInit(int argc, char *argv[]){
 		if (addCircularWall){
 			Lx = sqrt(4*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
 		}
+		else if (polydispersity){
+			Lx = sqrt(M_PI*N/phi*b*tgamma(1 + 2/a)*tgamma(b)/tgamma(1 + b + 2/a));
+		}
 		else{
 			Lx = sqrt(M_PI*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
 		}
@@ -562,10 +569,20 @@ void particlesInit(){
 		normalizePhysicalQ();
 	}
 	else{
-		Nsmall= (int)(N*fractionSmallN);
-		Nbig = N - Nsmall;
+		
 		double EinitGrow = 0.5;
 		particle* p;
+		optimizeGrowConstant();
+		double targetRad[N];
+		if (polydispersity){
+			for (int i = 0; i < N; i++)	
+				targetRad[i] = pow(1 - pow(1 - drand(0, 1), 1/b), 1/a);
+			qsort(targetRad, N, sizeof(double), cmpDouble);
+		}
+		else{
+			Nsmall= (int)(N*fractionSmallN);
+			Nbig = N - Nsmall;
+		}
 		for (int i = 0; i < N; i++){
 			p = particles + i;
 			if (addCircularWall){
@@ -581,15 +598,27 @@ void particlesInit(){
 			}
 			p->num = i;
 			p->rad = 0;
-			if (i < Nbig){
+
+			if (polydispersity){
+				p->vr = vr*targetRad[i];
 				p->type = 1;
-				p->m = 1;
+				p->m = pow(targetRad[i], 3);
 			}
 			else{
-				p->type = 0;
-				p->m = pow(sizeratio, 3);
+				if (i < Nbig){
+					p->type = 1;
+					p->m = 1;
+					p->vr = vr;
+					
+				}
+				else{
+					p->type = 0;
+					p->m = pow(sizeratio, 3);
+					p->vr = vr*sizeratio;
+				}
 			}
-			
+
+
 			p->t = 0;
 			p->coll = 0;
 
@@ -601,6 +630,7 @@ void particlesInit(){
 			p->lastColl = 0;
 		}
 	}
+
 	
 
 	
@@ -707,7 +737,7 @@ void eventListInit(){
 	root->lft = NULL;
 	root->top = NULL;
 
-	optimizeGrowConstant();
+	
 	
 	#if G != 1
 	addEventThermo(dtimeThermo);
@@ -1213,14 +1243,12 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 	double dvx = p2->vx - p1->vx;
 	double dvy = p2->vy - p1->vy;
-	double vr1 = growthSpeed(p1);
-	double vr2 = growthSpeed(p2);
-	double dvr = vr1 + vr2;
+	double dvr = p1->vr + p2->vr;
 	
 
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
-	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*vr2));
+	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*p2->vr));
 	PBC(&dx, &dy);
 	double b = dx*dvx + dy*dvy - dvr*dr;
 
@@ -1556,7 +1584,7 @@ void collisionEventGrow(int i){
 	int typeTemp;
 
 
-	double vrParticle = growthSpeed(p1);
+	double vrParticle = p1->vr;
 	
 	if (addWally){
 		double vyPlus = p1->vy + vrParticle;
@@ -1727,7 +1755,7 @@ void doTheWallGrow(){
 	particle* pi = particles + i;
 	freeFly(pi);
 
-	double vrParticle = growthSpeed(pi);
+	double vrParticle = pi->vr;
 
 	//hacky
 	if (xy == 0){
@@ -1863,9 +1891,7 @@ void doTheCollisionGrow(){
 
 	double dvx = pj->vx - pi->vx;
 	double dvy = pj->vy - pi->vy;
-	double vri = growthSpeed(pi);
-	double vrj = growthSpeed(pj);
-	double dvr = vri + vrj;
+	double dvr = pi->vr + pj->vr;;
 
 
 	PBC(&dx, &dy);
@@ -2437,13 +2463,7 @@ void freeFlyGrow(particle* p){
 
 	p->x += dt*p->vx;
 	p->y += dt*p->vy;
-	
-	if (p->type == 0)
-		p->rad += sizeratio*dt*vr;
-	else{
-		p->rad += dt*vr;
-	}
-
+	p->rad += dt*p->vr;
 
 	PBCpost(&(p->x), 1);
 	PBCpost(&(p->y), 0);
@@ -2617,8 +2637,10 @@ void optimizeGrowConstant(){
 	else{
 		baseGrow = 0.1;
 	}
-	if ((sizeratio > 0.5) && (fractionSmallN < 0.5) && (phi > 0.82)){
-		baseGrow *= 0.3;
+	if (polydispersity != 0){
+		if ((sizeratio > 0.5) && (fractionSmallN < 0.9) && (phi > 0.82)){
+			baseGrow *= 0.1;
+		}
 	}
 	if (phi < criticalPhi){
 		vr = baseGrow;
@@ -2628,13 +2650,6 @@ void optimizeGrowConstant(){
 	}
 }
 
-double growthSpeed(particle* p){
-	if (p->type == 0){
-		return vr*sizeratio;
-	}
-	return vr;
-	
-}
 
 void randomGaussian(particle* p){
 	double u1 = genrand_real3();
@@ -2678,8 +2693,13 @@ void PBC(double* dx, double* dy){
 	}
 }
 
+int cmpDouble(const void * a, const void * b){
+    double A = *(double*) a;
+   	double B = *(double*) b;
+    return (int)sign(B - A);
+}
+
 double PBCinsideCell(double dx, int x){
-	
 	if (x){
 		if (dx >= halfLx)
 			return dx - Lx;

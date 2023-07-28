@@ -306,7 +306,6 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	char name[200];	
 	
 	BeginMode2D(screenWindow->cam);
-	printf("%f %f\n", screenWindow->cam.target.x, screenWindow->cam.target.y);
 	drawParticlesAndBox(factor, screenState, screenWindow->cam.zoom);
 	
 	EndMode2D();
@@ -332,7 +331,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		GuiLock();
 
 	int dirtyColorParam2 = screenState->colorParam2;
-	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based", &screenState->colorParam2, screenState->colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based; Radius Based", &screenState->colorParam2, screenState->colorEditing2)){
 		
 		screenState->colorEditing2 = !screenState->colorEditing2;
 		if (screenState->colorParam2 == 0){
@@ -352,13 +351,32 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			nSym = 4;
 			screenState->colorFunction = &colorBOOP;
 		}
+		else if (screenState->colorParam2 == 5){
+			nSym = 4;
+			screenState->colorFunction = &colorRadius;
+		}
 		if ((dirtyColorParam2 == 0) && (screenState->colorParam2 != 0)){
 			screenState->colorFunctionArray = calloc(N, sizeof(double));
 		}
 		else if ((dirtyColorParam2 != 0) && (screenState->colorParam2 == 0)){
 			free(screenState->colorFunctionArray);
 		}
-	}	
+	}
+
+	bool tempPoly = polydispersity;
+	GuiCheckBox((Rectangle){start + 100*xGUI, 715*yGUI, 40*xGUI, 40*yGUI}, "Polydisp.", &polydispersity);
+	if (polydispersity != tempPoly){
+		if (polydispersity){
+			//small hack to get the structure factor right!
+			fractionSmallN = 0;
+		}
+		if (structFactorActivated)
+			free(positions);
+		freeArrays();
+
+		reset(argc, argv, &screenWindow->factor, screenState);
+		
+	}
 
 	if (screenState->leftClicked == 0)
 		GuiUnlock();
@@ -367,7 +385,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		if (screenState->colorEditing) 
 			GuiLock();
 
-		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 740*yGUI, 120*xGUI, 24*yGUI }, "Plasma;Viridis;Copper", &screenState->colorParam, screenState->colorEditing)){
+		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, "Plasma;Viridis;Copper", &screenState->colorParam, screenState->colorEditing)){
 			screenState->colorEditing = !screenState->colorEditing;
 			if (screenState->colorParam == 0){
 				screenState->colorArray = Plasma;
@@ -517,16 +535,17 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			screenState->colorFunctionArray = calloc(N, sizeof(double));
 	}
 
-
 	double sizeratioTemp = sizeratio;
-	sprintf(name, "%.3lf", sizeratio);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI}, "Sizeratio", name, &sizeratio, 0.25, 1);
-
-
 	double fractionSmallNTemp = fractionSmallN;
-	sprintf(name, "%.3lf", fractionSmallN);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI}, "Frac. Of Small.", name, &fractionSmallN, 0, 1);
+	if (!polydispersity){
+		
+		sprintf(name, "%.3lf", sizeratio);
+		GuiSliderBarDouble((Rectangle){start + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI}, "Sizeratio", name, &sizeratio, 0.25, 1);
 
+
+		sprintf(name, "%.3lf", fractionSmallN);
+		GuiSliderBarDouble((Rectangle){start + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI}, "Frac. Of Small.", name, &fractionSmallN, 0, 1);
+	}
 	
 
 	double phiTemp = phi;
@@ -711,6 +730,10 @@ double colorVelocity(particle* p){
 
 double colorCollision(particle* p){
 	return (double)p->coll;
+}
+
+double colorRadius(particle* p){
+	return (double)p->rad;
 }
 
 double colorBOOP(particle* p1){

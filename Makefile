@@ -4,7 +4,7 @@ G ?= 1
 ifeq ($(G), 0)
 	CFLAGS = -Ofast -Wall -Wextra -march=native -lm
 else
-	CFLAGS = graphics.c -march=native -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 -fopenmp 
+	CFLAGS = -Ofast graphics.c -march=native -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 -fopenmp 
 endif
 
 EDMD: EDMD.c

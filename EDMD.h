@@ -13,7 +13,7 @@ struct arguments{
 
 typedef struct particle particle;
 struct particle{
-	double rad, x, y, vx, vy, m, lastColl, t;
+	double rad, x, y, vx, vy, m, lastColl, t, vr;
 	particle *prv, *nxt;
 	int num, type, numberOfParticlesInWell, cell[2], crossX, crossY, synchro;
 	int* particlesInWell;
@@ -101,12 +101,12 @@ double sign(double x);
 double logTime(double time);
 double drand(double min, double max);
 void randomGaussian(particle* p);
-double growthSpeed(particle* p);
 void optimizeGrowConstant();
 void PBC(double* dx, double* dy);
 void PBCpost(double* val, int x);
 double PBCinsideCell(double dx, int x);
 void physicalQ();
+int cmpDouble(const void * a, const void * b);
 void normalizePhysicalQ();
 void customName();
 int mygetline(char* str, FILE* f);

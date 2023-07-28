@@ -35,12 +35,14 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 	double x = pos.x/factor;
 	double y = Ly - pos.y/factor; 
 
-	if ((addWallx) && (x > Lx - 5) && (x < Lx + 5)){
-		return 2;
-	}
-	if ((addWally) && (y > Ly - 5) && (y < Ly + 5)){
-		return 3;
-	}
+	if (t > 1/vr){
+		if ((addWallx) && (x > Lx - 5) && (x < Lx + 5)){
+			return 2;
+		}
+		if ((addWally) && (y > Ly - 5) && (y < Ly + 5)){
+			return 3;
+		}
+		}
 	if ((x < Lx) && (y < Ly)){
 		int X = coordToCell(x, 1);
 		int Y = coordToCell(y, 0);
@@ -733,7 +735,7 @@ double colorCollision(particle* p){
 }
 
 double colorRadius(particle* p){
-	return (double)p->rad;
+	return p->rad;
 }
 
 double colorBOOP(particle* p1){

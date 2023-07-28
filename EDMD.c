@@ -1784,15 +1784,15 @@ void doTheWallGrow(){
 		double vx = pi->vx;
 		double vy = pi->vy;
 		
-		if (1){
+		if (0){
 			double mix = -(1 + resW)*(sign(vx)*4*vrParticle*nx + sign(vy)*4*vrParticle*ny);
 			pi->vx = mix*nx;
 			pi->vy = mix*ny;
 		}
 		else{
 			double mix = -(1 + resW)*(pi->vx*nx + pi->vy*ny);
-			pi->vx += (mix - vrParticle)*nx;
-			pi->vy += (mix - vrParticle)*ny;
+			pi->vx += (mix - 2*vrParticle)*nx;
+			pi->vy += (mix - 2*vrParticle)*ny;
 		}
 	}
 

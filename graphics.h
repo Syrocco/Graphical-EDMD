@@ -13,6 +13,7 @@ extern int noise;
 extern bool addWell;
 extern bool addField;
 extern bool polydispersity;
+extern double vr;
 extern double dtnoise;
 extern double t;
 extern double gamm;

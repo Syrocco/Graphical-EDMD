@@ -1,4 +1,4 @@
-You can try it [here on itch.io](https://syrocco.itch.io/graphical-molecular-dynamics)
+You can try it [here on github Pages](https://syrocco.github.io/Graphical-EDMD/)
 
 # Graphical Event Driven Molecular Dynamics
 

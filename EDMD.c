@@ -514,14 +514,15 @@ void constantInit(int argc, char *argv[]){
 			Ly = Lx;
 	}
 	else{
-		if (addCircularWall){
-			Lx = sqrt(4*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
+		double r2 = (1 + fractionSmallN*(sizeratio*sizeratio - 1));
+		if (polydispersity){
+			r2 = b*tgamma(1 + 2/a)*tgamma(b)/tgamma(1 + b + 2/a);
 		}
-		else if (polydispersity){
-			Lx = sqrt(M_PI*N/phi*b*tgamma(1 + 2/a)*tgamma(b)/tgamma(1 + b + 2/a));
+		if (addCircularWall){
+			Lx = sqrt(4*N/phi*r2);
 		}
 		else{
-			Lx = sqrt(M_PI*N/phi*(1 + fractionSmallN*(sizeratio*sizeratio - 1)));
+			Lx = sqrt(M_PI*N/phi*r2);
 		}
 		Ly = Lx;
 	}

@@ -110,3 +110,4 @@ void reset(int argc, char* argv[], double* factor, state* screenState);
 int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 window graphicalInit();
 state GUIinit();
+void graphicsFree(state* screenState);

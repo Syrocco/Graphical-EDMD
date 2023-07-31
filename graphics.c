@@ -630,6 +630,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				addCircularWall = 1;
 			}
 			if (screenState->wallParam != 0){
+				
 				if (structFactorActivated)
 					free(positions);
 				freeArrays();
@@ -955,10 +956,11 @@ window graphicalInit(){
     InitWindow(1800, 900, "EDMD");
 	SetTargetFPS(144);
 	image = GenImageColor(qN, qN, BLANK);
+	UnloadImageColors(image.data);
 	image.data = structFactor;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);
-
+	
     return (window){
         .screenWidth = 1800,
         .screenHeight = 900,
@@ -993,4 +995,12 @@ state GUIinit(){
 		.wallEditing = false,
 		.wallParam = 0,
 	};
+}
+
+void graphicsFree(state* screenState){
+	if (structFactorActivated)
+		free(positions);
+	UnloadTexture(texture);     
+	if (screenState->colorParam2)
+		free(screenState->colorFunctionArray);
 }

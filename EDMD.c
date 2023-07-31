@@ -347,6 +347,8 @@ void* computeEvolution(void *arg){
 		fclose(fichier);
 		if (ther)
 			fclose(thermo);
+		#else
+		graphicsFree(&screenState);
 		#endif
 		freeArrays();
 	pthread_exit(NULL);

@@ -353,6 +353,8 @@ void* computeEvolution(void *arg){
 		freeArrays();
 	#if G
 	pthread_exit(NULL);
+	#else
+	return NULL;
 	#endif
 }
 
@@ -1277,7 +1279,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 		return minus;
 	}
 	//hacky
-	else if (((minus > 0) && (plus > 0.0000000001) && (plus < minus)) || (minus < 0) && (plus > 0.0000000001)){
+	else if (((minus > 0) && (plus > 0.0000000001) && (plus < minus)) || ((minus < 0) && (plus > 0.0000000001))){
 		return plus;
 	}
 

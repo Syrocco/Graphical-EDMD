@@ -1,5 +1,4 @@
 #include "EDMD.h"
-#include "raylib.h"
 #include "mersenne.c" 
 #include "quartic.c" 
 #include<math.h>
@@ -10,7 +9,6 @@
 #include<time.h>
 #include<sys/stat.h>
 #include<sys/types.h>
-#include<pthread.h>
 #include<stdbool.h>
 
 #include<getopt.h>
@@ -27,6 +25,8 @@
 
 #if G
 #include "graphics.h"
+#include "raylib.h"
+#include<pthread.h>
 #endif
 
 #define MAX_BATCH_ELEMENTS  8192
@@ -351,7 +351,9 @@ void* computeEvolution(void *arg){
 		graphicsFree(&screenState);
 		#endif
 		freeArrays();
+	#if G
 	pthread_exit(NULL);
+	#endif
 }
 
 
@@ -2474,13 +2476,13 @@ void freeFlyGrow(particle* p){
 
 void saveTXT(){
 	if (reduce){
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y radius\n", t, N, Lx, Ly);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y radius\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
 			fprintf(fichier, "%d %d %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].rad);
 		}
 	}
 	else{
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS xy xz yz\n0 %lf 0\n0 %lf 0\n0 2 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
 			
             int synchro = 0;
@@ -2756,7 +2758,12 @@ void physicalQ(){
 }
 
 void customName(){
+	
+	#if defined(_WIN32)
+	_mkdir("dump/");
+	#else 
 	mkdir("dump/", 0777);
+	#endif
 	int v = 1;
 	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){

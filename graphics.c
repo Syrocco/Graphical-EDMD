@@ -49,7 +49,7 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				screenState->particleUnderClick = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+				screenState->particleUnderClick = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
 				while (screenState->particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (pow((screenState->particleUnderClick->x - x), 2) + pow(screenState->particleUnderClick->y - y, 2) < screenState->particleUnderClick->rad*screenState->particleUnderClick->rad){
 						return 1;
@@ -212,9 +212,6 @@ void getInput(window* screenWindow, state* screenState){
 					free(p->particlesInWell);
 				}
 				
-			}
-			for (int i = 0; i < Nxcells; i++){
-				free(cellList[i]);
 			}
 			free(cellList);
 			boxConstantHelper();
@@ -439,9 +436,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			}
 			
 		}
-		for (int i = 0; i < Nxcells; i++){
-			free(cellList[i]);
-		}
+		
 		free(cellList);
 		boxConstantHelper();
 		cellListInit();
@@ -464,9 +459,6 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		float sigTemp = sig;
 		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI}, "Pot. rad.", name, &sig, 1.01f, 2.5f);
 		if (sig != sigTemp){
-			for (int i = 0; i < Nxcells; i++){
-					free(cellList[i]);
-			}
 			free(cellList);
 			boxConstantHelper();
 			cellListInit();
@@ -566,9 +558,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				p->y = p->y*mult;
 			}
 			printf("Lx = %lf\n", Lx);
-			for (int i = 0; i < Nxcells; i++){
-				free(cellList[i]);
-			}
+			
 			free(cellList);
 			boxConstantHelper();
 			cellListInit();
@@ -751,7 +741,7 @@ double colorBOOP(particle* p1){
 	double im = 0;
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
 			while ((p2 != NULL) && (p2->type == 1)){ //while there is a particle in the doubly linked list of the cellList do...
 				if ((p1->num != p2->num) && (p1->type == 1)){
 					double dy = p1->y - p2->y;

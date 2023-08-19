@@ -102,7 +102,7 @@ double tmax = 1000000;
 //time between each screenshots
 double dtime = 1;
 
-double dtimeThermo = 10000;
+double dtimeThermo = 1;
 double firstScreen = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -131,9 +131,9 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
+const int damping = 0;
 const int addDelta = 0;
-const int addDoubleDelta = 1;
+const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 int polydispersity = 0;
@@ -165,7 +165,7 @@ const int reduce = 0;
 
 
 //value for delta model
-double delta = 0.03;
+double delta = 0.2;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -194,10 +194,10 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.01;
+double gamm = 0.3;
 double T = 0;
 double expE = 1;
 //time between kicks
@@ -228,7 +228,7 @@ node *root;
 //array containing the particles
 particle* particles;
 //2D array of pointer
-particle*** cellList;
+particle** cellList;
 node** eventList;
 node** eventPaul;
 //variable containing the nextEvent
@@ -269,7 +269,6 @@ void* computeEvolution(void *arg){
 	#endif
 
 			nextEvent = findNextEvent();
-
 			//double dtEventM = nextEvent->t - t;
 			//if (dtEventM < 0.){
 			//	printf("%lf %d %d %d | ", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
@@ -672,7 +671,7 @@ void pairsInit(){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+				particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						double dx = p2->x - p1->x;
@@ -691,18 +690,15 @@ void pairsInit(){
 }
 
 /* ---------------------------------------------
-	Initializes the cellList. cellList[X][Y]
+	Initializes the cellList. cellList[X*Nxcells*Y]
 	points toward a single particle contained
 	in the cell {X, Y}, all the others particles
 	in the same cell are reachable by a
-	double linked list containing cellList[X][Y]
+	double linked list containing cellList[X*Nxcells*Y]
 --------------------------------------------- */
 void cellListInit(){
 
-	cellList = calloc(Nxcells, sizeof(particle**));
-	for (int i = 0; i < Nxcells; i++){
-		cellList[i] = calloc(Nycells, sizeof(particle*));
-	}
+	cellList = calloc(Nxcells*Nycells, sizeof(particle*));
 
 
 	for (int i = 0; i < N; i++){
@@ -796,9 +792,6 @@ void freeArrays(){
 		}	
 	}
 	free(particles);
-	for (int i = 0; i < Nxcells; i++){
-			free(cellList[i]);
-	}
 	free(cellList);
 	for (int i = 0; i < totalSize; i++){
 		free(eventList[i]);
@@ -829,8 +822,8 @@ void addToCell(int i){
 	p->cell[1] = Y;
 
 	p->prv = NULL;
-	p->nxt = cellList[X][Y];
-	cellList[X][Y] = p;
+	p->nxt = cellList[X*Nxcells + Y];
+	cellList[X*Nxcells + Y] = p;
 	if (p->nxt)
 		p->nxt->prv = p;
 
@@ -842,7 +835,7 @@ void addToCell(int i){
 void removeFromCell(int i){
 	particle* p = particles + i;
 	if (p->prv == NULL)
-		cellList[p->cell[0]][p->cell[1]] = p->nxt;
+		cellList[p->cell[0]*Nxcells + p->cell[1]] = p->nxt;
 	else
 		p->prv->nxt = p->nxt;
 	if (p->nxt != NULL)
@@ -857,22 +850,22 @@ int coordToCell(double a, int x){
 }
 
 
-int PBCcell(double a, int x){
-	if (x){
-		if (a < 0)
-			return a + Nxcells;
-		else if (a >= Nxcells)
-			return a - Nxcells;
-		return a;
-	}
-	else{
-		if (a < 0)
-			return a + Nycells;
-		else if (a >= Nycells)
-			return a - Nycells;
-		return a;
-	}
+int PBCcellX(double a){
+	if (a < 0)
+		return a + Nxcells;
+	else if (a >= Nxcells)
+		return a - Nxcells;
+	return a;
 }
+
+int PBCcellY(double a){
+	if (a < 0)
+		return a + Nycells;
+	else if (a >= Nycells)
+		return a - Nycells;
+	return a;
+}
+
 
 /* ---------------------------------------/
 /										  /
@@ -1076,12 +1069,12 @@ void crossingEventGrow(int i){
 	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	//printf("p: %d %lf |||", p.num, p.vx);
 	if (p.vx < 0){
-		travelTimeX = PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx;
+		travelTimeX = PBCinsideCellX(p.cell[0]*cellxSize - p.x)/p.vx;
 		xx = 1;
 		
 	}
 	else{
-		travelTimeX = PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx;
+		travelTimeX = PBCinsideCellX((1 + p.cell[0])*cellxSize - p.x)/p.vx;
 		xx = 2;
 		
 	}
@@ -1089,11 +1082,11 @@ void crossingEventGrow(int i){
 		
 
 	if (p.vy < 0){
-		travelTimeY = PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy;
+		travelTimeY = PBCinsideCellY(p.cell[1]*cellySize - p.y)/p.vy;
 		yy = 3;
 	}
 	else{
-		travelTimeY = PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy;
+		travelTimeY = PBCinsideCellY((1 + p.cell[1])*cellySize - p.y)/p.vy;
 		yy = 4;
 	}
 	
@@ -1116,12 +1109,12 @@ void crossingEventNormal(int i){
 	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	//printf("p: %d %lf |||", p.num, p.vx);
 	if (p.vx < 0){
-		travelTimeX = logTime(PBCinsideCell(p.cell[0]*cellxSize - p.x, 1)/p.vx);
+		travelTimeX = logTime(PBCinsideCellX(p.cell[0]*cellxSize - p.x)/p.vx);
 		xx = 1;
 		
 	}
 	else{
-		travelTimeX = logTime(PBCinsideCell((1 + p.cell[0])*cellxSize - p.x, 1)/p.vx);
+		travelTimeX = logTime(PBCinsideCellX((1 + p.cell[0])*cellxSize - p.x)/p.vx);
 		xx = 2;
 		
 	}
@@ -1129,14 +1122,14 @@ void crossingEventNormal(int i){
 
 	if (addField){
 		double vy = p.vy;
-		double dy = PBCinsideCell(p.y - (1 + p.cell[1])*cellySize, 0);
+		double dy = PBCinsideCellY(p.y - (1 + p.cell[1])*cellySize);
 		if (vy > sqrt(2*field*dy)){
 			travelTimeY = (-vy + sqrt(vy*vy - 2*field*dy))/field;
 			yy = 4;
 			
 		}
 		else{
-			dy = PBCinsideCell(p.y - p.cell[1]*cellySize, 0);
+			dy = PBCinsideCellY(p.y - p.cell[1]*cellySize);
 			travelTimeY = (-vy - sqrt(vy*vy - 2*field*dy))/field;
 			yy = 3;
 		}	
@@ -1145,11 +1138,11 @@ void crossingEventNormal(int i){
 		
 	else{
 		if (p.vy < 0){
-			travelTimeY = logTime(PBCinsideCell(p.cell[1]*cellySize - p.y, 0)/p.vy);
+			travelTimeY = logTime(PBCinsideCellY(p.cell[1]*cellySize - p.y)/p.vy);
 			yy = 3;
 		}
 		else{
-			travelTimeY = logTime(PBCinsideCell((1 + p.cell[1])*cellySize - p.y, 0)/p.vy);
+			travelTimeY = logTime(PBCinsideCellY((1 + p.cell[1])*cellySize - p.y)/p.vy);
 			yy = 4;
 		}
 	}
@@ -1225,8 +1218,8 @@ void doTheCrossing(){
 	}
 
 	p->prv = NULL;
-	p->nxt = cellList[p->cell[0]][p->cell[1]];
-	cellList[p->cell[0]][p->cell[1]] = p;
+	p->nxt = cellList[p->cell[0]*Nxcells + p->cell[1]];
+	cellList[p->cell[0]*Nxcells + p->cell[1]] = p;
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
@@ -1530,7 +1523,7 @@ void collisionEventNormal(int i){
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
 					if (addWell){
@@ -1650,7 +1643,7 @@ void collisionEventGrow(int i){
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcell(X + j, 1)][PBCcell(Y + k, 0)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
 					dtTemp = collisionTimeGrow(p1, p2);
@@ -1872,7 +1865,7 @@ void doTheWallNormal(){
 void doTheCollisionGrow(){
 
 	double delta = 0.03;
-	double res = 0.95;
+	double res = 0.75;
 
 	int i = nextEvent->i;
 	int j = nextEvent->j;
@@ -2460,8 +2453,8 @@ void freeFlyNormal(particle* p){
 		
 	}
 
-	PBCpost(&(p->x), 1);
-	PBCpost(&(p->y), 0);
+	PBCpostX(&(p->x));
+	PBCpostY(&(p->y));
 }
 
 void freeFlyGrow(particle* p){
@@ -2472,8 +2465,8 @@ void freeFlyGrow(particle* p){
 	p->y += dt*p->vy;
 	p->rad += dt*p->vr;
 
-	PBCpost(&(p->x), 1);
-	PBCpost(&(p->y), 0);
+	PBCpostX(&(p->x));
+	PBCpostY(&(p->y));
 }
 
 void saveTXT(){
@@ -2493,6 +2486,7 @@ void saveTXT(){
 			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
 		}
 	}
+	fflush(fichier);
 }
 
 void initializeThermo(){
@@ -2573,6 +2567,7 @@ void saveThermo(){
 			}
 		}
 	}
+	fflush(thermo);
 }
 
 double drand(double min, double max){
@@ -2706,38 +2701,33 @@ int cmpDouble(const void * a, const void * b){
     return (int)sign(B - A);
 }
 
-double PBCinsideCell(double dx, int x){
-	if (x){
-		if (dx >= halfLx)
-			return dx - Lx;
-		else if (dx < -halfLx){
-			return dx + Lx;
-
-		}
-		return dx;
-	}
-	else{
-		if (dx >= halfLy)
-			return dx - Ly;
-		else if (dx < -halfLy)
-			return dx + Ly;
-		return dx;
-	}
+double PBCinsideCellX(double dx){
+	if (dx >= halfLx)
+		return dx - Lx;
+	else if (dx < -halfLx)
+		return dx + Lx;
+	return dx;
 }
 
-void PBCpost(double* val, int x){
-	if (x){
-		if (*val < 0)
-			*val += Lx;
-		else if (*val >= Lx)
-			*val -= Lx;
-	}
-	else{
-		if (*val < 0)
-			*val += Ly;
-		else if (*val >= Ly)
-			*val -= Ly;
-	}
+double PBCinsideCellY(double dy){
+	if (dy >= halfLy)
+		return dy - Ly;
+	else if (dy < -halfLy)
+		return dy + Ly;
+	return dy;
+}
+
+void PBCpostX(double* val){
+	if (*val < 0)
+		*val += Lx;
+	else if (*val >= Lx)
+		*val -= Lx;
+}
+void PBCpostY(double* val){
+	if (*val < 0)
+		*val += Ly;
+	else if (*val >= Ly)
+		*val -= Ly;
 }
 
 

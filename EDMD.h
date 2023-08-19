@@ -51,8 +51,8 @@ void freeArrays();
 void addToCell(int i);
 void removeFromCell(int i);
 int coordToCell(double a, int x);
-int PBCcell(double a, int x);
-
+int PBCcellX(double a);
+int PBCcellY(double a);
 
 void addEventToQueue(node* toAdd);
 void addEventToTree(node* toAdd);
@@ -103,8 +103,10 @@ double drand(double min, double max);
 void randomGaussian(particle* p);
 void optimizeGrowConstant();
 void PBC(double* dx, double* dy);
-void PBCpost(double* val, int x);
-double PBCinsideCell(double dx, int x);
+void PBCpostX(double* val);
+void PBCpostY(double* val);
+double PBCinsideCellX(double dx);
+double PBCinsideCellY(double dy);
 void physicalQ();
 int cmpDouble(const void * a, const void * b);
 void normalizePhysicalQ();

@@ -25,7 +25,7 @@ extern double sig;
 extern double phi;
 extern double sizeratio;
 extern double fractionSmallN;
-extern particle*** cellList;
+extern particle** cellList;
 extern int Nxcells;
 extern int Nycells;
 extern long unsigned int ncol;

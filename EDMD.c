@@ -31,16 +31,6 @@
 
 #define MAX_BATCH_ELEMENTS  8192
 
-#define CELLCROSS 0
-#define COLLISION 1
-#define SCREENSHOT 2
-#define THERMO 6
-#define ADDINGNOISE 3
-#define WALL 4
-#define UPDATE 5
-#define OUT 8
-#define IN 7
-#define GROWSTOP 9
 
 #define CGREEN printf("\033[1;32m")
 #define CWHITE printf("\033[0;37m")
@@ -408,7 +398,7 @@ void boxConstantHelper(){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 300/(double)N;
+	dtPaul = 10/(double)N;
 
     paulListN = N;
 }
@@ -576,7 +566,7 @@ void particlesInit(){
 	}
 	else{
 		
-		double EinitGrow = 0.5;
+		double EinitGrow = 0.05;
 		particle* p;
 		optimizeGrowConstant();
 		double targetRad[N];
@@ -671,7 +661,8 @@ void pairsInit(){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
+				particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
+				//printf("id: %d vs: %d | PBC %d %d | Nxcells: %d Nycells: %d\n", PBCcellX(X + j)*Nycells + PBCcellY(Y + k), Nxcells*Nycells, PBCcellX(X + j), PBCcellX(Y + k), Nxcells, Nycells);
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						double dx = p2->x - p1->x;
@@ -690,11 +681,11 @@ void pairsInit(){
 }
 
 /* ---------------------------------------------
-	Initializes the cellList. cellList[X*Nxcells*Y]
+	Initializes the cellList. cellList[X*Nycells*Y]
 	points toward a single particle contained
 	in the cell {X, Y}, all the others particles
 	in the same cell are reachable by a
-	double linked list containing cellList[X*Nxcells*Y]
+	double linked list containing cellList[X*Nycells*Y]
 --------------------------------------------- */
 void cellListInit(){
 
@@ -822,8 +813,8 @@ void addToCell(int i){
 	p->cell[1] = Y;
 
 	p->prv = NULL;
-	p->nxt = cellList[X*Nxcells + Y];
-	cellList[X*Nxcells + Y] = p;
+	p->nxt = cellList[X*Nycells + Y];
+	cellList[X*Nycells + Y] = p;
 	if (p->nxt)
 		p->nxt->prv = p;
 
@@ -835,7 +826,7 @@ void addToCell(int i){
 void removeFromCell(int i){
 	particle* p = particles + i;
 	if (p->prv == NULL)
-		cellList[p->cell[0]*Nxcells + p->cell[1]] = p->nxt;
+		cellList[p->cell[0]*Nycells + p->cell[1]] = p->nxt;
 	else
 		p->prv->nxt = p->nxt;
 	if (p->nxt != NULL)
@@ -1218,8 +1209,8 @@ void doTheCrossing(){
 	}
 
 	p->prv = NULL;
-	p->nxt = cellList[p->cell[0]*Nxcells + p->cell[1]];
-	cellList[p->cell[0]*Nxcells + p->cell[1]] = p;
+	p->nxt = cellList[p->cell[0]*Nycells + p->cell[1]];
+	cellList[p->cell[0]*Nycells + p->cell[1]] = p;
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
@@ -1277,7 +1268,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	}
 
 	if (distOfSquare - dr*dr< -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
+		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
 	}
 	
@@ -1317,7 +1308,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected between particle %d and particle %d ! Position: %lf %lf %lf %lf and Speed: %lf %lf %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy);
+		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
 	}
 
@@ -1523,7 +1514,7 @@ void collisionEventNormal(int i){
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
 					if (addWell){
@@ -1604,7 +1595,7 @@ void collisionEventGrow(int i){
 	if (addWallx){
 		double vxPlus = p1->vx + vrParticle;
 		double vxMinus = p1->vx - vrParticle;
-		if ((X == 0) && (p1->vx < 0)){
+		if ((X == 0) && (vxMinus < 0)){
 			dtTemp = logTime(-(p1->x - p1->rad)/vxMinus);
 			if (dt > dtTemp){
 				type = WALL;
@@ -1643,7 +1634,7 @@ void collisionEventGrow(int i){
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
 			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 				if (p1->num != p2->num){
 					dtTemp = collisionTimeGrow(p1, p2);
@@ -1759,7 +1750,7 @@ void doTheWallGrow(){
 
 	//hacky
 	if (xy == 0){
-		if (pi->x + 2*pi->rad > Lx - 5){
+		if (pi->x > Lx - 2){
 			pi->vx = -pi->vx - 2*vrParticle;
 		}
 		else{
@@ -1768,7 +1759,7 @@ void doTheWallGrow(){
 	}
 	else if (xy == 1){
 
-		if (pi->y  + 2*pi->rad > Ly - 5){
+		if (pi->y > Ly - 2){
 			pi->vy = -pi->vy - 2*vrParticle;
 		}
 		else{

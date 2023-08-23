@@ -4,6 +4,17 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+enum event{
+	CELLCROSS,
+	COLLISION, 
+	SCREENSHOT,
+	THERMO,
+	ADDINGNOISE,
+	WALL, 
+	UPDATE,
+	OUT, IN,
+	GROWSTOP,
+};
 
 typedef struct arguments arguments;
 struct arguments{
@@ -25,8 +36,9 @@ struct particle{
 typedef struct node node;
 struct node{
 	node *lft, *rgt, *top;
-	int i, j, type, q; 
+	int i, j, q; 
 	double t;
+	enum event type;
 
 	unsigned long int collActual; //collActual = counter of collision at event prediciton
 };

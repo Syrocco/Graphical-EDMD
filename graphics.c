@@ -6,17 +6,15 @@
 #include "EDMD.h"
 #include <pthread.h>
 
-#define qN 200
+#define qN 180
 #define SIZE 400
-#define NUM_THREADS 6
-
+#define NUM_THREADS 11
 int nSym = 4; 
 
 double qx[qN] = {0};
 float structFactor[qN][qN] = {0};
 bool structFactorActivated = 0;
 position* positions;
-int counter = 0;
 pthread_t threads[NUM_THREADS];
 threadArg threadArgs[NUM_THREADS];
 
@@ -49,7 +47,7 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				screenState->particleUnderClick = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
+				screenState->particleUnderClick = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
 				while (screenState->particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (pow((screenState->particleUnderClick->x - x), 2) + pow(screenState->particleUnderClick->y - y, 2) < screenState->particleUnderClick->rad*screenState->particleUnderClick->rad){
 						return 1;
@@ -668,7 +666,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		}
 	}
 	if (structFactorActivated){
-		if ((counter%10 == 0) && (screenState->running)){
+		if (finishedStructComputation() && (screenState->running)){
 			//clock_t begin = clock();
 			awaitStructFactor();
 			//clock_t end = clock();
@@ -703,7 +701,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			//end = clock();
 			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
 			//printf("time took ASYNC: %lf\n", time_spent);
-			counter = 0;
+			
 		}
 		DrawTexturePro(texture,
             (Rectangle){ 0, 0, qN, qN },
@@ -713,7 +711,6 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	DrawFPS(GetScreenWidth() - 100, 10);
 	
 	EndDrawing();
-	counter++;
 }
 
 
@@ -741,7 +738,7 @@ double colorBOOP(particle* p1){
 	double im = 0;
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nxcells + PBCcellY(Y + k)];
+			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
 			while ((p2 != NULL) && (p2->type == 1)){ //while there is a particle in the doubly linked list of the cellList do...
 				if ((p1->num != p2->num) && (p1->type == 1)){
 					double dy = p1->y - p2->y;
@@ -776,13 +773,13 @@ void* computeStructureFactor(void* arg){
 	{
 		for (int j = 0; j < qN; j++)
 		{
-			double im = 0;
-			double re = 0;
+			float im = 0;
+			float re = 0;
 
 			for (int n = 0; n < N - (int)(N*fractionSmallN); n++)
 			{
 				p = positions + n;
-				double qr = qx[i]*p->x + qx[j]*p->y;
+				float qr = qx[i]*p->x + qx[j]*p->y;
 
 				re += cos(qr);
 				im += sin(qr);
@@ -795,11 +792,12 @@ void* computeStructureFactor(void* arg){
 			}
 		}
 	}
+	threadArgument->resting = 1;
 	pthread_exit(NULL);
 }
 
 void normalizeStruct(){
-	double max = 0;
+	float max = 0;
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
 			if (structFactor[i][j] > max){
@@ -824,15 +822,24 @@ void threadPoolInit(){
     for (int i = 0; i < NUM_THREADS; i++) {
         threadArgs[i].start = i*iterationsPerThread;
         threadArgs[i].end = (i + 1)*iterationsPerThread;
-        
+        threadArgs[i].resting = 1;
         // Distribute remaining iterations among threads
         if (i == NUM_THREADS - 1)
             threadArgs[i].end += remainingIterations;
 	}
 }
 
+bool finishedStructComputation(){
+	int temp = 0;
+	for (int i = 0; i < NUM_THREADS; i++){
+		temp += threadArgs[i].resting;
+	}
+	return (temp == NUM_THREADS);
+}
+
 void asyncStructFactor(){
 	for (int i = 0; i < NUM_THREADS; i++){
+		threadArgs[i].resting = 0;
 		pthread_create(&threads[i], NULL, computeStructureFactor, (void*)&threadArgs[i]);
 	}
 }
@@ -851,7 +858,6 @@ void reset(int argc, char *argv[], double* factor, state* screenState){
 	actualPaulList = 0;
 	screenState->selected = 0;
 	screenState->leftClicked = 0;
-	counter = 1;
 
 	
 	constantInit(argc, argv);

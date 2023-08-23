@@ -85,6 +85,7 @@ struct position{
 
 typedef struct threadArg threadArg;
 struct threadArg{
+    int resting;
     int start;
     int end;
 };
@@ -106,6 +107,7 @@ void normalizeStruct();
 void awaitStructFactor();
 void asyncStructFactor();
 void threadPoolInit();
+bool finishedStructComputation();
 void reset(int argc, char* argv[], double* factor, state* screenState);
 int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 window graphicalInit();

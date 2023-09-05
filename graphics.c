@@ -21,7 +21,9 @@ threadArg threadArgs[NUM_THREADS];
 Image image;
 Texture2D texture;
 
+Texture2D circleTexture;
 
+#define MAX_BATCH_ELEMENTS 8192*4
 
 int getWhatsUnderClick(window* screenWindow, state* screenState){
     double factor = screenWindow->factor;
@@ -270,8 +272,17 @@ void drawParticlesAndBox(double factor, state* screenState, float zoom){
 		else{
 			screenState->particleColor = screenState->particleArray[particles[i].type];
 		}
-		DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, screenState->particleColor);
-		
+
+		Rectangle sourceRect = {0.0f, 0.0f, circleTexture.width, circleTexture.height};
+
+		// Calculate destination rectangle
+		Rectangle destRect = {(particles[i].x - particles[i].rad)*factor, (Ly - particles[i].y - particles[i].rad)*factor, factor*particles[i].rad * 2, factor*particles[i].rad* 2};
+
+		// Draw the circle using the texture
+		DrawTexturePro(circleTexture, sourceRect, destRect, (Vector2){0, 0}, 0.0f, screenState->particleColor);
+
+		//DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, screenState->particleColor);
+
 	}
 	if (screenState->selected){
 		DrawRing((Vector2){particleUnderClick->x*factor, (Ly - particleUnderClick->y)*factor}, 0.7* particleUnderClick->rad*factor,  particleUnderClick->rad*factor, 0, 360, 20, BLACK);  
@@ -514,7 +525,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 9000.f);
+	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 10000.f);
 	if ((int)Ntemp != N){
 		if (structFactorActivated)
 			free(positions);
@@ -938,7 +949,6 @@ window graphicalInit(){
 	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;
-
     Camera2D cam = {0};
     cam.zoom = 1;
 
@@ -956,7 +966,7 @@ window graphicalInit(){
 	image.data = structFactor;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);
-	
+	circleTexture = LoadTexture("tex.png");
     return (window){
         .screenWidth = 1800,
         .screenHeight = 900,

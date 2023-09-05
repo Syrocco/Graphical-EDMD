@@ -29,7 +29,7 @@
 #include<pthread.h>
 #endif
 
-#define MAX_BATCH_ELEMENTS  8192
+
 
 
 #define CGREEN printf("\033[1;32m")
@@ -315,8 +315,6 @@ void* computeEvolution(void *arg){
 					doOut();
 					break;
 				case GROWSTOP:
-
-				
 					stopGrow();				
 					break;
 			}
@@ -569,7 +567,7 @@ void particlesInit(){
 		double EinitGrow = 0.05;
 		particle* p;
 		optimizeGrowConstant();
-		double targetRad[N];
+		double *targetRad = calloc(N, sizeof(double));
 		if (polydispersity){
 			for (int i = 0; i < N; i++)	
 				targetRad[i] = pow(1 - pow(1 - drand(0, 1), 1/b), 1/a);
@@ -624,6 +622,9 @@ void particlesInit(){
 			p->vy = sqrt(-2*log(U1)/p->m*EinitGrow)*sin(2*M_PI*U2);
 
 			p->lastColl = 0;
+		}
+		if (polydispersity){
+			free(targetRad);
 		}
 	}
 
@@ -1228,10 +1229,8 @@ void doTheCrossing(){
 --------------------------------------- */
 double collisionTimeGrow(particle* p1, particle* p2){
 
-
-
 	double lat2 = t - p2->t;
-
+	
 	double dvx = p2->vx - p1->vx;
 	double dvy = p2->vy - p1->vy;
 	double dvr = p1->vr + p2->vr;
@@ -1259,14 +1258,17 @@ double collisionTimeGrow(particle* p1, particle* p2){
  
 	double plus = (-b + sqrt(det))/(v2 - dvr*dvr);
 	double minus = (-b - sqrt(det))/(v2 - dvr*dvr);
+	
+	//printf("%.10lf %.10lf\n", plus, minus);
+		
 	if (((minus > 0) && (plus > 0) && (minus < plus)) || ((minus > 0) && (plus < 0))){
 		return minus;
 	}
 	//hacky
-	else if (((minus > 0) && (plus > 0.0000000001) && (plus < minus)) || ((minus < 0) && (plus > 0.0000000001))){
+	else if (((minus > 0) && (plus > 0.000000001) && (plus < minus)) || ((minus < 0) && (plus > 0.000000001))){
+		printf("%lf %lf\n", minus, plus);
 		return plus;
 	}
-
 	if (distOfSquare - dr*dr< -0.01){
 		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
@@ -1308,7 +1310,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
+		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
 	}
 
@@ -1388,7 +1390,7 @@ double separateTime(particle* p1, particle* p2){
 void collisionEventNormal(int i){
 	int finalPartner = 0;
 	double dt = 10000000;
-	int type = COLLISION;
+	enum event type = COLLISION;
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
@@ -1566,7 +1568,7 @@ void collisionEventNormal(int i){
 void collisionEventGrow(int i){
 	int finalPartner = 0;
 	double dt = 10000000;
-	int type = COLLISION;
+	enum event type = COLLISION;
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
@@ -1768,6 +1770,7 @@ void doTheWallGrow(){
 
 
 	}
+	//Very hacky
 	else{
 		double theta = atan2(pi->y - halfLx, pi->x - halfLx);
 		double nx = cos(theta);
@@ -1855,7 +1858,7 @@ void doTheWallNormal(){
 ----------------------------------- */
 void doTheCollisionGrow(){
 
-	double delta = 0.03;
+	double delta = 0.1;
 	double res = 0.75;
 
 	int i = nextEvent->i;

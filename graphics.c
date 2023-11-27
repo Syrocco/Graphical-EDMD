@@ -409,7 +409,8 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		if (screenState->leftClicked == 0)
 			GuiUnlock();
 	}		
-		
+
+	GuiCheckBox((Rectangle){start + 406*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Wall. Inj.", &thermoWall);	
 	
 	int dirtyNoise = noise;
 	GuiToggleGroup((Rectangle){start  + 100*xGUI, 40*yGUI, 100*xGUI, 40*yGUI}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
@@ -424,9 +425,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		}
 	}	
 
-	if (noise){
+	if (noise != 0 || thermoWall != 0){
 		sprintf(name, "%.3f", T);
-		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 0.1f);
+		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 1.f);
 		if (noise == 1){
 			sprintf(name, "%.3f", gamm);
 			GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 130*yGUI, 505*xGUI, 40*yGUI }, "Gamma", name, &gamm, 0.001f, 0.1f);
@@ -462,8 +463,8 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	}
 
 	if (addWell){
-		sprintf(name, "%.3f", U);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -0.3f, 0.3f);
+		sprintf(name, "%.6f", U);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -0.00003f, 0.00003f);
 		sprintf(name, "%.3f", sig);
 		float sigTemp = sig;
 		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI}, "Pot. rad.", name, &sig, 1.01f, 2.5f);

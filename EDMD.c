@@ -20,7 +20,7 @@
 
 
 #ifndef G
-#define G 1
+#define G 0
 #endif
 
 #if G
@@ -37,6 +37,7 @@
 #define CCYAN printf("\033[1;96m")
 
 #define ERROR 0
+#define never 100000000000000000000000000.0
 
 //Values if no load file
 int N = 100;
@@ -45,7 +46,9 @@ double sizeratio = 1;
 double fractionSmallN = 0;
 
 int Nbig, Nsmall;
-double px, py, E, pressure, dxr, dyr, dist, active, Ep;
+double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
+double COM_x = 0;
+double COM_y = 0;
 double Lx, Ly;
 double lastScreen = 0;
 double lastCollNum = 0;
@@ -66,7 +69,6 @@ double cellyFac; // = 1/cellSize
 //for now we only need 3 more events
 const int suppSizeEvent = 10;
 
-double on = 1;
 double t = 0;
 
 double collTerm = 0;
@@ -88,16 +90,16 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 1000000;
+double tmax = 100000;  
 //time between each screenshots
-double dtime = 1;
+double dtime = 1000;
+double firstScreen = 90000;
 
-double dtimeThermo = 1;
-double firstScreen = 0;
+double dtimeThermo = 100;
+double firstThermo = 100;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
-
 
 
 
@@ -113,7 +115,9 @@ const int addDelta = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
+const int addEnergy = 0;
 bool polydispersity = false;
+bool thermoWall = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
@@ -121,12 +125,14 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 0;
-const int addDelta = 0;
+const int damping = 1;
+const int addDelta = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 int polydispersity = 0;
+int thermoWall = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -152,10 +158,13 @@ const int ther = 1;
 
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
+const int msd = 1;
+double* posxInitial = NULL;
+double* posyInitial = NULL;
 
 
 //value for delta model
-double delta = 0.2;
+double delta = 0.05;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -163,32 +172,35 @@ double deltam = 0;
 double ts = 6;
 
 //value for evolving delta model
-double tau = 5;
-double deltaMax = 0.02;
+double tau = 20;
+double deltaMax = 0.01;
 
 //values for exponential model
-double vo = 1;
-double ao = 1.3;
+double vo = 3.5;
+double ao = 1.5;
 
 //values for square potential model
 double sig = 2;
 double U = -1;
 
+//Value of the energy input at collision
+double deltaE = 0.0009;
+
 //value for the field, must be < 0
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.01;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.3;
-double T = 0;
+double gamm = 0.05;
+double T = 0.06;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.3;
@@ -315,7 +327,7 @@ void* computeEvolution(void *arg){
 					doOut();
 					break;
 				case GROWSTOP:
-					stopGrow();				
+					stopGrow();			
 					break;
 			}
 		#if G
@@ -349,8 +361,8 @@ void* computeEvolution(void *arg){
 int main(int argc, char *argv[]){
 
 	
-	init_genrand(666);
-	
+	//init_genrand(666);
+	init_genrand(time(NULL));
 
 	#if G
 	pthread_t mainThread;
@@ -396,7 +408,7 @@ void boxConstantHelper(){
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
 
-	dtPaul = 10/(double)N;
+	dtPaul = 100/(double)N;
 
     paulListN = N;
 }
@@ -433,11 +445,8 @@ void constantInit(int argc, char *argv[]){
 		switch(c){
 			case 'l':
 				load = 1;
-				double temp1;
-				double temp2;
-				double temp3;
-				sscanf(optarg, "%lf %lf %lf", &temp1, &temp2, &temp3);
-				sprintf(filename, "%.7lf%.7lf%.7lf.txt", temp1, temp2, temp3);
+				strcpy(filename, optarg);
+				printf("%s", filename);
 				break;
 			case 'N':
 				load = 0;
@@ -540,6 +549,9 @@ void particlesInit(){
 	if (particles == NULL)
 		printf("Memory alloc failed");
 
+	
+	
+
 	int i = 0;
 	if (load){
 		particle* p;
@@ -592,6 +604,8 @@ void particlesInit(){
 			}
 			p->num = i;
 			p->rad = 0;
+			p->crossX = 0;
+			p->crossY = 0;
 
 			if (polydispersity){
 				p->vr = vr*targetRad[i];
@@ -638,7 +652,6 @@ void particlesInit(){
 		else
 			phi = M_PI*(sizeratio*sizeratio*Nsmall + Nbig)/(Lx*Ly);
 	}
-	
 }
 
 
@@ -727,7 +740,7 @@ void eventListInit(){
 
 
 	root = eventList[2*N];
-	root->t = 1000000001; //arbitrary value, root->rgt will always be NULL.
+	root->t = never + 1; //arbitrary value, root->rgt will always be NULL.
 	root->rgt = NULL;
 	root->lft = NULL;
 	root->top = NULL;
@@ -735,12 +748,19 @@ void eventListInit(){
 	
 	
 	#if G != 1
-	addEventThermo(dtimeThermo);
+	
 	if (load == 0){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
+		if (firstThermo < 1/vr){
+			firstThermo = 1/vr + firstThermo;
+		}
 	}
+	
+	addEventThermo(firstThermo + 0.000000001);
+	
+	
 	#endif
 	if (load == 0){
 		tmax += 1/vr;
@@ -790,6 +810,7 @@ void freeArrays(){
 	}
 	free(eventList);
 	free(eventPaul);
+
 	
 
 }
@@ -1254,7 +1275,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 
 	if (det < 0)
-		return 1000000000000;
+		return never;
  
 	double plus = (-b + sqrt(det))/(v2 - dvr*dvr);
 	double minus = (-b - sqrt(det))/(v2 - dvr*dvr);
@@ -1274,7 +1295,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 		exit(3);
 	}
 	
-	return 1000000000000;
+	return never;
 
 	
 
@@ -1299,7 +1320,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	//no collision.
 	if (b > 0)
-		return 1000000000000;
+		return never;
 
 
 	double v2 = dvx*dvx + dvy*dvy;
@@ -1315,7 +1336,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 	}
 
 	if (det < 0)
-		return 1000000000000;
+		return never;
 	return logTime((-b - sqrt(det))/v2);
 
 }
@@ -1338,7 +1359,7 @@ double sphereTime(particle* p1, particle* p2){
 
 	//no collision.
 	if (b > 0)
-		return 100000000;
+		return never;
 
 
 	double v2 = dvx*dvx + dvy*dvy;
@@ -1347,7 +1368,7 @@ double sphereTime(particle* p1, particle* p2){
 
 
 	if (det < 0)
-		return 100000000;
+		return never;
 
 	return logTime((-b - sqrt(det))/v2);
 }
@@ -1377,7 +1398,7 @@ double separateTime(particle* p1, particle* p2){
 
 
 	if (det < 0)
-		return 10000000000;
+		return never;
 
 	double temp = (- b + sqrt(det))/v2;
 	return logTime(temp);
@@ -1389,7 +1410,7 @@ double separateTime(particle* p1, particle* p2){
 --------------------------------------------- */
 void collisionEventNormal(int i){
 	int finalPartner = 0;
-	double dt = 10000000;
+	double dt = never;
 	enum event type = COLLISION;
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
@@ -1823,7 +1844,12 @@ void doTheWallNormal(){
 				}
 			}
 		}
-		pi->vx = -resW*pi->vx;
+		if (thermoWall == 1){
+			pi->vx = -sign(pi->vx)*drand(0, T/pi->m);
+		}
+		else{
+			pi->vx = -resW*pi->vx;
+		}
 	}
 	else if (xy == 1){
 		dp += fabs((resW + 1)*pi->m*pi->vy);
@@ -1835,7 +1861,12 @@ void doTheWallNormal(){
 			pi->vy = drand(0, 5);
 		}
 		*/
-		pi->vy = -resW*pi->vy;
+		if (thermoWall){
+			pi->vy = -sign(pi->vy)*drand(0, T/pi->m);
+		}
+		else{
+			pi->vy = -resW*pi->vy;
+		}
 		//pi->vy = drand(-50, 50);
 	}
 	else{
@@ -1843,8 +1874,14 @@ void doTheWallNormal(){
 		double nx = cos(theta);
 		double ny = sin(theta);
 		double mix = -(1 + resW)*(pi->vx*nx + pi->vy*ny);
-		pi->vx += mix*nx;
-		pi->vy += mix*ny;
+		if (thermoWall == 0){
+			pi->vx += mix*nx;
+			pi->vy += mix*ny;
+		}
+		else{
+			pi->vx = -nx*drand(0, T);
+			pi->vy = -ny*drand(0, T);
+		}
 		dp += fabs(pi->m*mix);
 	}
 
@@ -1971,12 +2008,14 @@ void doTheCollisionNormal(){
 	if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
 
+
+
+	
 	double invMass = 1/(pi->m + pj->m);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
-
-
-
 	collTerm += pi->m*pj->m*collKernel;
+	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
+
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
@@ -1991,6 +2030,12 @@ void doTheCollisionNormal(){
 		else if (addEvolvingDelta){
 			double dti = t - pi->lastColl;
 			double dtj = t - pj->lastColl;
+			if ((dti < 1/N) || (dtj < 1/N)){
+				res = 1;
+			}
+			else{
+				res = 0.1;
+			}
 			delta = deltaMax*(2 - (exp(-dtj/tau) + exp(-dti/tau)))/2;
 		}
 
@@ -1998,15 +2043,6 @@ void doTheCollisionNormal(){
 		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
 		dxr = dx/dist;
 		dyr = dy/dist;
-	}
-
-
-	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
-
-
-
-
-	if ((addDoubleDelta) || (addDelta) || (addEvolvingDelta)){
 
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -2019,6 +2055,18 @@ void doTheCollisionNormal(){
 		pj->vx -= funkyFactor*pi->m*dx;
 		pj->vy -= funkyFactor*pi->m*dy;
 	}
+	if (addEnergy){
+		double b = dx*dvx + dy*dvy;
+		double distSquared = 4*pi->rad*pj->rad;
+		double funkyFactor2 = -(b + sqrt(b*b + 4*distSquared*deltaE))/(2*distSquared); //lacking mass xDeltaE
+
+		pi->vx += funkyFactor2*pj->m*dx;
+		pi->vy += funkyFactor2*pj->m*dy;
+		pj->vx -= funkyFactor2*pi->m*dx;
+		pj->vy -= funkyFactor2*pi->m*dy;
+
+	}
+
 
     pi->lastColl = t;
     pj->lastColl = t;
@@ -2248,17 +2296,12 @@ void takeAScreenshot(){
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
 	}
-	physicalQ();
-	if (on){
-		on = 0;
-		addEventScreenshot(t + dtime);
-		return;
-	}
-	on = 1;
-	addEventScreenshot(t + nextScreen);
-
+	
+	addEventScreenshot(t + dtime);
 	#if G == 0
 	saveTXT();
+	#else
+	physicalQ(); //don't remember why i did this.
 	#endif
 	
 	printInfo();
@@ -2266,10 +2309,23 @@ void takeAScreenshot(){
 
 void takeAThermo(){
 
-	if (damping == 1){
+	if ((damping == 1) || (msd)){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
 		}
+	}
+	if ((msd) && (fabs(t - firstThermo) < 0.0001) && (firstThermo != 0)){
+		
+		posxInitial = calloc((unsigned int)N, sizeof(double));
+		posyInitial = calloc((unsigned int)N, sizeof(double));
+		for (int i = 0; i < N; i++){
+			COM_x += particles[i].x + particles[i].crossX*Lx;
+			COM_y += particles[i].y + particles[i].crossY*Ly;
+			posxInitial[i] = particles[i].x + particles[i].crossX*Lx;
+			posyInitial[i] = particles[i].y + particles[i].crossY*Ly;
+		}
+		COM_x = COM_x/N;
+		COM_y = COM_y/N;
 	}
 	physicalQ();
 	saveThermo();
@@ -2280,7 +2336,7 @@ void takeAThermo(){
 
 void printInfo(){
 	int size = 29;
-	int place = (int)(size*t)/(int)tmax;
+	int place = (int)(size*t/tmax);
 	printf("\r│\033[1;32m%.2e\033[0;37m/%.2e ", t, tmax);
 	CCYAN;
 	for (int i = 0; i < size; i++){
@@ -2311,7 +2367,8 @@ void stopGrow(){
 		p->coll = 0;
 		ncol = 0;
 		ncross = 0;
-		p = 0;
+		p->crossX = 0;
+		p->crossY = 0;
 	}
 	collisionEvent = &collisionEventNormal;
 	doTheCollision = &doTheCollisionNormal;
@@ -2371,6 +2428,7 @@ void addNoise(){
 	if (noise == 2)
 		physicalQ();
 	for (int i = 0; i < N; i++){
+
 		particle* p = particles + i; //(int)(genrand_int32()%N)
 		int j = p->num;
 		p->coll++;
@@ -2393,6 +2451,7 @@ void addNoise(){
 
 		removeEventFromQueue(eventList[N + j]);
 		collisionEvent(j);
+		
 	}
 	addEventNoise(t + dtnoise);
 }
@@ -2465,9 +2524,9 @@ void freeFlyGrow(particle* p){
 
 void saveTXT(){
 	if (reduce){
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y radius\n", t, N, Lx, Ly);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %d %lf %lf %lf\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].rad);
+			fprintf(fichier, "%d %lf %lf\n", i, particles[i].x, particles[i].y);
 		}
 	}
 	else{
@@ -2506,7 +2565,6 @@ void initializeThermo(){
 
 void saveThermo(){
 	double area = Lx*Ly;
-
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
 	
@@ -2540,14 +2598,14 @@ void saveThermo(){
 						perimeter += 2*Lx;
 					}
 					fprintf(thermo, "%lf %.10lf %lf %lf\n", t, E/N, pressure, dp/((t - t1)*perimeter));
-
+					
 					dp = 0;
 				}
 			t1 = t;
 			}
 
 			else{
-
+				
 				if (addWell){
 					Ep = 0;
 					for (int i = 0; i < N; i ++){
@@ -2556,7 +2614,12 @@ void saveThermo(){
 					fprintf(thermo, "%lf %.10lf %lf %lf \n", t, E/N, Ep/N, pressure);
 				}
 				else{
-					fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
+					if (msd){
+						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, MSD/N);
+					}
+					else{
+						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
+					}
 				}
 			}
 		}
@@ -2578,7 +2641,7 @@ inline double logTime(double time){
 	if (damping == 1){
 		double var = (1 - time*gamm);
 		if (var < 0)
-			return 1000000000000;
+			return never;
 		else{
 			return -log(var)/gamm;
 		}
@@ -2738,9 +2801,21 @@ void physicalQ(){
 			active += 1.;
 		}
 	}
-
-
 	active /= N;
+	if (msd != 0 && t >= firstThermo){
+		MSD = 0;
+		double COMt_x = 0;
+		double COMt_y = 0;
+		for (int i = 0; i < N; i++){
+			COMt_x += particles[i].x + particles[i].crossX*Lx;
+			COMt_y += particles[i].y + particles[i].crossY*Ly;
+		}
+		COMt_x = COMt_x/N;
+		COMt_y = COMt_y/N;
+		for (int i = 0; i < N; i++){
+			MSD += pow(particles[i].x + particles[i].crossX*Lx - posxInitial[i] - (COMt_x - COM_x), 2) + pow(particles[i].y + particles[i].crossY*Ly - posyInitial[i] - (COMt_y - COM_y), 2);
+		}
+	}
 }
 
 void customName(){

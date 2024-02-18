@@ -211,6 +211,7 @@ double a = 2;
 double b = 5;
 
 double proportionPositivelyCharged = 0.2;
+double proportionNeutralyCharged = 0.1;
 
 
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
@@ -368,6 +369,7 @@ int main(int argc, char *argv[]){
 	//init_genrand(666);
 	init_genrand(time(NULL));
 
+	
 	#if G
 	pthread_t mainThread;
 	pthread_create(&mainThread, NULL, computeEvolution,&(arguments){argc, argv});
@@ -646,8 +648,12 @@ void particlesInit(){
 			p->lastColl = 0;
 			
 			// Needed only if charged == 1/true..
-			if (drand(0, 1) < proportionPositivelyCharged){
+			double randomTemp = drand(0, 1);
+			if (randomTemp < proportionPositivelyCharged){
 				p->charge = 1;
+			}
+			else if (randomTemp < proportionNeutralyCharged + proportionPositivelyCharged){
+				p->charge = 0;
 			}
 			else{
 				p->charge = -1;
@@ -2118,63 +2124,69 @@ void doIn(){
 
 	freeFly(pj);
 
+
 	pi->coll++;
 	pj->coll++;
 
+	// Insanely hacky!
+	if (pi->charge*pj->charge != 0){
+
+		double dx = pj->x - pi->x;
+		double dy = pj->y - pi->y;
+
+		PBC(&dx, &dy);
+
+		double dxr = dx/sqrt(dx*dx + dy*dy);
+		double dyr = dy/sqrt(dx*dx + dy*dy);
 
 
-	double dx = pj->x - pi->x;
-	double dy = pj->y - pi->y;
+		//https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+		double vi = pi->vx*dxr + pi->vy*dyr;
+		double vj = pj->vx*dxr + pj->vy*dyr;
+		double mi = pi->m;
+		double mj = pj->m;
+		double vif, vjf;
 
-	PBC(&dx, &dy);
+		double temporary = mi*mj*(vi - vj)*(vi - vj);
 
-	double dxr = dx/sqrt(dx*dx + dy*dy);
-	double dyr = dy/sqrt(dx*dx + dy*dy);
-
-
-	//https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
-	double vi = pi->vx*dxr + pi->vy*dyr;
-	double vj = pj->vx*dxr + pj->vy*dyr;
-	double mi = pi->m;
-	double mj = pj->m;
-	double vif, vjf;
-
-	double temporary = mi*mj*(vi - vj)*(vi - vj);
-
-	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
-		addParticleInWellList(pi, j);
-		addParticleInWellList(pj, i);
-		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*fabs(U));
-		vif = (mi*atroce + horrible)/(mi*(mi + mj));
-		vjf = (mj*atroce - horrible)/(mj*(mi + mj));
-	}
-	else{
-		if (fabs(U) < -temporary/(2*(mi + mj))){
-			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
-			vif = (mi*atroce - horrible)/(mi*(mi + mj));
-			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+		if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
 			addParticleInWellList(pi, j);
 			addParticleInWellList(pj, i);
+			double atroce = (mi*vi + mj*vj);
+			double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*fabs(U));
+			vif = (mi*atroce + horrible)/(mi*(mi + mj));
+			vjf = (mj*atroce - horrible)/(mj*(mi + mj));
+		}
+		else{
+			if (fabs(U) < -temporary/(2*(mi + mj))){
+				double atroce = (mi*vi + mj*vj);
+				double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
+				vif = (mi*atroce - horrible)/(mi*(mi + mj));
+				vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+				addParticleInWellList(pi, j);
+				addParticleInWellList(pj, i);
 
+			}
+			else{ //bounces on the square well
+				vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
+				vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
+			}
 		}
-		else{ //bounces on the square well
-			vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
-			vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
-		}
+
+
+		double dvjx = (vjf - vj)*dxr;
+		double dvjy = (vjf - vj)*dyr;
+		collTerm += dvjy*dy + dvjx*dx;
+
+		pi->vx += (vif - vi)*dxr;
+		pi->vy += (vif - vi)*dyr;
+		pj->vx += dvjx;
+		pj->vy += dvjy;
 	}
-
-
-	double dvjx = (vjf - vj)*dxr;
-	double dvjy = (vjf - vj)*dyr;
-	collTerm += dvjy*dy + dvjx*dx;
-
-	pi->vx += (vif - vi)*dxr;
-	pi->vy += (vif - vi)*dyr;
-	pj->vx += dvjx;
-	pj->vy += dvjy;
-
+	else{
+		addParticleInWellList(pi, j);
+		addParticleInWellList(pj, i);
+	}
 
 
 	//recomputes crossing and collision of pi and pj
@@ -2214,56 +2226,61 @@ void doOut(){
 	pi->coll++;
 	pj->coll++;
 
+	// Insanely hacky!
+	if (pi->charge*pj->charge != 0){
+		double dx = pj->x - pi->x;
+		double dy = pj->y - pi->y;
 
-	double dx = pj->x - pi->x;
-	double dy = pj->y - pi->y;
+		PBC(&dx, &dy);
 
-	PBC(&dx, &dy);
-
-	double dxr = dx/sqrt(dx*dx + dy*dy);
-	double dyr = dy/sqrt(dx*dx + dy*dy);
+		double dxr = dx/sqrt(dx*dx + dy*dy);
+		double dyr = dy/sqrt(dx*dx + dy*dy);
 
 
-	// https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
-	double vi = pi->vx*dxr + pi->vy*dyr;
-	double vj = pj->vx*dxr + pj->vy*dyr;
-	double mi = pi->m;
-	double mj = pj->m;
-	double temporary = mi*mj*(vi - vj)*(vi - vj);
-	double vif, vjf;
-	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
-		if (fabs(U) < temporary/(2*(mi + mj))){ //leaves the square well
+		// https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+		double vi = pi->vx*dxr + pi->vy*dyr;
+		double vj = pj->vx*dxr + pj->vy*dyr;
+		double mi = pi->m;
+		double mj = pj->m;
+		double temporary = mi*mj*(vi - vj)*(vi - vj);
+		double vif, vjf;
+		if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
+			if (fabs(U) < temporary/(2*(mi + mj))){ //leaves the square well
+				double atroce = (mi*vi + mj*vj);
+				double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
+				vif = (mi*atroce - horrible)/(mi*(mi + mj));
+				vjf = (mj*atroce + horrible)/(mj*(mi + mj));
+				removeParticleInWellList(pi, j);
+				removeParticleInWellList(pj, i);
+
+			}
+			else{ //bounces on the square well
+				vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
+				vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
+			}
+		}
+		else{
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
+			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*fabs(U));
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			removeParticleInWellList(pi, j);
 			removeParticleInWellList(pj, i);
+		}
 
-		}
-		else{ //bounces on the square well
-			vif = ((mi - mj)*vi + 2*mj*vj)/(mi + mj);
-			vjf = ((mj - mi)*vj + 2*mi*vi)/(mi + mj);
-		}
+		double dvjx = (vjf - vj)*dxr;
+		double dvjy = (vjf - vj)*dyr;
+		collTerm += dvjy*dy + dvjx*dx;
+
+		pi->vx += (vif - vi)*dxr;
+		pi->vy += (vif - vi)*dyr;
+		pj->vx += dvjx;
+		pj->vy += dvjy;
 	}
 	else{
-		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*fabs(U));
-		vif = (mi*atroce - horrible)/(mi*(mi + mj));
-		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 		removeParticleInWellList(pi, j);
 		removeParticleInWellList(pj, i);
 	}
-
-	double dvjx = (vjf - vj)*dxr;
-	double dvjy = (vjf - vj)*dyr;
-	collTerm += dvjy*dy + dvjx*dx;
-
-	pi->vx += (vif - vi)*dxr;
-	pi->vy += (vif - vi)*dyr;
-	pj->vx += dvjx;
-	pj->vy += dvjy;
-
 	//recomputes crossing and collision of pi and pj
 	removeEventFromQueue(eventList[i]);
 	removeEventFromQueue(eventList[j]);

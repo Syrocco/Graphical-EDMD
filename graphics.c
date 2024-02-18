@@ -520,13 +520,21 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		
 		GuiCheckBox((Rectangle){ start  + 200*xGUI, 180*yGUI, 40*xGUI, 40*yGUI}, "Charged", &charged);
 		if (charged){
-			sprintf(name, "%.6f", proportionPositivelyCharged);
-			double dirtyProp = proportionPositivelyCharged;
-			GuiSliderBarDouble((Rectangle){ start + 400*xGUI, 180*yGUI, 100*xGUI, 40*yGUI }, "% of + Part.", name, &proportionPositivelyCharged, 0.f, 0.5f);
-			if (dirtyProp != proportionPositivelyCharged){
+			double dirtyPropP = proportionPositivelyCharged;
+			sprintf(name, "%.2f", proportionPositivelyCharged);
+			GuiSliderBarDouble((Rectangle){ start + 400*xGUI, 180*yGUI, 50*xGUI, 40*yGUI }, "%+", name, &proportionPositivelyCharged, 0.f, 0.5f);
+			double dirtyPropN = proportionNeutralyCharged;
+			sprintf(name, "%.2f", proportionNeutralyCharged);
+			GuiSliderBarDouble((Rectangle){ start + 500*xGUI, 180*yGUI, 50*xGUI, 40*yGUI }, "%n", name, &proportionNeutralyCharged, 0.f, 0.5f);
+			if ((dirtyPropP != proportionPositivelyCharged) || (dirtyPropN != proportionNeutralyCharged)){
+				printf("Here!");
 				for (int i = 0; i < N; i++){
-					if (drand(0, 1) < proportionPositivelyCharged){
+					double randomTemp = drand(0, 1);
+					if (randomTemp < proportionPositivelyCharged){
 						particles[i].charge = 1;
+					}
+					else if (randomTemp < proportionNeutralyCharged + proportionPositivelyCharged){
+						particles[i].charge = 0;
 					}
 					else{
 						particles[i].charge = -1;
@@ -585,7 +593,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	}
 	
 	sprintf(name, "%.3f", res);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.3f, 1.f);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.f, 1.f);
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);

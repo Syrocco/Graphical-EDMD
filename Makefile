@@ -10,4 +10,4 @@ endif
 
 
 EDMD: EDMD.c
-	$(CC) EDMD.c $(CFLAGS) -DG=$(G)
+	$(CC) EDMD.c $(CFLAGS) -DG=$(G) -g

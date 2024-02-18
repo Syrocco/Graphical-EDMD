@@ -30,6 +30,7 @@ extern double res;
 extern double U;
 extern bool charged;
 extern double proportionPositivelyCharged;
+extern double proportionNeutralyCharged;
 extern double sig;
 extern double phi;
 extern double sizeratio;

@@ -90,13 +90,13 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 100000;  
+double tmax = 1350;  
 //time between each screenshots
-double dtime = 1000;
-double firstScreen = 90000;
+double dtime = 10;
+double firstScreen = 100;
 
-double dtimeThermo = 100;
-double firstThermo = 100;
+double dtimeThermo = 5;
+double firstThermo = 10;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -110,23 +110,23 @@ int noise = 1;
 int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
-const int damping = 0;
-const int addDelta = 0;
-const int addDoubleDelta = 0;
+bool damping = false;
+bool addDelta = false;
+bool addDoubleDelta = false;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int addEnergy = 0;
 bool polydispersity = false;
 bool thermoWall = 0;
 #else
-const int addWell = 0;
+const int addWell = 1;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
-const int addDelta = 1;
+const int damping = 0;
+const int addDelta = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -158,13 +158,13 @@ const int ther = 1;
 
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
-const int msd = 1;
+const int msd = 0;
 double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 
 //value for delta model
-double delta = 0.05;
+double delta = 0.08;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -180,8 +180,8 @@ double vo = 3.5;
 double ao = 1.5;
 
 //values for square potential model
-double sig = 2;
-double U = -1;
+double sig = 1.05;
+double U = 1;
 
 //Value of the energy input at collision
 double deltaE = 0.0009;
@@ -190,20 +190,20 @@ double deltaE = 0.0009;
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 0.01;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.05;
-double T = 0.06;
+double gamm = 0.3;
+double T = 0.5;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.3;
+double dtnoise = 0.8;
 
 double a = 2;
 double b = 5;
@@ -435,13 +435,14 @@ void constantInit(int argc, char *argv[]){
 		{"ts", required_argument, NULL, 's'},
 		{"xs", required_argument, NULL, 'x'},
 		{"sizeratio", required_argument, NULL, 'q'},
+		{"temperature", required_argument, NULL, 'T'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:X:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -503,6 +504,9 @@ void constantInit(int argc, char *argv[]){
 				break;
 			case 's':
 				sscanf(optarg, "%lf", &ts);
+				break;
+			case 'X':
+				sscanf(optarg, "%lf", &T);
 				break;
 		}
 	}
@@ -2615,7 +2619,13 @@ void saveThermo(){
 				}
 				else{
 					if (msd){
-						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, MSD/N);
+						double ex = 0;
+						double ey = 0;
+						for (int i = 0; i < N; i++){
+							ex += particles[i].m*particles[i].vx;
+							ey += particles[i].m*particles[i].vy;
+						}
+						fprintf(thermo, "%lf %lf %.10lf %lf \n", t, 0.5*(ex*ex + ey*ey)/N, E/N, MSD/N);
 					}
 					else{
 						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
@@ -2826,12 +2836,12 @@ void customName(){
 	mkdir("dump/", 0777);
 	#endif
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, ts, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){

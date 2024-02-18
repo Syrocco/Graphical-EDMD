@@ -409,9 +409,23 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		if (screenState->leftClicked == 0)
 			GuiUnlock();
 	}		
-
-	GuiCheckBox((Rectangle){start + 406*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Wall. Inj.", &thermoWall);	
 	
+	bool dirtyDamping = damping;
+	GuiCheckBox((Rectangle){start + 406*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, "Damping", &damping);
+	if (dirtyDamping != damping){
+		for(int i = 0; i < N; i++){			
+			particle* p = particles + i;
+			freeFly(p);
+			removeEventFromQueue(eventList[N + p->num]);
+			collisionEvent(p->num);
+			removeEventFromQueue(eventList[p->num]);
+			crossingEvent(p->num);
+		}
+	}
+
+	
+
+
 	int dirtyNoise = noise;
 	GuiToggleGroup((Rectangle){start  + 100*xGUI, 40*yGUI, 100*xGUI, 40*yGUI}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
 	
@@ -425,12 +439,23 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		}
 	}	
 
-	if (noise != 0 || thermoWall != 0){
-		sprintf(name, "%.3f", T);
-		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 1.f);
+	if (noise != 0 || damping != 0){
+		bool dirtyGamm = gamm;
+		sprintf(name, "%.3f", gamm);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 130*yGUI, 505*xGUI, 40*yGUI }, "Gamma", name, &gamm, 0.001f, 0.1f);
+		if (dirtyGamm != gamm){
+			for(int i = 0; i < N; i++){			
+				particle* p = particles + i;
+				freeFly(p);
+				removeEventFromQueue(eventList[N + p->num]);
+				collisionEvent(p->num);
+				removeEventFromQueue(eventList[p->num]);
+				crossingEvent(p->num);
+			}
+		}
 		if (noise == 1){
-			sprintf(name, "%.3f", gamm);
-			GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 130*yGUI, 505*xGUI, 40*yGUI }, "Gamma", name, &gamm, 0.001f, 0.1f);
+			sprintf(name, "%.3f", T);
+			GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 1.f);
 		}
 	}
 	
@@ -502,6 +527,24 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			removeEventFromQueue(eventList[p->num]);
 			crossingEvent(p->num);
 		}
+	}
+
+	GuiCheckBox((Rectangle){start + 250*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Delta", &addDelta);
+	bool dirtyDoubleDelta = addDoubleDelta;
+	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Synchro Delta", &addDoubleDelta);
+	if (addDelta && addDoubleDelta == false){
+		sprintf(name, "%.3f", delta);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 0.1);
+	}
+	if (addDoubleDelta){
+		if (dirtyDoubleDelta != addDoubleDelta){
+			deltaM = delta;
+			
+		}
+		sprintf(name, "%.3f", deltaM);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &deltaM, 0, 0.1);
+		sprintf(name, "%.3f", ts);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 380*yGUI, 505*xGUI, 20*yGUI}, "Synch. Time", name, &ts, 0.000001, 10);
 	}
 
 	if (addField){
@@ -600,6 +643,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		//}
 	}
 	
+
+
+
 	int dirtyWallParam = screenState->wallParam;
 	if (GuiDropdownBox((Rectangle){start + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall", &screenState->wallParam, screenState->wallEditing)){
 		screenState->wallEditing = !screenState->wallEditing;
@@ -944,7 +990,9 @@ window graphicalInit(){
 	N = 2000;
 	phi = 0.5;
 	field = -0.001;
-	res = 1;
+	res = 0.95;
+	delta = 0.01;
+	damping = 0.02;
 	sig = 1.5;
 	U = 0.15;
 	gamm = 0.1;

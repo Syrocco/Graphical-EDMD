@@ -492,7 +492,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	
 	if (addWell){
 		sprintf(name, "%.6f", U);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -0.00003f, 0.00003f);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -1.f, 1.f);
 		sprintf(name, "%.3f", sig);
 		float sigTemp = sig;
 		GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI}, "Pot. rad.", name, &sig, 1.01f, 2.5f);

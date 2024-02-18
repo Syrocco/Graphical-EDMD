@@ -2141,19 +2141,18 @@ void doIn(){
 
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 
-
 	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
 		addParticleInWellList(pi, j);
 		addParticleInWellList(pj, i);
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*abs(U));
+		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*fabs(U));
 		vif = (mi*atroce + horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce - horrible)/(mj*(mi + mj));
 	}
 	else{
-		if (abs(U) < -temporary/(2*(mi + mj))){
+		if (fabs(U) < -temporary/(2*(mi + mj))){
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*abs(U));
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			addParticleInWellList(pi, j);
@@ -2232,11 +2231,10 @@ void doOut(){
 	double mj = pj->m;
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 	double vif, vjf;
-
 	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
-		if (-abs(U) > temporary/(2*(mi + mj))){ //leaves the square well
+		if (fabs(U) < temporary/(2*(mi + mj))){ //leaves the square well
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*abs(U));
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*fabs(U));
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			removeParticleInWellList(pi, j);
@@ -2250,7 +2248,7 @@ void doOut(){
 	}
 	else{
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*abs(U));
+		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*fabs(U));
 		vif = (mi*atroce - horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 		removeParticleInWellList(pi, j);

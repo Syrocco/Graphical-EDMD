@@ -118,6 +118,7 @@ const int addExpo = 0;
 const int addEnergy = 0;
 bool polydispersity = false;
 bool thermoWall = 0;
+bool charged = 0;
 #else
 const int addWell = 1;
 const int addField = 0;
@@ -133,6 +134,7 @@ const int addEvolvingDelta = 0;
 const int addExpo = 0;
 int polydispersity = 0;
 int thermoWall = 0;
+int charged = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -207,6 +209,8 @@ double dtnoise = 0.8;
 
 double a = 2;
 double b = 5;
+
+double proportionPositivelyCharged = 0.2;
 
 
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
@@ -640,6 +644,15 @@ void particlesInit(){
 			p->vy = sqrt(-2*log(U1)/p->m*EinitGrow)*sin(2*M_PI*U2);
 
 			p->lastColl = 0;
+			
+			// Needed only if charged == 1/true..
+			if (drand(0, 1) < proportionPositivelyCharged){
+				p->charge = 1;
+			}
+			else{
+				p->charge = -1;
+			}
+			
 		}
 		if (polydispersity){
 			free(targetRad);
@@ -2128,18 +2141,19 @@ void doIn(){
 
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 
-	if (U < 0){
+
+	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
 		addParticleInWellList(pi, j);
 		addParticleInWellList(pj, i);
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) - 2*mi*mj*(mi + mj)*U);
+		double horrible = sqrt(mi*mi*mj*mj*(vi - vj)*(vi - vj) + 2*mi*mj*(mi + mj)*abs(U));
 		vif = (mi*atroce + horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce - horrible)/(mj*(mi + mj));
 	}
 	else{
-		if (U < -temporary/(2*(mi + mj))){
+		if (abs(U) < -temporary/(2*(mi + mj))){
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*U);
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*abs(U));
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			addParticleInWellList(pi, j);
@@ -2219,10 +2233,10 @@ void doOut(){
 	double temporary = mi*mj*(vi - vj)*(vi - vj);
 	double vif, vjf;
 
-	if (U < 0){
-		if (U > temporary/(2*(mi + mj))){ //leaves the square well
+	if (((charged == 1) && (pi->charge*pj->charge < 0)) || ((charged == 0) && (U < 0))){
+		if (-abs(U) > temporary/(2*(mi + mj))){ //leaves the square well
 			double atroce = (mi*vi + mj*vj);
-			double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
+			double horrible = sqrt(mi*mj*temporary - 2*mi*mj*(mi + mj)*abs(U));
 			vif = (mi*atroce - horrible)/(mi*(mi + mj));
 			vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 			removeParticleInWellList(pi, j);
@@ -2236,7 +2250,7 @@ void doOut(){
 	}
 	else{
 		double atroce = (mi*vi + mj*vj);
-		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*U);
+		double horrible = sqrt(mi*mj*temporary + 2*mi*mj*(mi + mj)*abs(U));
 		vif = (mi*atroce - horrible)/(mi*(mi + mj));
 		vjf = (mj*atroce + horrible)/(mj*(mi + mj));
 		removeParticleInWellList(pi, j);

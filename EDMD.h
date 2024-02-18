@@ -28,8 +28,8 @@ struct particle{
 	particle *prv, *nxt;
 	int num, type, numberOfParticlesInWell, cell[2], crossX, crossY, synchro;
 	int* particlesInWell;
-
 	unsigned long int coll; //coll = counter of collision at collision
+	int charge;
 
 };
 

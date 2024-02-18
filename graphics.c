@@ -339,7 +339,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		GuiLock();
 
 	int dirtyColorParam2 = screenState->colorParam2;
-	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based; Radius Based", &screenState->colorParam2, screenState->colorEditing2)){
+	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based; Radius Based; Charge Based", &screenState->colorParam2, screenState->colorEditing2)){
 		
 		screenState->colorEditing2 = !screenState->colorEditing2;
 		if (screenState->colorParam2 == 0){
@@ -362,6 +362,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		else if (screenState->colorParam2 == 5){
 			nSym = 4;
 			screenState->colorFunction = &colorRadius;
+		}
+		else if (screenState->colorParam2 == 6){
+			screenState->colorFunction = &colorCharge;
 		}
 		if ((dirtyColorParam2 == 0) && (screenState->colorParam2 != 0)){
 			screenState->colorFunctionArray = calloc(N, sizeof(double));
@@ -486,7 +489,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			crossingEvent(p->num);
 		}
 	}
-
+	
 	if (addWell){
 		sprintf(name, "%.6f", U);
 		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -0.00003f, 0.00003f);
@@ -512,6 +515,23 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				crossingEvent(p->num);
 				
 
+			}
+		}
+		
+		GuiCheckBox((Rectangle){ start  + 200*xGUI, 180*yGUI, 40*xGUI, 40*yGUI}, "Charged", &charged);
+		if (charged){
+			sprintf(name, "%.6f", proportionPositivelyCharged);
+			double dirtyProp = proportionPositivelyCharged;
+			GuiSliderBarDouble((Rectangle){ start + 400*xGUI, 180*yGUI, 100*xGUI, 40*yGUI }, "% of + Part.", name, &proportionPositivelyCharged, 0.f, 0.5f);
+			if (dirtyProp != proportionPositivelyCharged){
+				for (int i = 0; i < N; i++){
+					if (drand(0, 1) < proportionPositivelyCharged){
+						particles[i].charge = 1;
+					}
+					else{
+						particles[i].charge = -1;
+					}
+				}
 			}
 		}
 	}
@@ -782,6 +802,11 @@ double colorCollision(particle* p){
 
 double colorRadius(particle* p){
 	return p->rad;
+}
+
+
+double colorCharge(particle* p){
+	return p->charge;
 }
 
 double colorBOOP(particle* p1){

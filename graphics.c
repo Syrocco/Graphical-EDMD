@@ -1023,7 +1023,7 @@ window graphicalInit(){
 	N = 2000;
 	phi = 0.5;
 	field = -0.001;
-	res = 0.95;
+	res = 1;
 	delta = 0.01;
 	damping = 0.02;
 	sig = 1.5;

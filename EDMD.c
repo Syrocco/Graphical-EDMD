@@ -2129,7 +2129,7 @@ void doIn(){
 	pj->coll++;
 
 	// Insanely hacky!
-	if (pi->charge*pj->charge != 0){
+	if ((pi->charge*pj->charge != 0) || (charged == 0)) {
 
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
@@ -2227,7 +2227,7 @@ void doOut(){
 	pj->coll++;
 
 	// Insanely hacky!
-	if (pi->charge*pj->charge != 0){
+	if ((pi->charge*pj->charge != 0) || (charged == 0)){
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
 

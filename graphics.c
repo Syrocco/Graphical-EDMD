@@ -1031,6 +1031,7 @@ window graphicalInit(){
 	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;
+	aspectRatio = 1;
     Camera2D cam = {0};
     cam.zoom = 1;
 

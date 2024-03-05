@@ -27,6 +27,7 @@ extern double gamm;
 extern double T;
 extern double field;
 extern double res;
+extern double aspectRatio;
 extern double U;
 extern bool charged;
 extern double proportionPositivelyCharged;

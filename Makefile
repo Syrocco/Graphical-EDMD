@@ -1,5 +1,5 @@
 CC = gcc
-G ?= 1
+G ?= 0
 
 
 ifeq ($(G), 0)
@@ -10,4 +10,4 @@ endif
 
 
 EDMD: EDMD.c
-	$(CC) EDMD.c $(CFLAGS) -DG=$(G) -g
+	$(CC) EDMD.c $(CFLAGS) -DG=$(G) 

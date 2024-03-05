@@ -44,6 +44,8 @@ int N = 100;
 double phi = 0.1;
 double sizeratio = 1;
 double fractionSmallN = 0;
+double aspectRatio = 1;
+int controlLenght = 0;
 
 int Nbig, Nsmall;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
@@ -90,13 +92,13 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 1350;  
+double tmax = 13500;  
 //time between each screenshots
-double dtime = 10;
-double firstScreen = 100;
+double dtime = 100;
+double firstScreen = 0;
 
-double dtimeThermo = 5;
-double firstThermo = 10;
+double dtimeThermo = 50;
+double firstThermo = 100;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -110,7 +112,7 @@ int noise = 1;
 int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
-bool damping = false;
+bool damping = true;
 bool addDelta = false;
 bool addDoubleDelta = false;
 const int addEvolvingDelta = 0;
@@ -120,14 +122,14 @@ bool polydispersity = false;
 bool thermoWall = 0;
 bool charged = 0;
 #else
-const int addWell = 1;
+const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
-const int addWallx = 0;
+const int addWallx = 1;
 const int addCircularWall = 0;
-const int damping = 0;
-const int addDelta = 0;
+const int damping = 1;
+const int addDelta = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -166,7 +168,7 @@ double* posyInitial = NULL;
 
 
 //value for delta model
-double delta = 0.08;
+double delta = 0.124;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -198,11 +200,11 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.869;
 
 //parameter if noise or damping
-double gamm = 0.3;
-double T = 0.5;
+double gamm = 0.1;
+double T = 0.121;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.8;
@@ -442,13 +444,15 @@ void constantInit(int argc, char *argv[]){
 		{"xs", required_argument, NULL, 'x'},
 		{"sizeratio", required_argument, NULL, 'q'},
 		{"temperature", required_argument, NULL, 'T'},
+		{"aspect", required_argument, NULL, 'a'},
+		{"Ly", required_argument, NULL, 'L'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:X:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:X:a:L:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -466,6 +470,10 @@ void constantInit(int argc, char *argv[]){
 			case 'x':
 				load = 0;
 				sscanf(optarg, "%lf", &fractionSmallN);
+				break;
+			case 'a':
+				load = 0;
+				sscanf(optarg, "%lf", &aspectRatio);
 				break;
 			case 'q':
 				load = 0;
@@ -514,6 +522,10 @@ void constantInit(int argc, char *argv[]){
 			case 'X':
 				sscanf(optarg, "%lf", &T);
 				break;
+			case 'L':
+				controlLenght = 1;
+				load = 0;
+				sscanf(optarg, "%lf", &Ly);
 		}
 	}
 
@@ -529,14 +541,25 @@ void constantInit(int argc, char *argv[]){
 		double r2 = (1 + fractionSmallN*(sizeratio*sizeratio - 1));
 		if (polydispersity){
 			r2 = b*tgamma(1 + 2/a)*tgamma(b)/tgamma(1 + b + 2/a);
+			Ly = Lx;
 		}
 		if (addCircularWall){
 			Lx = sqrt(4*N/phi*r2);
+			Ly = Lx;
 		}
 		else{
-			Lx = sqrt(M_PI*N/phi*r2);
+			if (controlLenght == 0){
+				Lx = sqrt(M_PI*N/(phi*aspectRatio)*r2);
+				Ly = Lx*aspectRatio;
+			}
+			else{
+				Lx = Ly/aspectRatio;
+				N = (int)(phi*Lx*Ly/(M_PI*r2));
+				phi = M_PI*N*r2/(Lx*Ly);
+			}
+
 		}
-		Ly = Lx;
+		
 	}
 
 	
@@ -1627,13 +1650,13 @@ void collisionEventGrow(int i){
 		double vyPlus = p1->vy + vrParticle;
 		double vyMinus = p1->vy - vrParticle;
 		if ((Y == 0) && (vyMinus < 0)){
-			dt = logTime(-(p1->y - p1->rad)/vyMinus);
+			dt = -(p1->y - p1->rad)/vyMinus;
 			type = WALL;
 			xy = 1;
 			}
 		else if ((Y == Nycells - 1) && (vyPlus > 0)){
 
-			dt = logTime((Ly - p1->y - p1->rad)/vyPlus);
+			dt = (Ly - p1->y - p1->rad)/vyPlus;
 			type = WALL;
 			xy = 1;
 		}
@@ -1642,7 +1665,7 @@ void collisionEventGrow(int i){
 		double vxPlus = p1->vx + vrParticle;
 		double vxMinus = p1->vx - vrParticle;
 		if ((X == 0) && (vxMinus < 0)){
-			dtTemp = logTime(-(p1->x - p1->rad)/vxMinus);
+			dtTemp = -(p1->x - p1->rad)/vxMinus;
 			if (dt > dtTemp){
 				type = WALL;
 				dt = dtTemp;
@@ -1652,7 +1675,7 @@ void collisionEventGrow(int i){
 
 		else if ((X == Nxcells - 1) && (vxPlus > 0)){
 
-			dtTemp = logTime((Lx - p1->x - p1->rad)/vxPlus);
+			dtTemp = (Lx - p1->x - p1->rad)/vxPlus;
 			if (dt > dtTemp){
 				type = WALL;
 				dt = dtTemp;

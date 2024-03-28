@@ -92,13 +92,13 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 13500;  
+double tmax = 1000000;  
 //time between each screenshots
 double dtime = 100;
 double firstScreen = 0;
 
-double dtimeThermo = 50;
-double firstThermo = 100;
+double dtimeThermo = 10;
+double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -112,7 +112,7 @@ int noise = 1;
 int addWally = 0;
 int addWallx = 0;
 int addCircularWall = 0;
-bool damping = true;
+bool damping = false;
 bool addDelta = false;
 bool addDoubleDelta = false;
 const int addEvolvingDelta = 0;
@@ -126,11 +126,11 @@ const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
-const int addWallx = 1;
+const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
-const int addDelta = 1;
-const int addEnergy = 0;
+const int damping = 0;
+const int addDelta = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -168,46 +168,49 @@ double* posyInitial = NULL;
 
 
 //value for delta model
-double delta = 0.124;
+double delta = 0.078;
 
 //values for double delta model
-double deltaM = 0.03;
+double deltaM = 0.07;
 double deltam = 0;
-double ts = 6;
+double ts = 1;
 
 //value for evolving delta model
-double tau = 20;
-double deltaMax = 0.01;
+double tau = 5;
+double deltaMax = 0.1;
 
 //values for exponential model
 double vo = 3.5;
 double ao = 1.5;
 
 //values for square potential model
-double sig = 1.05;
-double U = 1;
+double sig = 1.125;
+double U = -2;
 
 //Value of the energy input at collision
-double deltaE = 0.0009;
+double deltaE = 100;
+double beta = 6;
+double taur = 1;
+double additionalEnergy = 0.01;
 
 //value for the field, must be < 0
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.1;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.869;
+double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.1;
-double T = 0.121;
+double gamm = 0.2;
+double T = 1.367;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.8;
+double dtnoise = 0.5;
 
 double a = 2;
 double b = 5;
@@ -446,13 +449,14 @@ void constantInit(int argc, char *argv[]){
 		{"temperature", required_argument, NULL, 'T'},
 		{"aspect", required_argument, NULL, 'a'},
 		{"Ly", required_argument, NULL, 'L'},
+		{"Lx", required_argument, NULL, 'X'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:X:a:L:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -519,13 +523,18 @@ void constantInit(int argc, char *argv[]){
 			case 's':
 				sscanf(optarg, "%lf", &ts);
 				break;
-			case 'X':
+			case 'T':
 				sscanf(optarg, "%lf", &T);
 				break;
 			case 'L':
 				controlLenght = 1;
 				load = 0;
 				sscanf(optarg, "%lf", &Ly);
+				break;
+			case 'X':
+				controlLenght = 2;
+				load = 0;
+				sscanf(optarg, "%lf", &Lx);
 		}
 	}
 
@@ -552,8 +561,13 @@ void constantInit(int argc, char *argv[]){
 				Lx = sqrt(M_PI*N/(phi*aspectRatio)*r2);
 				Ly = Lx*aspectRatio;
 			}
-			else{
+			else if (controlLenght == 1){
 				Lx = Ly/aspectRatio;
+				N = (int)(phi*Lx*Ly/(M_PI*r2));
+				phi = M_PI*N*r2/(Lx*Ly);
+			}
+			else{
+				Ly = Lx*aspectRatio;
 				N = (int)(phi*Lx*Ly/(M_PI*r2));
 				phi = M_PI*N*r2/(Lx*Ly);
 			}
@@ -2076,13 +2090,9 @@ void doTheCollisionNormal(){
 		else if (addEvolvingDelta){
 			double dti = t - pi->lastColl;
 			double dtj = t - pj->lastColl;
-			if ((dti < 1/N) || (dtj < 1/N)){
-				res = 1;
-			}
-			else{
-				res = 0.1;
-			}
-			delta = deltaMax*(2 - (exp(-dtj/tau) + exp(-dti/tau)))/2;
+			//delta = deltaMax*(2 - (exp(-dtj/tau) + exp(-dti/tau)))/2;
+			//delta = deltaMax*(pow(dtj/tau, 3) + pow(dti/tau, 3));
+			delta = deltaMax*pow((2 - (exp(-dtj/tau) + exp(-dti/tau)))/2, 3);
 		}
 
 		dist = sqrt(dx*dx + dy*dy);
@@ -2095,22 +2105,27 @@ void doTheCollisionNormal(){
 		pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
 		pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
 	}
-	else{
-		pi->vx += funkyFactor*pj->m*dx;
-		pi->vy += funkyFactor*pj->m*dy;
-		pj->vx -= funkyFactor*pi->m*dx;
-		pj->vy -= funkyFactor*pi->m*dy;
-	}
-	if (addEnergy){
+	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
 		double distSquared = 4*pi->rad*pj->rad;
-		double funkyFactor2 = -(b + sqrt(b*b + 4*distSquared*deltaE))/(2*distSquared); //lacking mass xDeltaE
+		double dti = t - pi->lastColl;
+		double dtj = t - pj->lastColl;
+		double deltaETotal = additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
+
 
 		pi->vx += funkyFactor2*pj->m*dx;
 		pi->vy += funkyFactor2*pj->m*dy;
 		pj->vx -= funkyFactor2*pi->m*dx;
 		pj->vy -= funkyFactor2*pi->m*dy;
 
+	}
+	else{
+
+		pi->vx += funkyFactor*pj->m*dx;
+		pi->vy += funkyFactor*pj->m*dy;
+		pj->vx -= funkyFactor*pi->m*dx;
+		pj->vy -= funkyFactor*pi->m*dy;
 	}
 
 
@@ -2888,12 +2903,12 @@ void customName(){
 	mkdir("dump/", 0777);
 	#endif
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, Einit, phi, sizeratio, vo, ao, deltaM, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){

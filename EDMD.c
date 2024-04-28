@@ -92,12 +92,12 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 1000000;  
+double tmax = 100000;  
 //time between each screenshots
-double dtime = 100;
-double firstScreen = 0;
+double dtime = 300;
+double firstScreen = 50;
 
-double dtimeThermo = 10;
+double dtimeThermo = 100;
 double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -129,8 +129,8 @@ const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 0;
-const int addEnergy = 1;
+const int addDelta = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -168,12 +168,12 @@ double* posyInitial = NULL;
 
 
 //value for delta model
-double delta = 0.078;
+double delta = 0.1;
 
 //values for double delta model
-double deltaM = 0.07;
+double deltaM = 0.03;
 double deltam = 0;
-double ts = 1;
+double ts = 6;
 
 //value for evolving delta model
 double tau = 5;
@@ -188,25 +188,25 @@ double sig = 1.125;
 double U = -2;
 
 //Value of the energy input at collision
-double deltaE = 100;
+double deltaE = 50;
 double beta = 6;
-double taur = 1;
-double additionalEnergy = 0.01;
+double taur = 3;
+double additionalEnergy = 0.1;
 
 //value for the field, must be < 0
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 0.1;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 0;
 
 //parameter if noise or damping
-double gamm = 0.2;
+double gamm = 0.01;
 double T = 1.367;
 double expE = 1;
 //time between kicks
@@ -450,13 +450,14 @@ void constantInit(int argc, char *argv[]){
 		{"aspect", required_argument, NULL, 'a'},
 		{"Ly", required_argument, NULL, 'L'},
 		{"Lx", required_argument, NULL, 'X'},
+		{"deltaE", required_argument, NULL, 'e'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				load = 1;
@@ -535,6 +536,10 @@ void constantInit(int argc, char *argv[]){
 				controlLenght = 2;
 				load = 0;
 				sscanf(optarg, "%lf", &Lx);
+				break;
+			case 'e':
+				sscanf(optarg, "%lf", &deltaE);
+				break;
 		}
 	}
 
@@ -2111,8 +2116,8 @@ void doTheCollisionNormal(){
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
 		double deltaETotal = additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
-		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
 
+		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
 
 		pi->vx += funkyFactor2*pj->m*dx;
 		pi->vy += funkyFactor2*pj->m*dy;
@@ -2597,7 +2602,7 @@ void saveTXT(){
 	if (reduce){
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %lf %lf\n", i, particles[i].x, particles[i].y);
+			fprintf(fichier, "%d %.4lf %.4lf\n", i, particles[i].x, particles[i].y);
 		}
 	}
 	else{
@@ -2903,12 +2908,12 @@ void customName(){
 	mkdir("dump/", 0777);
 	#endif
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, vo, ao, delta, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){

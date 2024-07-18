@@ -41,14 +41,14 @@
 
 //Values if no load file
 int N = 100;
-double phi = 0.1;
+double phi = 0.05;
 double sizeratio = 1;
 double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
 
 int Nbig, Nsmall;
-double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
+double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD, HELFAND, offDiagPressure;
 double COM_x = 0;
 double COM_y = 0;
 double Lx, Ly;
@@ -74,6 +74,7 @@ const int suppSizeEvent = 10;
 double t = 0;
 
 double collTerm = 0;
+double offDiagCollTerm = 0;
 double dp = 0;
 double dpLeft = 0;
 double dpRight = 0;
@@ -92,13 +93,13 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 100000;  
+double tmax = 60000;  
 //time between each screenshots
-double dtime = 300;
-double firstScreen = 50;
+double dtime = 10;
+double firstScreen = 10;
 
 double dtimeThermo = 100;
-double firstThermo = 1;
+double firstThermo = 500;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -129,7 +130,7 @@ const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 1;
+const int addDelta = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -163,17 +164,19 @@ const int ther = 1;
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
 const int msd = 0;
+const int helfand = 1;
 double* posxInitial = NULL;
 double* posyInitial = NULL;
-
+double helfandyxInitial = 0;
+double helfandxyInitial = 0;
 
 //value for delta model
-double delta = 0.1;
+double delta = 0.092;
 
 //values for double delta model
-double deltaM = 0.03;
+double deltaM = 0.05;
 double deltam = 0;
-double ts = 6;
+double ts = 4;
 
 //value for evolving delta model
 double tau = 5;
@@ -191,26 +194,26 @@ double U = -2;
 double deltaE = 50;
 double beta = 6;
 double taur = 3;
-double additionalEnergy = 0.1;
+double additionalEnergy = 0.05;
 
 //value for the field, must be < 0
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.06;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0;
+double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.01;
-double T = 1.367;
+double gamm = 0.006;
+double T = 1;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.5;
+double dtnoise = 13;
 
 double a = 2;
 double b = 5;
@@ -371,9 +374,9 @@ void* computeEvolution(void *arg){
 int main(int argc, char *argv[]){
 
 	
-	//init_genrand(666);
+	
 	init_genrand(time(NULL));
-
+	//init_genrand(666);
 	
 	#if G
 	pthread_t mainThread;
@@ -2079,6 +2082,7 @@ void doTheCollisionNormal(){
 	double invMass = 1/(pi->m + pj->m);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
 	collTerm += pi->m*pj->m*collKernel;
+	offDiagCollTerm += pi->m*pj->m*invMass*(1 + res)*(dx*dvy + dy*dvx)/2;
 	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
 
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
@@ -2113,9 +2117,9 @@ void doTheCollisionNormal(){
 	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
 		double distSquared = 4*pi->rad*pj->rad;
-		double dti = t - pi->lastColl;
-		double dtj = t - pj->lastColl;
-		double deltaETotal = additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		//double dti = t - pi->lastColl;
+		//double dtj = t - pj->lastColl;
+		double deltaETotal = additionalEnergy;// + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 
 		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
 
@@ -2385,23 +2389,30 @@ void takeAScreenshot(){
 
 void takeAThermo(){
 
-	if ((damping == 1) || (msd)){
+	if ((damping == 1) || (msd || (helfand))){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
 		}
 	}
-	if ((msd) && (fabs(t - firstThermo) < 0.0001) && (firstThermo != 0)){
-		
-		posxInitial = calloc((unsigned int)N, sizeof(double));
-		posyInitial = calloc((unsigned int)N, sizeof(double));
-		for (int i = 0; i < N; i++){
-			COM_x += particles[i].x + particles[i].crossX*Lx;
-			COM_y += particles[i].y + particles[i].crossY*Ly;
-			posxInitial[i] = particles[i].x + particles[i].crossX*Lx;
-			posyInitial[i] = particles[i].y + particles[i].crossY*Ly;
+	if ((fabs(t - firstThermo) < 0.0001) && (firstThermo != 0)){
+		if (msd){
+			posxInitial = calloc((unsigned int)N, sizeof(double));
+			posyInitial = calloc((unsigned int)N, sizeof(double));
+			for (int i = 0; i < N; i++){
+				COM_x += particles[i].x + particles[i].crossX*Lx;
+				COM_y += particles[i].y + particles[i].crossY*Ly;
+				posxInitial[i] = particles[i].x + particles[i].crossX*Lx;
+				posyInitial[i] = particles[i].y + particles[i].crossY*Ly;
+			}
+			COM_x = COM_x/N;
+			COM_y = COM_y/N;
 		}
-		COM_x = COM_x/N;
-		COM_y = COM_y/N;
+		if (helfand){
+			for (int i = 0; i < N; i++){
+				helfandxyInitial += (particles[i].x + particles[i].crossX*Lx)*particles[i].vy;
+				helfandyxInitial += (particles[i].y + particles[i].crossY*Ly)*particles[i].vx;
+			}
+		}
 	}
 	physicalQ();
 	saveThermo();
@@ -2431,7 +2442,7 @@ void printInfo(){
 	
 
 
-	printf(" │ n° coll = \033[1;32m%.2e\033[0;37m  Energy = \033[1;32m%.3lf\033[0;37m  Pressure = \033[1;32m%.3lf\033[0;37m │", (float)ncol, E/N, pressure);
+	printf(" │ n° coll = \033[1;32m%.2e\033[0;37m  Energy = \033[1;32m%.8lf\033[0;37m  Pressure = \033[1;32m%.3lf\033[0;37m │", (float)ncol, E/N, pressure);
 
 }
 
@@ -2600,9 +2611,9 @@ void freeFlyGrow(particle* p){
 
 void saveTXT(){
 	if (reduce){
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y\n", t, N, Lx, Ly);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y vx vy\n", t, N, Lx, Ly);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %.4lf %.4lf\n", i, particles[i].x, particles[i].y);
+			fprintf(fichier, "%d %.2lf %.2lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
 		}
 	}
 	else{
@@ -2649,7 +2660,10 @@ void saveThermo(){
 	}
 	
     pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
-    collTerm = 0;
+    offDiagPressure = (-1/(deltaTime))*offDiagCollTerm/(2*area);
+	collTerm = 0;
+	offDiagCollTerm = 0;
+
 
     if (t != 0){
 		if (ther){
@@ -2698,6 +2712,9 @@ void saveThermo(){
 							ey += particles[i].m*particles[i].vy;
 						}
 						fprintf(thermo, "%lf %lf %.10lf %lf \n", t, 0.5*(ex*ex + ey*ey)/N, E/N, MSD/N);
+					}
+					else if (helfand){
+						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, HELFAND/(4*Lx*Ly*E/N));
 					}
 					else{
 						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
@@ -2898,6 +2915,18 @@ void physicalQ(){
 			MSD += pow(particles[i].x + particles[i].crossX*Lx - posxInitial[i] - (COMt_x - COM_x), 2) + pow(particles[i].y + particles[i].crossY*Ly - posyInitial[i] - (COMt_y - COM_y), 2);
 		}
 	}
+	if (helfand != 0 && t >= firstThermo){
+		HELFAND = 0;
+		double helfandxy = 0;
+		double helfandyx = 0;
+		for (int i = 0; i < N; i++){
+			helfandxy += (particles[i].x + particles[i].crossX*Lx)*particles[i].vy;
+			helfandyx += (particles[i].y + particles[i].crossY*Ly)*particles[i].vx;
+		}
+		
+		HELFAND = pow(helfandxy - helfandxyInitial, 2) + pow(helfandyx - helfandyxInitial, 2);
+		//HELFAND = helfandxy;
+	}
 }
 
 void customName(){
@@ -2908,12 +2937,12 @@ void customName(){
 	mkdir("dump/", 0777);
 	#endif
 	int v = 1;
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, vo, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 }
 
 int mygetline(char* str, FILE* f){

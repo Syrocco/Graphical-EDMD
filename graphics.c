@@ -1041,7 +1041,7 @@ window graphicalInit(){
 	
 	threadPoolInit();
 
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE);// | FLAG_VSYNC_HINT);
     InitWindow(1800, 900, "EDMD");
 	SetTargetFPS(144);
 	image = GenImageColor(qN, qN, BLANK);

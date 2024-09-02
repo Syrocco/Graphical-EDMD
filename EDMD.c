@@ -48,7 +48,7 @@ double aspectRatio = 1;
 int controlLenght = 0;
 
 int Nbig, Nsmall;
-double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD, HELFAND, offDiagPressure;
+double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
 double COM_x = 0;
 double COM_y = 0;
 double Lx, Ly;
@@ -74,7 +74,6 @@ const int suppSizeEvent = 10;
 double t = 0;
 
 double collTerm = 0;
-double offDiagCollTerm = 0;
 double dp = 0;
 double dpLeft = 0;
 double dpRight = 0;
@@ -95,7 +94,7 @@ int load = 1;
 //duration of simulation
 double tmax = 60000;  
 //time between each screenshots
-double dtime = 10;
+double dtime = 1;
 double firstScreen = 10;
 
 double dtimeThermo = 100;
@@ -122,15 +121,16 @@ const int addEnergy = 0;
 bool polydispersity = false;
 bool thermoWall = 0;
 bool charged = 0;
+bool addShear = 1;
 #else
 const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
-const int addWallx = 0;
+const int addWallx = 1;
 const int addCircularWall = 0;
-const int damping = 0;
-const int addDelta = 0;
+const int damping = 1;
+const int addDelta = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -138,6 +138,7 @@ const int addExpo = 0;
 int polydispersity = 0;
 int thermoWall = 0;
 int charged = 0;
+int addShear = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -164,11 +165,8 @@ const int ther = 1;
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
 const int msd = 0;
-const int helfand = 1;
 double* posxInitial = NULL;
 double* posyInitial = NULL;
-double helfandyxInitial = 0;
-double helfandxyInitial = 0;
 
 //value for delta model
 double delta = 0.092;
@@ -206,7 +204,7 @@ double Einit = 0.06;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.006;
@@ -221,6 +219,10 @@ double b = 5;
 double proportionPositivelyCharged = 0.2;
 double proportionNeutralyCharged = 0.1;
 
+const int addEnergyThermo = 1;
+const int addPressureThermo = 1;
+const int addCollisionNumberThermo = 1;
+const int addEnergyCenterOfMassThermo = 0;
 
 //parameter to reach a given temperature out of equilibrium with langevin dynamics
 double updateTime = 100;
@@ -273,9 +275,7 @@ void* computeEvolution(void *arg){
 	#if G != 1
 	customName();
 	fichier = fopen(fileName, "w");
-	if ((ther) || (addWallx) || (addWally)){
-		thermo = fopen(thermoName, "w");
-	}
+	initThermo();
 	while (t <= tmax){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
@@ -592,6 +592,38 @@ void constantInit(int argc, char *argv[]){
 		firstScreen = tmax - 1;
 	
 	boxConstantHelper();
+}
+
+void initThermo(){
+	if ((ther)){
+		thermo = fopen(thermoName, "w");
+		fprintf(thermo, "t ");
+		if (addCollisionNumberThermo){
+			fprintf(thermo, "Ncol ");
+		}
+		if (addEnergyThermo){
+			fprintf(thermo, "E ");
+		}
+		if (addPressureThermo){
+			fprintf(thermo, "p ");
+		}
+		if (addCircularWall || addWallx || addWally){
+			fprintf(thermo, "pwall ");
+		}
+		if (addMidWall){
+			fprintf(thermo, "pmid dp ");
+		}
+		if (addWell){
+			fprintf(thermo, "U ");
+		}
+		if (msd){
+			fprintf(thermo, "MSD ");
+		}
+		if (addEnergyCenterOfMassThermo){
+			fprintf(thermo, "ECOM ");
+		}
+		fprintf(thermo, "\n");
+	}	
 }
 
 /* ------------------------------------------
@@ -1932,8 +1964,20 @@ void doTheWallNormal(){
 		if (thermoWall){
 			pi->vy = -sign(pi->vy)*drand(0, T/pi->m);
 		}
+		
 		else{
 			pi->vy = -resW*pi->vy;
+		}
+		if (addShear){
+			if (pi->y + 2*pi->rad > Ly){
+				pi->vx = 0.1;
+			}
+			else{
+				pi->vx = -0.1;
+			}
+			if (addDelta){
+				pi->vy += delta*sign(pi->vy); 
+			}
 		}
 		//pi->vy = drand(-50, 50);
 	}
@@ -2082,7 +2126,6 @@ void doTheCollisionNormal(){
 	double invMass = 1/(pi->m + pj->m);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
 	collTerm += pi->m*pj->m*collKernel;
-	offDiagCollTerm += pi->m*pj->m*invMass*(1 + res)*(dx*dvy + dy*dvx)/2;
 	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
 
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
@@ -2389,7 +2432,7 @@ void takeAScreenshot(){
 
 void takeAThermo(){
 
-	if ((damping == 1) || (msd || (helfand))){
+	if ((damping == 1) || (msd)){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
 		}
@@ -2407,12 +2450,7 @@ void takeAThermo(){
 			COM_x = COM_x/N;
 			COM_y = COM_y/N;
 		}
-		if (helfand){
-			for (int i = 0; i < N; i++){
-				helfandxyInitial += (particles[i].x + particles[i].crossX*Lx)*particles[i].vy;
-				helfandyxInitial += (particles[i].y + particles[i].crossY*Ly)*particles[i].vx;
-			}
-		}
+		
 	}
 	physicalQ();
 	saveThermo();
@@ -2651,79 +2689,72 @@ void initializeThermo(){
 
 
 void saveThermo(){
+
 	double area = Lx*Ly;
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
-	
 	if (addCircularWall){
 		area = M_PI*halfLx*halfLx; 
 	}
 	
     pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
-    offDiagPressure = (-1/(deltaTime))*offDiagCollTerm/(2*area);
 	collTerm = 0;
-	offDiagCollTerm = 0;
 
 
-    if (t != 0){
-		if (ther){
-			if ((addWallx) || (addWally) || (addCircularWall)){
-
-				if (addMidWall){
-
-					fprintf(thermo, "%lf %lf %lf %lf\n", t, E/N, dpMid/((t - t1)*Ly), (dpRight - dpLeft)/((t - t1)*Ly));
-					dpMid = 0;
-					dpRight = 0;
-					dpLeft = 0;
-				}
-				else{
-					double perimeter = 0;
-					if (addCircularWall){
-						perimeter = M_PI*Lx;
-					}
-					if (addWallx){
-						perimeter += 2*Ly;
-					}
-					if (addWally){
-						perimeter += 2*Lx;
-					}
-					fprintf(thermo, "%lf %.10lf %lf %lf\n", t, E/N, pressure, dp/((t - t1)*perimeter));
-					
-					dp = 0;
-				}
-			t1 = t;
-			}
-
-			else{
-				
-				if (addWell){
-					Ep = 0;
-					for (int i = 0; i < N; i ++){
-						Ep -= U*particles[i].numberOfParticlesInWell/2;
-					}
-					fprintf(thermo, "%lf %.10lf %lf %lf \n", t, E/N, Ep/N, pressure);
-				}
-				else{
-					if (msd){
-						double ex = 0;
-						double ey = 0;
-						for (int i = 0; i < N; i++){
-							ex += particles[i].m*particles[i].vx;
-							ey += particles[i].m*particles[i].vy;
-						}
-						fprintf(thermo, "%lf %lf %.10lf %lf \n", t, 0.5*(ex*ex + ey*ey)/N, E/N, MSD/N);
-					}
-					else if (helfand){
-						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, HELFAND/(4*Lx*Ly*E/N));
-					}
-					else{
-						fprintf(thermo, "%lf %ld %.10lf %lf \n", t, ncol, E/N, pressure);
-					}
-				}
-			}
+	if (t != 0){
+		fprintf(thermo, "%lf ", t);
+		if (addCollisionNumberThermo){
+			fprintf(thermo, "%ld ", ncol);
 		}
+		if (addEnergyThermo){
+			fprintf(thermo, "%lf ", E/N);
+		}
+		if (addPressureThermo){
+			fprintf(thermo, "%lf ", pressure);
+		}
+		if (addCircularWall || addWallx || addWally){
+			double perimeter = 0;
+			if (addCircularWall){
+				perimeter = M_PI*Lx;
+			}
+			if (addWallx){
+				perimeter += 2*Ly;
+			}
+			if (addWally){
+				perimeter += 2*Lx;
+			}
+			fprintf(thermo, "%lf ", dp/(deltaTime*perimeter));
+			dp = 0;
+		}
+		if (addMidWall){
+			fprintf(thermo, "%lf %lf", dpMid/(deltaTime*Ly),(dpRight - dpLeft)/(deltaTime*Ly)) ;
+			dpMid = 0;
+			dpRight = 0;
+			dpLeft = 0;
+		}
+		if (addWell){
+			Ep = 0;
+			for (int i = 0; i < N; i ++){
+				Ep -= U*particles[i].numberOfParticlesInWell/2;
+			}
+			fprintf(thermo, "%lf ", Ep/N);
+		}
+		if (msd){
+			fprintf(thermo, "%lf ", MSD/N);
+		}
+		if (addEnergyCenterOfMassThermo){
+			double ex = 0;
+			double ey = 0;
+			for (int i = 0; i < N; i++){
+				ex += particles[i].m*particles[i].vx;
+				ey += particles[i].m*particles[i].vy;
+			}
+			fprintf(thermo, "%lf ", 0.5*(ex*ex + ey*ey)/N);
+		}
+		fprintf(thermo, "\n");
 	}
 	fflush(thermo);
+
 }
 
 double drand(double min, double max){
@@ -2915,18 +2946,7 @@ void physicalQ(){
 			MSD += pow(particles[i].x + particles[i].crossX*Lx - posxInitial[i] - (COMt_x - COM_x), 2) + pow(particles[i].y + particles[i].crossY*Ly - posyInitial[i] - (COMt_y - COM_y), 2);
 		}
 	}
-	if (helfand != 0 && t >= firstThermo){
-		HELFAND = 0;
-		double helfandxy = 0;
-		double helfandyx = 0;
-		for (int i = 0; i < N; i++){
-			helfandxy += (particles[i].x + particles[i].crossX*Lx)*particles[i].vy;
-			helfandyx += (particles[i].y + particles[i].crossY*Ly)*particles[i].vx;
-		}
-		
-		HELFAND = pow(helfandxy - helfandxyInitial, 2) + pow(helfandyx - helfandyxInitial, 2);
-		//HELFAND = helfandxy;
-	}
+	
 }
 
 void customName(){

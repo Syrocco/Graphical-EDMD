@@ -58,7 +58,7 @@ void cellListInit();
 void boxConstantHelper();
 void eventListInit();
 void freeArrays();
-
+void initThermo();
 
 void addToCell(int i);
 void removeFromCell(int i);

@@ -625,7 +625,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 
 	double phiTemp = phi;
 	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.85);
+	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI}, "Packing fraction", name, &phi, 0.1, 0.88);
 	if ((phiTemp != phi) || (fractionSmallNTemp != fractionSmallN) || (sizeratioTemp != sizeratio)){
 	/*
 		if ((phiTemp > phi) && (t > 1/vr)){

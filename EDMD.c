@@ -22,7 +22,7 @@
 #ifndef G
 #define G 0
 #endif
-
+#define SIGN 1
 #if G
 #include "graphics.h"
 #include "raylib.h"
@@ -92,13 +92,13 @@ int load = 1;
 
 
 //duration of simulation
-double tmax = 60000;  
+double tmax = 11000000;  
 //time between each screenshots
-double dtime = 1;
-double firstScreen = 10;
+double dtime = 100;
+double firstScreen = 0;
 
 double dtimeThermo = 100;
-double firstThermo = 500;
+double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -121,15 +121,16 @@ const int addEnergy = 0;
 bool polydispersity = false;
 bool thermoWall = 0;
 bool charged = 0;
-bool addShear = 1;
+bool addShear = 0;
+bool addShearWall = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 0;
+const int noise = 1;
 const int addWally = 0;
-const int addWallx = 1;
+const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
+const int damping = 0;
 const int addDelta = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
@@ -138,7 +139,8 @@ const int addExpo = 0;
 int polydispersity = 0;
 int thermoWall = 0;
 int charged = 0;
-int addShear = 0;
+int addShear = 1;
+int addShearWall = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -169,7 +171,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.092;
+double delta = 0.022;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -204,14 +206,17 @@ double Einit = 0.06;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.006;
-double T = 1;
+double gamm = 0.2;
+double T = 0.0;
 double expE = 1;
 //time between kicks
-double dtnoise = 13;
+double dtnoise = 2;
+
+
+double strainRate = 0.01;
 
 double a = 2;
 double b = 5;
@@ -290,6 +295,7 @@ void* computeEvolution(void *arg){
 			//}
 			
 			t = nextEvent->t;
+			//printf("%lf %lf %lf %lf\n", particles[0].x, particles[0].y, particles[1].x, particles[1].y);
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
 				case COLLISION:
@@ -375,8 +381,8 @@ int main(int argc, char *argv[]){
 
 	
 	
-	init_genrand(time(NULL));
-	//init_genrand(666);
+	//init_genrand(time(NULL));
+	init_genrand(666);
 	
 	#if G
 	pthread_t mainThread;
@@ -741,7 +747,6 @@ void particlesInit(){
 			free(targetRad);
 		}
 	}
-
 	
 
 	
@@ -1315,6 +1320,10 @@ void doTheCrossing(){
 			if (newCell == -1){
 				p->cell[1] = Nycells - 1;
 				p->crossY -= 1;
+				if ((addShear && t >= 1/vr) || (addShear && load == 1)){
+					shearCorrection(&(p->x), &(p->vx), -1);
+					p->cell[0] = coordToCell(p->x, 1); 
+				}
 			}
 			else
 				p->cell[1] = newCell;
@@ -1324,6 +1333,10 @@ void doTheCrossing(){
 			if (newCell == Nycells){
 				p->cell[1] = 0;
 				p->crossY += 1;
+				if ((addShear && t >= 1/vr) || (addShear && load == 1)){
+					shearCorrection(&(p->x), &(p->vx), 1);
+					p->cell[0] = coordToCell(p->x, 1); 
+				}
 			}
 			else
 				p->cell[1] = newCell;
@@ -1336,7 +1349,7 @@ void doTheCrossing(){
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
-
+	//p->coll++;
 	crossingEvent(i);
 	removeEventFromQueue(eventList[N + i]);
 	collisionEvent(i);
@@ -1391,7 +1404,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 		return plus;
 	}
 	if (distOfSquare - dr*dr< -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
+		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
 	}
 	
@@ -1415,7 +1428,13 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
+
+	if (addShear){
+		correctDistances(p1, p2, lat2, &dx, &dvx);
+	}
+
 	PBC(&dx, &dy);
+	
 	double b = dx*dvx + dy*dvy;
 
 	//no collision.
@@ -1431,7 +1450,8 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf\033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
+		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: %lf \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad, dx*dx + dy*dy);
+		saveTXT();
 		exit(3);
 	}
 
@@ -1634,7 +1654,7 @@ void collisionEventNormal(int i){
 		}
 	}
 
-
+	
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
 			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
@@ -1672,7 +1692,83 @@ void collisionEventNormal(int i){
 	 		}
 	 	}
 	}
+	if (addShear){
+		if (Y == 0){
+			for (int k = 0; k < Nxcells; k++){
+				particle* p2 = cellList[k*Nycells + Nycells - 1];
+				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (p1->num != p2->num){
+						if (addWell){
+							if (isParticleInWellList(p1, p2->num)){
+								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp2 = separateTime(p1, p2);
+								if (dtTemp < dtTemp2){
+									typeTemp = COLLISION;
+								}
+								else{
+									dtTemp = dtTemp2;
+									typeTemp = OUT;
+								}
+							}
+							else{
+								dtTemp = sphereTime(p1, p2);
+								typeTemp = IN;
+							}
+						}
+						else{
+							dtTemp = collisionTimeNormal(p1, p2);
+							typeTemp = COLLISION;
+						}
 
+						if (dt > dtTemp){ //get min
+							finalPartner = p2->num;
+							dt = dtTemp;
+							type = typeTemp;
+						}
+					}
+					p2 = p2->nxt;
+				}
+			}
+		}
+		else if (Y == Nycells - 1){
+			for (int k = 0; k < Nxcells; k++){
+				particle* p2 = cellList[k*Nycells];
+				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (p1->num != p2->num){
+						if (addWell){
+							if (isParticleInWellList(p1, p2->num)){
+								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp2 = separateTime(p1, p2);
+								if (dtTemp < dtTemp2){
+									typeTemp = COLLISION;
+								}
+								else{
+									dtTemp = dtTemp2;
+									typeTemp = OUT;
+								}
+							}
+							else{
+								dtTemp = sphereTime(p1, p2);
+								typeTemp = IN;
+							}
+						}
+						else{
+							dtTemp = collisionTimeNormal(p1, p2);
+							typeTemp = COLLISION;
+						}
+
+						if (dt > dtTemp){ //get min
+							finalPartner = p2->num;
+							dt = dtTemp;
+							type = typeTemp;
+						}
+					}
+					p2 = p2->nxt;
+				}
+			}
+		}
+	}
+	
 	if (type == COLLISION){
 		addCollisionEvent(i, finalPartner, t + dt);
 	}
@@ -1968,7 +2064,7 @@ void doTheWallNormal(){
 		else{
 			pi->vy = -resW*pi->vy;
 		}
-		if (addShear){
+		if (addShearWall){
 			if (pi->y + 2*pi->rad > Ly){
 				pi->vx = 0.1;
 			}
@@ -2108,20 +2204,20 @@ void doTheCollisionNormal(){
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
 
+	
+
 	double dvx = pj->vx - pi->vx;
 	double dvy = pj->vy - pi->vy;
 
 
+	if (addShear){
+		correctDistances(pi, pj, 0, &dx, &dvx);
+	}
 
 	PBC(&dx, &dy);
 
-
-
 	if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
-
-
-
 	
 	double invMass = 1/(pi->m + pj->m);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
@@ -2866,19 +2962,45 @@ void randomGaussian(particle* p){
 	}
 }
 
+void shearCorrection(double* x, double* vx, int sign){
+	*x += sign*(fmod(strainRate*(t - 1/vr)*Ly, Lx));
+	*vx += sign*strainRate*Ly;
+	PBCpostX(x);
+}
+
+void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx){
+	if (p1->cell[1] == 0 && p2->cell[1] == Nycells - 1){
+			double x = p2->x + lat2*p2->vx;
+			double vx = p2->vx;
+			shearCorrection(&x, &vx, 1);
+			*dx = x - p1->x;
+			*dvx = vx - p1->vx;
+		}
+	if (p1->cell[1] == Nycells - 1 && p2->cell[1] == 0){
+		double x = p2->x + lat2*p2->vx;
+		double vx = p2->vx;
+		shearCorrection(&x, &vx, -1);
+		*dx = x - p1->x;
+		*dvx = vx - p1->vx;
+	}
+}
 
 void PBC(double* dx, double* dy){
 	if ((!addWallx) && (!addCircularWall)){
-		if (*dx >= halfLx)
+		if (*dx >= halfLx){
 			*dx -= Lx;
-		else if (*dx < -halfLx)
+		}
+		else if (*dx < -halfLx){
 			*dx += Lx;
+		}			
 	}
 	if ((!addWally) && (!addCircularWall)){
-		if (*dy >= halfLy)
+		if (*dy >= halfLy){
 			*dy -= Ly;
-		else if (*dy < -halfLy)
+		}
+		else if (*dy < -halfLy){
 			*dy += Ly;
+		}
 	}
 }
 
@@ -3065,6 +3187,10 @@ void runningCheck(){
 		printf("WARNING:\033[0;31m Thermostat used with energy input based on collision!\033[0m\n");
 	if ((damping) && (euler)){
 		printf("ERROR:\033[1;31m Can't use damping == 1 with Euler == 1\033[0m\n");
+		stop = 1;
+	}
+	if ((addShear) && (charged || addField || addWell || addWallx || addWally || addCircularWall || damping)){
+		printf("ERROR:\033[1;31m Can't use addShear == 1 with charged/Field/Well/Walls/damping == 1\033[0m\n");
 		stop = 1;
 	}
 

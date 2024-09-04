@@ -65,6 +65,8 @@ void removeFromCell(int i);
 int coordToCell(double a, int x);
 int PBCcellX(double a);
 int PBCcellY(double a);
+void shearCorrection(double* x, double* vx, int sign);
+void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx);
 
 void addEventToQueue(node* toAdd);
 void addEventToTree(node* toAdd);

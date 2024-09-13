@@ -42,7 +42,7 @@
 //Values if no load file
 int N = 100;
 double phi = 0.05;
-double sizeratio = 1;
+double sizeratio = 0.5;
 double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
@@ -88,16 +88,16 @@ FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
-int load = 1;
-
+int load = 0;
+int S1 = 0;
 
 //duration of simulation
 double tmax = 11000000;  
 //time between each screenshots
-double dtime = 100;
+double dtime = 10;
 double firstScreen = 0;
 
-double dtimeThermo = 100;
+double dtimeThermo = 10;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -126,21 +126,21 @@ bool addShearWall = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 1;
+const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
-int polydispersity = 0;
-int thermoWall = 0;
-int charged = 0;
-int addShear = 1;
-int addShearWall = 0;
+const int polydispersity = 0;
+const int thermoWall = 0;
+const int charged = 0;
+const int addShear = 0;
+const int addShearWall = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -171,7 +171,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.022;
+double delta = 0.1;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -209,11 +209,11 @@ double resW = 1;
 double res = 0.95;
 
 //parameter if noise or damping
-double gamm = 0.2;
-double T = 0.0;
+double gamm = 0.1;
+double T = 1.367;
 double expE = 1;
 //time between kicks
-double dtnoise = 2;
+double dtnoise = 1;
 
 
 double strainRate = 0.01;
@@ -560,6 +560,15 @@ void constantInit(int argc, char *argv[]){
 		if (nValues == 2)
 			Ly = Lx;
 	}
+	else if (S1){
+		Nsmall = N/2;
+		Nsmall = (int)sqrt(Nsmall);
+		Nsmall = Nsmall*Nsmall;
+		Nbig = Nsmall;
+		N = Nbig + Nsmall;
+		Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/phi);
+		Ly = Lx;
+	}
 	else{
 		double r2 = (1 + fractionSmallN*(sizeratio*sizeratio - 1));
 		if (polydispersity){
@@ -665,6 +674,52 @@ void particlesInit(){
 		fclose(file);
 		Nsmall = N - Nbig;
 		sizeratio = particles[N-1].rad;
+		normalizePhysicalQ();
+	}
+	else if (S1){
+		particle* p;
+		int Nsqrt = (int)sqrt(Nsmall);
+		int k = 0;
+		float dx = Lx/Nsqrt;
+		for (i = 0; i < Nsqrt; i++){
+			for (int j = 0; j < Nsqrt; j++){
+				p = particles + k;
+				p->x = i*dx;
+				p->y = j*dx;
+				p->type = 1;
+				p->rad = 1;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+		
+		for (i = 0; i < Nsqrt; i++){
+			for (int j = 0; j < Nsqrt; j++){
+				p = particles + k;
+				p->x = dx/2 + i*dx;
+				p->y = dx/2 + j*dx;
+				p->type = 0;
+				p->rad = sizeratio;
+				p->m = sizeratio*sizeratio*sizeratio;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
 		normalizePhysicalQ();
 	}
 	else{
@@ -854,7 +909,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0){
+	if (load == 0 && S1 == 0){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -867,7 +922,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0){
+	if (load == 0 && S1 == 0){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -2553,6 +2608,7 @@ void takeAThermo(){
 
 	addEventThermo(t + dtimeThermo);
 	printInfo();
+
 }
 
 void printInfo(){
@@ -2646,33 +2702,64 @@ void addEventNoise(double tnoise){
 
 void addNoise(){
 	//double k = 2*M_PI*3/Lx;
-	if (noise == 2)
+	if (noise == 2 || noise == 4){
 		physicalQ();
-	for (int i = 0; i < N; i++){
-
-		particle* p = particles + i; //(int)(genrand_int32()%N)
-		int j = p->num;
-		p->coll++;
-		//updates position
-		freeFly(p);
-		//adds the kick
-		if (noise == 1){
-			randomGaussian(p);
+	}
+	if (noise == 4){
+		for (int i = 0; i < N; i++){
+			freeFly(particles + i);
+			particles[i].vx -= px/(N*particles[i].m);
+			particles[i].vy -= py/(N*particles[i].m);
+			particles[i].coll++;
 		}
-		else{
-			p->vx /= sqrt(E/N/T);
-			p->vy /= sqrt(E/N/T);
+		for (int j = 0; j < N; j++){
+			removeEventFromQueue(eventList[j]);
+			crossingEvent(j);
+
+			removeEventFromQueue(eventList[N + j]);
+			collisionEvent(j);
 		}
-		//p->vx += 0.03*sin(k*p->x - 0.1*t)*dtnoise;
-		//p->vy += 0.3*sin(k*p->y - 0.1*t)*dtnoise;
+	}
+	else if (noise == 3){
+		for (int i = 0; i < N; i++){
+			freeFly(particles + i);
+			particles[i].vx += (particles[i].y - halfLy)/(particles[i].m)*dtnoise*strainRate*0.1;
+			particles[i].coll++;
+		}
+		for (int j = 0; j < N; j++){
+			removeEventFromQueue(eventList[j]);
+			crossingEvent(j);
 
-		//Calculate the new collisions and the new cell crossings.
-		removeEventFromQueue(eventList[j]);
-		crossingEvent(j);
+			removeEventFromQueue(eventList[N + j]);
+			collisionEvent(j);
+		}
+	}
+	else{
+		for (int i = 0; i < N; i++){
 
-		removeEventFromQueue(eventList[N + j]);
-		collisionEvent(j);
-		
+			particle* p = particles + i; //(int)(genrand_int32()%N)
+			int j = p->num;
+			p->coll++;
+			//updates position
+			freeFly(p);
+			//adds the kick
+			if (noise == 1){
+				randomGaussian(p);
+			}
+			else{
+				p->vx /= sqrt(E/N/T);
+				p->vy /= sqrt(E/N/T);
+			}
+			//p->vx += 0.03*sin(k*p->x - 0.1*t)*dtnoise;
+			//p->vy += 0.3*sin(k*p->y - 0.1*t)*dtnoise;
+
+			//Calculate the new collisions and the new cell crossings.
+			removeEventFromQueue(eventList[j]);
+			crossingEvent(j);
+
+			removeEventFromQueue(eventList[N + j]);
+			collisionEvent(j);
+		}
 	}
 	addEventNoise(t + dtnoise);
 }

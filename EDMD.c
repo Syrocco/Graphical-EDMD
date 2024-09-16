@@ -93,9 +93,9 @@ int load = 2;
 int S1 = 0;
 
 //duration of simulation
-double tmax = 11000000;  
+double tmax = 1100;  
 //time between each screenshots
-double dtime = 1000;
+double dtime = 100;
 double firstScreen = 0;
 
 double dtimeThermo = 100;
@@ -132,7 +132,7 @@ const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 0;
+const int addDelta = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -172,7 +172,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.03;
+double delta = 0.022;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -207,7 +207,7 @@ double Einit = 0.03;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
 double gamm = 0.01;
@@ -724,7 +724,6 @@ void particlesInit(){
 			p->vy = vy[i];
 			p->rad = rad[i];
 			p->m = m[i];
-			printf("%lf ", x[i]);
 		    Nbig += p->type;
 			p->num = i;
 			p->t = 0;

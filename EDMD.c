@@ -10,6 +10,7 @@
 #include<sys/stat.h>
 #include<sys/types.h>
 #include<stdbool.h>
+#include"parser.h"
 
 #include<getopt.h>
 #include<time.h>
@@ -88,16 +89,16 @@ FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
-int load = 0;
+int load = 2;
 int S1 = 0;
 
 //duration of simulation
 double tmax = 11000000;  
 //time between each screenshots
-double dtime = 10;
+double dtime = 1000;
 double firstScreen = 0;
 
-double dtimeThermo = 10;
+double dtimeThermo = 100;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -130,8 +131,8 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
-const int addDelta = 1;
+const int damping = 0;
+const int addDelta = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -149,7 +150,7 @@ const int updating = 0;
 
 //add a wall at x = Lx/2
 const int addMidWall = 0;
-//add a circular wall
+
 
 
 void (*collisionEvent)(int);
@@ -171,7 +172,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.1;
+double delta = 0.03;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -200,17 +201,17 @@ double additionalEnergy = 0.05;
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 0.06;
+double Einit = 0.03;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.1;
-double T = 1.367;
+double gamm = 0.01;
+double T = 0;
 double expE = 1;
 //time between kicks
 double dtnoise = 1;
@@ -247,6 +248,7 @@ double t1 = 0;
 FILE *fichier;
 FILE *thermo;
 node *root;
+Dump* dump;
 //array containing the particles
 particle* particles;
 //2D array of pointer
@@ -469,9 +471,13 @@ void constantInit(int argc, char *argv[]){
 	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
-				load = 1;
 				strcpy(filename, optarg);
-				printf("%s", filename);
+				int len = strlen(filename);
+				if (len > 0 && filename[len - 1] == 'p') {
+					load = 2;
+				} else {
+					load = 1;
+				}
 				break;
 			case 'N':
 				load = 0;
@@ -552,13 +558,22 @@ void constantInit(int argc, char *argv[]){
 		}
 	}
 
-
-	if (load){
+	
+	if (load == 1){
 		file = fopen(filename, "r");
 		mygetline(buffer, file);
 		int nValues = sscanf(buffer, "%d %lf %lf\n", &N, &Lx, &Ly);
 		if (nValues == 2)
 			Ly = Lx;
+	}
+	else if (load == 2){
+		file = fopen(filename, "r");
+		dump = dump_open(filename,'r');		
+		N = get_natoms(dump);
+		char hboxx;
+		Lx = get_boxx(&hboxx, 1, dump);
+		char hboxy;
+		Ly = get_boxy(&hboxy, 1, dump);
 	}
 	else if (S1){
 		Nsmall = N/2;
@@ -655,7 +670,7 @@ void particlesInit(){
 	
 
 	int i = 0;
-	if (load){
+	if (load == 1){
 		particle* p;
 		for (i = 0; i < N; i++){
 		    p = particles + i;
@@ -675,6 +690,58 @@ void particlesInit(){
 		Nsmall = N - Nbig;
 		sizeratio = particles[N-1].rad;
 		normalizePhysicalQ();
+	}
+	else if (load == 2){
+		int nframes = dump->nframes;
+		jump_to_frame(nframes - 1, dump);
+
+		double* x = calloc(N, sizeof(double));
+		double* y = calloc(N, sizeof(double));
+		double* vx = calloc(N, sizeof(double));
+		double* vy = calloc(N, sizeof(double));
+		double* rad = calloc(N, sizeof(double));
+		double* m = calloc(N, sizeof(double));
+		int* type = calloc(N, sizeof(int));
+
+		get_doubleatomprop("x", x, N, dump);
+		get_doubleatomprop("y", y, N, dump);
+		get_doubleatomprop("vx", vx, N, dump);
+		get_doubleatomprop("vy", vy, N, dump);
+		get_doubleatomprop("radius", rad, N, dump);
+		get_doubleatomprop("m", m, N, dump);
+		get_intatomprop("type", type, N, dump);
+
+		
+		
+
+		particle* p;
+		for (i = 0; i < N; i++){
+		    p = particles + i;
+			p->type = type[i];
+			p->x = x[i];
+			p->y = y[i];
+			p->vx = vx[i];
+			p->vy = vy[i];
+			p->rad = rad[i];
+			p->m = m[i];
+			printf("%lf ", x[i]);
+		    Nbig += p->type;
+			p->num = i;
+			p->t = 0;
+			p->coll = 0;
+            p->lastColl = 0;
+		}
+		fclose(file);
+		Nsmall = N - Nbig;
+		sizeratio = particles[N-1].rad;
+		free(x);
+		free(y);
+		free(vx);
+		free(vy);
+		free(type);
+		free(m);
+		free(rad);
+		dump_close(dump);
 	}
 	else if (S1){
 		particle* p;
@@ -806,7 +873,7 @@ void particlesInit(){
 
 	
 
-	if (load == 1){
+	if (load){
 		if (addCircularWall)
 			phi = (sizeratio*sizeratio*Nsmall + Nbig)/(halfLx*halfLx);
 		else
@@ -1375,7 +1442,7 @@ void doTheCrossing(){
 			if (newCell == -1){
 				p->cell[1] = Nycells - 1;
 				p->crossY -= 1;
-				if ((addShear && t >= 1/vr) || (addShear && load == 1)){
+				if ((addShear && t >= 1/vr) || (addShear && load)){
 					shearCorrection(&(p->x), &(p->vx), -1);
 					p->cell[0] = coordToCell(p->x, 1); 
 				}
@@ -1388,7 +1455,7 @@ void doTheCrossing(){
 			if (newCell == Nycells){
 				p->cell[1] = 0;
 				p->crossY += 1;
-				if ((addShear && t >= 1/vr) || (addShear && load == 1)){
+				if ((addShear && t >= 1/vr) || (addShear && load)){
 					shearCorrection(&(p->x), &(p->vx), 1);
 					p->cell[0] = coordToCell(p->x, 1); 
 				}

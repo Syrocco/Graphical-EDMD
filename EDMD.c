@@ -19,6 +19,16 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
+#define NONADDITIVE 0
+
+
+#if NONADDITIVE == 0
+    #define DIST(r1, r2) (sqrt(4 * (r1) * (r2)))
+	#define DIST2(r1, r2) ((4 * (r1) * (r2)))
+#else
+    #define DIST(r1, r2) ((r1) + (r2))
+	#define DIST2(r1, r2) (((r1) + (r2))*((r1) + (r2)))
+#endif
 
 #ifndef G
 #define G 0
@@ -1493,7 +1503,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
-	double dr = 2*sqrt(p1->rad*(p2->rad + lat2*p2->vr));
+	double dr = DIST(p1->rad, p2->rad + lat2*p2->vr);
 	PBC(&dx, &dy);
 	double b = dx*dvx + dy*dvy - dvr*dr;
 
@@ -1564,8 +1574,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 
 	double v2 = dvx*dvx + dvy*dvy;
-	double distOfSquare = 4*p1->rad*p2->rad;
-	distOfSquare = dx*dx + dy*dy - 4*p1->rad*p2->rad;
+	double distOfSquare = dx*dx + dy*dy - DIST2(p1->rad, p2->rad);
 	double det = pow(b, 2) - v2*distOfSquare;
 
 
@@ -2343,7 +2352,8 @@ void doTheCollisionNormal(){
 	double invMass = 1/(pi->m + pj->m);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
 	collTerm += pi->m*pj->m*collKernel;
-	double funkyFactor = collKernel/(4*pi->rad*pj->rad);
+	double distSquared = DIST2(pi->rad, pj->rad);
+	double funkyFactor = collKernel/distSquared;
 
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
@@ -2376,7 +2386,6 @@ void doTheCollisionNormal(){
 	}
 	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
-		double distSquared = 4*pi->rad*pj->rad;
 		//double dti = t - pi->lastColl;
 		//double dtj = t - pj->lastColl;
 		double deltaETotal = additionalEnergy;// + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));

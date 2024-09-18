@@ -103,12 +103,12 @@ int load = 0;
 int S1 = 0;
 
 //duration of simulation
-double tmax = 110000;  
+double tmax = 11000;  
 //time between each screenshots
-double dtime = 100;
+double dtime = 1;
 double firstScreen = 0;
 
-double dtimeThermo = 10;
+double dtimeThermo = 1;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -138,8 +138,8 @@ bool addShearWall = 0;
 const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
-const int addWally = 1;
-const int addWallx = 1;
+const int addWally = 0;
+const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
@@ -307,7 +307,7 @@ void* computeEvolution(void *arg){
 			//}
 			
 			t = nextEvent->t;
-			//printf("%lf %lf %lf %lf\n", particles[0].x, particles[0].y, particles[1].x, particles[1].y);
+			//printf("%lf %lf %d %d\n", nextEvent->t, 1/vr, nextEvent->type, nextEvent->i);
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
 				case COLLISION:
@@ -2287,7 +2287,7 @@ void doTheWallGrow(){
 
 	//hacky
 	if (xy == 0){
-		if (pi->x > Lx - 2){
+		if (pi->x > Lx - 3){
 			pi->vx = -pi->vx - 2*vrParticle;
 		}
 		else{
@@ -2296,7 +2296,7 @@ void doTheWallGrow(){
 	}
 	else if (xy == 1){
 
-		if (pi->y > Ly - 2){
+		if (pi->y > Ly - 3){
 			pi->vy = -pi->vy - 2*vrParticle;
 		}
 		else{
@@ -2342,7 +2342,7 @@ void doTheWallNormal(){
 		dp += fabs((resW + 1)*pi->m*pi->vx);
 		if (addMidWall){
 			if (pi->vx < 0){
-				if (pi->x - 2 < 0){
+				if (pi->x - 3 < 0){
 					dpLeft += fabs((resW + 1)*pi->m*pi->vx);
 				}
 				else{
@@ -2350,7 +2350,7 @@ void doTheWallNormal(){
 				}
 			}
 			else{
-				if (pi->x + 2 > Lx){
+				if (pi->x + 3 > Lx){
 					dpRight += fabs((resW + 1)*pi->m*pi->vx);
 				}
 				else{

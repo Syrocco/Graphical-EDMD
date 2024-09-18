@@ -1,3 +1,7 @@
+/*
+ *	Author: Etienne Fayen
+ *
+*/
 #include "parser.h"
 
 /*** Open/close dump file ***/

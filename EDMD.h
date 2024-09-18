@@ -26,10 +26,16 @@ typedef struct particle particle;
 struct particle{
 	double rad, x, y, vx, vy, m, lastColl, t, vr;
 	particle *prv, *nxt;
-	int num, type, numberOfParticlesInWell, cell[2], crossX, crossY, synchro;
+	int num, type, numberOfParticlesInWell, crossX, crossY, synchro;
 	int* particlesInWell;
 	unsigned long int coll; //coll = counter of collision at collision
 	int charge;
+	#if THREE_D
+	double vz, z;
+	int cell[3], crossZ;
+	#else
+	int cell[2];
+	#endif
 
 };
 
@@ -65,6 +71,7 @@ void removeFromCell(int i);
 int coordToCell(double a, int x);
 int PBCcellX(double a);
 int PBCcellY(double a);
+int PBCcellZ(double a);
 void shearCorrection(double* x, double* vx, int sign);
 void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx);
 
@@ -116,11 +123,17 @@ double logTime(double time);
 double drand(double min, double max);
 void randomGaussian(particle* p);
 void optimizeGrowConstant();
+#if THREE_D
+void PBC(double* dx, double* dy, double* dz);
+#else
 void PBC(double* dx, double* dy);
+#endif
 void PBCpostX(double* val);
 void PBCpostY(double* val);
+void PBCpostZ(double* val);
 double PBCinsideCellX(double dx);
 double PBCinsideCellY(double dy);
+double PBCinsideCellZ(double dz);
 void physicalQ();
 int cmpDouble(const void * a, const void * b);
 void normalizePhysicalQ();

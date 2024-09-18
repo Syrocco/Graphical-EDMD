@@ -1,3 +1,5 @@
+#define THREE_D 1
+
 #include "EDMD.h"
 #include "mersenne.c" 
 #include "quartic.c" 
@@ -19,7 +21,7 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
-#define NONADDITIVE 0
+#define NONADDITIVE 1
 
 
 #if NONADDITIVE == 0
@@ -62,22 +64,20 @@ int Nbig, Nsmall;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
 double COM_x = 0;
 double COM_y = 0;
-double Lx, Ly;
+double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
 
 
-int Nycells;
-int Nxcells;
-double halfLx; // = Lx/2
-double halfLy; // = Ly/2
-double cellxSize; // L/Ncells
-double cellySize; // L/Ncells
-double halfxC; // = cellSize/2;
-double cellxFac; // = 1/cellSize
-double halfyC; // = cellSize/2;
-double cellyFac; // = 1/cellSize
+int Nxcells, Nycells;
+double halfLx, halfLy; 
+double cellxSize, cellySize; 
+double halfxC, halfyC; 
+double cellxFac, cellyFac; 
+#if THREE_D
+	double halfLz, cellzSize, halfzC, cellzFac, Nzcells, dzr, pz;
+#endif
 
 //for now we only need 3 more events
 const int suppSizeEvent = 10;
@@ -99,16 +99,16 @@ FILE* file;
 
 
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
-int load = 2;
+int load = 0;
 int S1 = 0;
 
 //duration of simulation
-double tmax = 1100;  
+double tmax = 110000;  
 //time between each screenshots
 double dtime = 100;
 double firstScreen = 0;
 
-double dtimeThermo = 100;
+double dtimeThermo = 10;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -138,11 +138,11 @@ bool addShearWall = 0;
 const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
-const int addWally = 0;
-const int addWallx = 0;
+const int addWally = 1;
+const int addWallx = 1;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 1;
+const int addDelta = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -211,17 +211,17 @@ double additionalEnergy = 0.05;
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 0.03;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.01;
-double T = 0;
+double T = 1;
 double expE = 1;
 //time between kicks
 double dtnoise = 1;
@@ -424,13 +424,22 @@ int main(int argc, char *argv[]){
 void boxConstantHelper(){
 	halfLx = Lx/2;
 	halfLy = Ly/2;
+	#if THREE_D
+	halfLz = Lz/2;
+	#endif
 	if (addWell){
 		Nycells = (int)(halfLy/sig);
 		Nxcells = (int)(halfLx/sig);
+		#if THREE_D
+		Nzcells = (int)(halfLz/sig);
+		#endif
 	}
 	else{
 		Nycells = (int)(halfLy);
 		Nxcells = (int)(halfLx);
+		#if THREE_D
+		Nzcells = (int)(halfLz);
+		#endif
 	}
 
 	cellxSize = Lx/Nxcells;
@@ -439,7 +448,11 @@ void boxConstantHelper(){
 	halfyC = cellxSize/2;
 	cellxFac = 1/cellxSize;
 	cellyFac = 1/cellySize;
-
+	#if THREE_D
+	cellzSize = Lz/Nzcells;
+	halfzC = cellzSize/2;
+	cellzFac = 1/cellzSize;
+	#endif
 	dtPaul = 100/(double)N;
 
     paulListN = N;
@@ -595,7 +608,11 @@ void constantInit(int argc, char *argv[]){
 		Ly = Lx;
 	}
 	else{
+		#if THREE_D
+		double r2 = (1 + fractionSmallN*(sizeratio*sizeratio*sizeratio - 1));
+		#else
 		double r2 = (1 + fractionSmallN*(sizeratio*sizeratio - 1));
+		#endif
 		if (polydispersity){
 			r2 = b*tgamma(1 + 2/a)*tgamma(b)/tgamma(1 + b + 2/a);
 			Ly = Lx;
@@ -606,18 +623,27 @@ void constantInit(int argc, char *argv[]){
 		}
 		else{
 			if (controlLenght == 0){
+				#if THREE_D
+				Lx = pow((4./3.)*M_PI*N/(phi*aspectRatio)*r2, 1./3.);
+				#else
 				Lx = sqrt(M_PI*N/(phi*aspectRatio)*r2);
+				#endif
+				Lz = Lx;
 				Ly = Lx*aspectRatio;
+				
 			}
+			// NO 3d
 			else if (controlLenght == 1){
 				Lx = Ly/aspectRatio;
 				N = (int)(phi*Lx*Ly/(M_PI*r2));
 				phi = M_PI*N*r2/(Lx*Ly);
+				Lz = Ly;
 			}
 			else{
 				Ly = Lx*aspectRatio;
 				N = (int)(phi*Lx*Ly/(M_PI*r2));
 				phi = M_PI*N*r2/(Lx*Ly);
+				Lz = Ly;
 			}
 
 		}
@@ -825,11 +851,17 @@ void particlesInit(){
 			else{
 				p->x = drand(2.5, Lx - 2.5); 
 				p->y = drand(2.5, Ly - 2.5);
+				#if THREE_D
+				p->z = drand(2.5, Lz - 2.5);
+				#endif
 			}
 			p->num = i;
 			p->rad = 0;
 			p->crossX = 0;
 			p->crossY = 0;
+			#if THREE_D
+			p->crossZ = 0;
+			#endif
 
 			if (polydispersity){
 				p->vr = vr*targetRad[i];
@@ -858,6 +890,9 @@ void particlesInit(){
 			double U2 = drand(0, 1);
 			p->vx = sqrt(-2*log(U1)/p->m*EinitGrow)*cos(2*M_PI*U2);
 			p->vy = sqrt(-2*log(U1)/p->m*EinitGrow)*sin(2*M_PI*U2);
+			#if THREE_D
+			p->vz = 0;
+			#endif
 
 			p->lastColl = 0;
 			
@@ -911,13 +946,17 @@ void pairsInit(){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
+				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
 				//printf("id: %d vs: %d | PBC %d %d | Nxcells: %d Nycells: %d\n", PBCcellX(X + j)*Nycells + PBCcellY(Y + k), Nxcells*Nycells, PBCcellX(X + j), PBCcellX(Y + k), Nxcells, Nycells);
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						double dx = p2->x - p1->x;
 						double dy = p2->y - p1->y;
+						#if THREE_D
+						PBC(&dx, &dy, &dx);
+						#else
 						PBC(&dx, &dy);
+						#endif
 						if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad) && (isParticleInWellList(p1, p2->num) == 0)) //last condition to prevent double counting for small system
 							addParticleInWellList(p1, p2->num);
 					}
@@ -939,7 +978,11 @@ void pairsInit(){
 --------------------------------------------- */
 void cellListInit(){
 
+	#if THREE_D
+	cellList = calloc(Nxcells*Nycells*Nzcells, sizeof(particle*));
+	#else
 	cellList = calloc(Nxcells*Nycells, sizeof(particle*));
+	#endif
 
 
 	for (int i = 0; i < N; i++){
@@ -1065,14 +1108,23 @@ void addToCell(int i){
 	particle* p = particles + i;
 	int X = coordToCell(p->x, 1);
 	int Y = coordToCell(p->y, 0);
+	
 
 
 	p->cell[0] = X;
 	p->cell[1] = Y;
-
 	p->prv = NULL;
-	p->nxt = cellList[X*Nycells + Y];
-	cellList[X*Nycells + Y] = p;
+
+	#if THREE_D
+	int Z = coordToCell(p->z, 2);
+	p->cell[2] = Z;
+	p->nxt = cellList[Z*Nycells*Nxcells + Y*Nxcells + X];
+	cellList[Z*Nycells*Nxcells + Y*Nxcells + X] = p;
+	#else
+	p->nxt = cellList[Y*Nxcells + X];
+	cellList[Y*Nxcells + X] = p;
+	#endif
+	
 	if (p->nxt)
 		p->nxt->prv = p;
 
@@ -1084,7 +1136,11 @@ void addToCell(int i){
 void removeFromCell(int i){
 	particle* p = particles + i;
 	if (p->prv == NULL)
-		cellList[p->cell[0]*Nycells + p->cell[1]] = p->nxt;
+		#if THREE_D
+		cellList[p->cell[2]*Nycells*Nxcells + p->cell[1]*Nxcells + p->cell[0]] = p->nxt;
+		#else
+		cellList[p->cell[1]*Nxcells + p->cell[0]] = p->nxt;
+		#endif
 	else
 		p->prv->nxt = p->nxt;
 	if (p->nxt != NULL)
@@ -1093,8 +1149,13 @@ void removeFromCell(int i){
 
 
 int coordToCell(double a, int x){
-	if (x)
+	if (x == 1)
 		return (int)(a*cellxFac);
+	#if THREE_D
+	else if (x == 2){
+		return (int)(a*cellzFac);
+	}
+	#endif
 	return (int)(a*cellyFac);
 }
 
@@ -1114,7 +1175,15 @@ int PBCcellY(double a){
 		return a - Nycells;
 	return a;
 }
-
+#if THREE_D
+int PBCcellZ(double a){
+	if (a < 0)
+		return a + Nzcells;
+	else if (a >= Nzcells)
+		return a - Nzcells;
+	return a;
+}
+#endif
 
 /* ---------------------------------------/
 /										  /
@@ -1311,9 +1380,9 @@ void crossingEventGrow(int i){
 	particle p = particles[i];
 	double travelTimeX = 10000000;
 	double travelTimeY = 10000000;
-
 	int xx;
 	int yy = 1;
+	
 
 	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	//printf("p: %d %lf |||", p.num, p.vx);
@@ -1339,11 +1408,33 @@ void crossingEventGrow(int i){
 		yy = 4;
 	}
 	
-
+	#if THREE_D
+	double travelTimeZ = 10000000;
+	int zz;
+	if (p.vz < 0){
+		travelTimeZ = PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz;
+		zz = 5;
+	}
+	else{
+		travelTimeZ = PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz;
+		zz = 6;
+	}
+	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
+   		addCrossingEvent(i, xx, t + travelTimeX);
+	} 
+	else if (travelTimeY <= travelTimeX && travelTimeY <= travelTimeZ) {
+		addCrossingEvent(i, yy, t + travelTimeY);
+	} 
+	else {
+		addCrossingEvent(i, zz, t + travelTimeZ);
+	}
+	#else
 	if (travelTimeX < travelTimeY)
 		addCrossingEvent(i, xx, t + travelTimeX);
 	else
 		addCrossingEvent(i, yy, t + travelTimeY);
+	#endif
+
 }
 
 void crossingEventNormal(int i){
@@ -1382,9 +1473,7 @@ void crossingEventNormal(int i){
 			travelTimeY = (-vy - sqrt(vy*vy - 2*field*dy))/field;
 			yy = 3;
 		}	
-	}
-
-		
+	}	
 	else{
 		if (p.vy < 0){
 			travelTimeY = logTime(PBCinsideCellY(p.cell[1]*cellySize - p.y)/p.vy);
@@ -1396,10 +1485,32 @@ void crossingEventNormal(int i){
 		}
 	}
 
+	#if THREE_D
+	double travelTimeZ = 10000000;
+	int zz;
+	if (p.vz < 0){
+		travelTimeZ = PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz;
+		zz = 5;
+	}
+	else{
+		travelTimeZ = PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz;
+		zz = 6;
+	}
+	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
+   		addCrossingEvent(i, xx, t + travelTimeX);
+	} 
+	else if (travelTimeY <= travelTimeX && travelTimeY <= travelTimeZ) {
+		addCrossingEvent(i, yy, t + travelTimeY);
+	} 
+	else {
+		addCrossingEvent(i, zz, t + travelTimeZ);
+	}
+	#else
 	if (travelTimeX < travelTimeY)
 		addCrossingEvent(i, xx, t + travelTimeX);
 	else
 		addCrossingEvent(i, yy, t + travelTimeY);
+	#endif
 }
 /* ---------------------------------------------
 	Creates the crossing event and adds it
@@ -1472,11 +1583,36 @@ void doTheCrossing(){
 			else
 				p->cell[1] = newCell;
 			break;
+		#if THREE_D
+		case 5:
+			newCell = p->cell[2] - 1;
+			if (newCell == -1){
+				p->cell[2] = Nzcells - 1;
+				p->crossZ -= 1;
+			}
+			else
+				p->cell[2] = newCell;
+			break;
+		case 6:
+			newCell = p->cell[2] + 1;
+			if (newCell == Nzcells){
+				p->cell[2] = 0;
+				p->crossZ += 1;
+			}
+			else
+				p->cell[2] = newCell;
+			break;
+		#endif
 	}
 
 	p->prv = NULL;
-	p->nxt = cellList[p->cell[0]*Nycells + p->cell[1]];
-	cellList[p->cell[0]*Nycells + p->cell[1]] = p;
+	#if THREE_D
+	p->nxt = cellList[p->cell[2]*Nycells*Nxcells + p->cell[1]*Nxcells + p->cell[0]];
+	cellList[p->cell[2]*Nycells*Nxcells + p->cell[1]*Nxcells + p->cell[0]] = p;
+	#else
+	p->nxt = cellList[p->cell[1]*Nxcells + p->cell[0]];
+	cellList[p->cell[1]*Nxcells + p->cell[0]] = p;
+	#endif
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
@@ -1500,19 +1636,29 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	double dvy = p2->vy - p1->vy;
 	double dvr = p1->vr + p2->vr;
 	
-
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
+
+
 	double dr = DIST(p1->rad, p2->rad + lat2*p2->vr);
+
+	#if THREE_D
+	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	double dvz = p2->vz - p1->vz;
+	PBC(&dx, &dy, &dz);
+	double b = dx*dvx + dy*dvy + dz*dvz - dvr*dr;
+	double v2 = dvx*dvx + dvy*dvy + dvz*dvz;
+	double distOfSquare = dx*dx + dy*dy + dz*dz;
+	#else
 	PBC(&dx, &dy);
 	double b = dx*dvx + dy*dvy - dvr*dr;
-
-	
-	
-
-
 	double v2 = dvx*dvx + dvy*dvy;
 	double distOfSquare = dx*dx + dy*dy;
+	#endif
+	
+
+
+
 	double det = pow(b, 2) - (v2 - dvr*dvr)*(distOfSquare - dr*dr);
 
 
@@ -1556,25 +1702,38 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	double dvx = p2->vx - p1->vx;
 	double dvy = p2->vy - p1->vy;
+	
+	
 
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
+
 
 	if (addShear){
 		correctDistances(p1, p2, lat2, &dx, &dvx);
 	}
 
+	#if THREE_D
+	double dvz = p2->vz - p1->vz;
+	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	PBC(&dx, &dy, &dz);
+	double b = dx*dvx + dy*dvy + dz*dvz;
+	#else
 	PBC(&dx, &dy);
-	
 	double b = dx*dvx + dy*dvy;
-
+	#endif
 	//no collision.
 	if (b > 0)
 		return never;
 
 
+	#if THREE_D
+	double v2 = dvx*dvx + dvy*dvy + dvz*dvz;
+	double distOfSquare = dx*dx + dy*dy + dz*dz - DIST2(p1->rad, p2->rad);
+	#else
 	double v2 = dvx*dvx + dvy*dvy;
-	double distOfSquare = dx*dx + dy*dy - DIST2(p1->rad, p2->rad);
+	double distOfSquare = dx*dx + dy*dy  - DIST2(p1->rad, p2->rad);
+	#endif
 	double det = pow(b, 2) - v2*distOfSquare;
 
 
@@ -1604,7 +1763,11 @@ double sphereTime(particle* p1, particle* p2){
 	double dvy = p2->vy - p1->vy;
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	#if THREE_D
+	PBC(&dx, &dy, &dx);
+	#else
 	PBC(&dx, &dy);
+	#endif
 	double b = dx*dvx + dy*dvy;
 
 	//no collision.
@@ -1637,7 +1800,11 @@ double separateTime(particle* p1, particle* p2){
 	double dvy = p2->vy - p1->vy;
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	#if THREE_D
+	PBC(&dx, &dy, &dx);
+	#else
 	PBC(&dx, &dy);
+	#endif
 	double b = dx*dvx + dy*dvy;
 
 
@@ -1665,6 +1832,9 @@ void collisionEventNormal(int i){
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
+	#if THREE_D
+	int Z = p1->cell[2];
+	#endif
 	int xy = 2;
 	double dtTemp, dtTemp2;
 	int typeTemp;
@@ -1787,39 +1957,47 @@ void collisionEventNormal(int i){
 	
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
-			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-				if (p1->num != p2->num){
-					if (addWell){
-						if (isParticleInWellList(p1, p2->num)){
-							dtTemp = collisionTimeNormal(p1, p2);
-							dtTemp2 = separateTime(p1, p2);
-							if (dtTemp < dtTemp2){
-								typeTemp = COLLISION;
+			#if THREE_D
+			for (int l = -1; l <= 1; l++){
+				particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + j) * Nxcells + PBCcellX(X + l)];
+			#else
+				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+			#endif
+				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (p1->num != p2->num){
+						if (addWell){
+							if (isParticleInWellList(p1, p2->num)){
+								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp2 = separateTime(p1, p2);
+								if (dtTemp < dtTemp2){
+									typeTemp = COLLISION;
+								}
+								else{
+									dtTemp = dtTemp2;
+									typeTemp = OUT;
+								}
 							}
 							else{
-								dtTemp = dtTemp2;
-								typeTemp = OUT;
+								dtTemp = sphereTime(p1, p2);
+								typeTemp = IN;
 							}
 						}
 						else{
-							dtTemp = sphereTime(p1, p2);
-							typeTemp = IN;
+							dtTemp = collisionTimeNormal(p1, p2);
+							typeTemp = COLLISION;
+						}
+
+						if (dt > dtTemp){ //get min
+							finalPartner = p2->num;
+							dt = dtTemp;
+							type = typeTemp;
 						}
 					}
-					else{
-						dtTemp = collisionTimeNormal(p1, p2);
-						typeTemp = COLLISION;
-					}
-
-			 		if (dt > dtTemp){ //get min
-						finalPartner = p2->num;
-						dt = dtTemp;
-						type = typeTemp;
-					}
+					p2 = p2->nxt;
 				}
-				p2 = p2->nxt;
-	 		}
+			#if THREE_D
+			}
+			#endif
 	 	}
 	}
 	if (addShear){
@@ -1919,6 +2097,9 @@ void collisionEventGrow(int i){
 	particle* p1 = particles + i;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
+	#if THREE_D
+	int Z = p1->cell[2];
+	#endif
 	int xy = 2;
 	double dtTemp;
 	int typeTemp;
@@ -1978,29 +2159,36 @@ void collisionEventGrow(int i){
 			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
 			type = WALL;
 			xy = 2;
-
 	}
 
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
-			while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-				if (p1->num != p2->num){
-					dtTemp = collisionTimeGrow(p1, p2);
-					typeTemp = COLLISION;
-					
+			#if THREE_D
+			for (int l = -1; l <= 1; l++){
+				particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + j) * Nxcells + PBCcellX(X + l)];
+			#else
+				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+			#endif
+				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+					if (p1->num != p2->num){
+						dtTemp = collisionTimeGrow(p1, p2);
+						typeTemp = COLLISION;
+						
 
-			 		if (dt > dtTemp){ //get min
-						finalPartner = p2->num;
-						dt = dtTemp;
-						type = typeTemp;
+						if (dt > dtTemp){ //get min
+							finalPartner = p2->num;
+							dt = dtTemp;
+							type = typeTemp;
+						}
 					}
+					p2 = p2->nxt;
 				}
-				p2 = p2->nxt;
-	 		}
+			#if THREE_D
+			}
+			#endif
 	 	}
 	}
-	//printf("%lf %d\n", dt, type);
+
 	if (type == COLLISION){
 		addCollisionEvent(i, finalPartner, t + dt);
 	}
@@ -2257,42 +2445,40 @@ void doTheCollisionGrow(){
 
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
+	
 
 	double dvx = pj->vx - pi->vx;
 	double dvy = pj->vy - pi->vy;
-	double dvr = pi->vr + pj->vr;;
+	double dvr = pi->vr + pj->vr;
 
-
+	#if THREE_D
+	double dz = pj->z - pi->z;
+	double dvz = pj->vz - pi->vz;
+	PBC(&dx, &dy, &dz);
+	dist = sqrt(dx*dx + dy*dy + dz*dz);
+	dzr = dz/dist;
+	#else
 	PBC(&dx, &dy);
 	dist = sqrt(dx*dx + dy*dy);
+	#endif
 	dxr = dx/dist;
 	dyr = dy/dist;
+	
 
 	double invMass = 1/(pi->m + pj->m);
+	#if THREE_D
+	double collKernel = invMass*(1 + res)*(dxr*dvx + dyr*dvy + dzr*dvz - dvr);
+	pi->vz += collKernel*pj->m*dzr - 2*pj->m*invMass*delta*dzr;
+	pj->vz -= collKernel*pi->m*dzr - 2*pi->m*invMass*delta*dzr;
+	#else
 	double collKernel = invMass*(1 + res)*(dxr*dvx + dyr*dvy - dvr);
-
-
-
-	
+	#endif
 
 	pi->vx += collKernel*pj->m*dxr - 2*pj->m*invMass*delta*dxr;
 	pi->vy += collKernel*pj->m*dyr - 2*pj->m*invMass*delta*dyr;
 	pj->vx -= collKernel*pi->m*dxr - 2*pi->m*invMass*delta*dxr;
 	pj->vy -= collKernel*pi->m*dyr - 2*pi->m*invMass*delta*dyr;
-
-	/*
-	pi->vx = - 2*vr*dxr;
-	pi->vy = - 2*vr*dyr;
-	pj->vx = + 2*vr*dxr;
-	pj->vy = + 2*vr*dyr;
 	
-	if ((sqrt(pi->vx*pi->vx + pi->vy*pi->vy) < vr) || (sqrt(pj->vx*pj->vx + pj->vy*pj->vy) < vr)){
-		printf("%lf et %lf | ", sqrt(pi->vx*pi->vx + pi->vy*pi->vy), sqrt(pj->vx*pj->vx + pj->vy*pj->vy));
-	}
-
-	if (pow(pi->vx - pj->vx, 2) + pow(pi->vy - pj->vy, 2) < vr*vr){
-		printf("WHO");
-	}*/
 
 	
 
@@ -2333,6 +2519,7 @@ void doTheCollisionNormal(){
 
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
+	
 
 	
 
@@ -2340,17 +2527,23 @@ void doTheCollisionNormal(){
 	double dvy = pj->vy - pi->vy;
 
 
+
 	if (addShear){
 		correctDistances(pi, pj, 0, &dx, &dvx);
 	}
-
-	PBC(&dx, &dy);
-
-	if (addExpo)
-		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
-	
 	double invMass = 1/(pi->m + pj->m);
+
+	#if THREE_D
+	double dz = pj->z - pi->z;
+	double dvz = pj->vz - pi->vz;
+	PBC(&dx, &dy, &dz);
+	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy + dz*dvz);
+	#else
+	PBC(&dx, &dy);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
+	#endif
+
+	
 	collTerm += pi->m*pj->m*collKernel;
 	double distSquared = DIST2(pi->rad, pj->rad);
 	double funkyFactor = collKernel/distSquared;
@@ -2374,10 +2567,18 @@ void doTheCollisionNormal(){
 			delta = deltaMax*pow((2 - (exp(-dtj/tau) + exp(-dti/tau)))/2, 3);
 		}
 
+		#if THREE_D
+		dist = sqrt(dx*dx + dy*dy + dz*dz);
+		dzr = dz/dist;
+		pi->vz += funkyFactor*pj->m*dz - 2*pj->m*invMass*delta*dzr;
+		pj->vz -= funkyFactor*pi->m*dz - 2*pi->m*invMass*delta*dzr;
+		#else
 		dist = sqrt(dx*dx + dy*dy);
-		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
+		#endif
 		dxr = dx/dist;
 		dyr = dy/dist;
+		
+		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
 
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -2398,8 +2599,13 @@ void doTheCollisionNormal(){
 		pj->vy -= funkyFactor2*pi->m*dy;
 
 	}
+	else if (addExpo)
+		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
 	else{
-
+		#if THREE_D
+		pi->vz += funkyFactor*pj->m*dz;
+		pj->vz -= funkyFactor*pi->m*dz;
+		#endif
 		pi->vx += funkyFactor*pj->m*dx;
 		pi->vy += funkyFactor*pj->m*dy;
 		pj->vx -= funkyFactor*pi->m*dx;
@@ -2449,8 +2655,11 @@ void doIn(){
 
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
-
+		#if THREE_D
+		PBC(&dx, &dy, &dx);
+		#else
 		PBC(&dx, &dy);
+		#endif
 
 		double dxr = dx/sqrt(dx*dx + dy*dy);
 		double dyr = dy/sqrt(dx*dx + dy*dy);
@@ -2547,7 +2756,11 @@ void doOut(){
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
 
+		#if THREE_D
+		PBC(&dx, &dy, &dx);
+		#else
 		PBC(&dx, &dy);
+		#endif
 
 		double dxr = dx/sqrt(dx*dx + dy*dy);
 		double dyr = dy/sqrt(dx*dx + dy*dy);
@@ -2721,6 +2934,9 @@ void stopGrow(){
 		ncross = 0;
 		p->crossX = 0;
 		p->crossY = 0;
+		#if THREE_D
+		p->crossZ = 0;
+		#endif
 	}
 	collisionEvent = &collisionEventNormal;
 	doTheCollision = &doTheCollisionNormal;
@@ -2873,6 +3089,9 @@ void freeFlyNormal(particle* p){
     p->t = t;
 	if (addField == 1){
 		p->x += dt*p->vx;
+		#if THREE_D
+		p->z += dt*p->vz;
+		#endif
 		p->y += dt*p->vy + 0.5*field*dt*dt;
 		p->vy += dt*field;
 	}
@@ -2882,15 +3101,25 @@ void freeFlyNormal(particle* p){
 		p->y += p->vy/gamm*(1 - ex);
 		p->vx *= ex;
 		p->vy *= ex;
+		#if THREE_D
+		p->z += p->vz/gamm*(1 - ex);
+		p->vz *= ex;
+		#endif
 	}
 	else{
 		p->x += dt*p->vx;
 		p->y += dt*p->vy;
+		#if THREE_D
+		p->z += dt*p->vz;
+		#endif
 		
 	}
 
 	PBCpostX(&(p->x));
 	PBCpostY(&(p->y));
+	#if THREE_D
+	PBCpostZ(&(p->z));
+	#endif
 }
 
 void freeFlyGrow(particle* p){
@@ -2899,10 +3128,15 @@ void freeFlyGrow(particle* p){
 
 	p->x += dt*p->vx;
 	p->y += dt*p->vy;
+
 	p->rad += dt*p->vr;
 
 	PBCpostX(&(p->x));
 	PBCpostY(&(p->y));
+	#if THREE_D
+	p->z += dt*p->vz;
+	PBCpostZ(&(p->z));
+	#endif
 }
 
 void saveTXT(){
@@ -2913,13 +3147,21 @@ void saveTXT(){
 		}
 	}
 	else{
+	#if THREE_D
+	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
+	#else
 	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
+	#endif
 		for(int i = 0; i < N; i++){
 			
             int synchro = 0;
             if (t - particles[i].lastColl > ts)
                 synchro = 1;
+			#if THREE_D
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, synchro);
+			#else
 			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
+			#endif
 		}
 	}
 	fflush(fichier);
@@ -2947,15 +3189,23 @@ void initializeThermo(){
 
 
 void saveThermo(){
-
+	
+	#if THREE_D
+	double vol = Lx*Ly*Lz;
+	#else
 	double area = Lx*Ly;
-	double deltaTime = t - lastScreen;
-	lastScreen = t;
 	if (addCircularWall){
 		area = M_PI*halfLx*halfLx; 
 	}
+	#endif
+	double deltaTime = t - lastScreen;
+	lastScreen = t;
 	
-    pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
+	#if THREE_D
+	pressure = (-1/(deltaTime))*collTerm/(3*vol) + (2./3.)*E/vol;
+	#else
+	pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
+	#endif
 	collTerm = 0;
 
 
@@ -2971,6 +3221,16 @@ void saveThermo(){
 			fprintf(thermo, "%lf ", pressure);
 		}
 		if (addCircularWall || addWallx || addWally){
+			#if THREE_D
+			double wallArea = 0;
+			if (addWallx){
+				wallArea += 2*Ly*Ly;
+			}
+			if (addWally){
+				wallArea += 2*Lx*Lx;
+			}
+			fprintf(thermo, "%lf ", dp/(deltaTime*wallArea));
+			#else
 			double perimeter = 0;
 			if (addCircularWall){
 				perimeter = M_PI*Lx;
@@ -2982,6 +3242,7 @@ void saveThermo(){
 				perimeter += 2*Lx;
 			}
 			fprintf(thermo, "%lf ", dp/(deltaTime*perimeter));
+			#endif
 			dp = 0;
 		}
 		if (addMidWall){
@@ -3044,6 +3305,9 @@ void normalizePhysicalQ(){
 		for (int i = 0; i < N; i++){
 			particles[i].vx -= px/(N*particles[i].m);
 			particles[i].vy -= py/(N*particles[i].m);
+			#if THREE_D
+			particles[i].vz -= pz/(N*particles[i].m);
+			#endif
 		}
 	}
 	else{
@@ -3072,12 +3336,19 @@ void normalizePhysicalQ(){
 	for (int i = 0; i < N; i++){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
+		#if THREE_D
+		particles[i].vz /= sqrt(E/N/Einit);
+		#endif
 	}
 }
 
 void optimizeGrowConstant(){
 	double baseGrow;
+	#if THREE_D
+	double criticalPhi = 0.6;
+	#else
 	double criticalPhi = 0.8;
+	#endif
 	if (addCircularWall){
 		baseGrow = 0.03;
 	}
@@ -3147,6 +3418,33 @@ void correctDistances(particle* p1, particle* p2, double lat2, double* dx, doubl
 	}
 }
 
+#if THREE_D
+void PBC(double* dx, double* dy, double* dz){
+	if ((!addWallx) && (!addCircularWall)){
+		if (*dx >= halfLx){
+			*dx -= Lx;
+		}
+		else if (*dx < -halfLx){
+			*dx += Lx;
+		}			
+	}
+	if ((!addWally) && (!addCircularWall)){
+		if (*dy >= halfLy){
+			*dy -= Ly;
+		}
+		else if (*dy < -halfLy){
+			*dy += Ly;
+		}
+	}
+	
+	if (*dz >= halfLz){
+		*dz -= Lz;
+	}
+	else if (*dz < -halfLz){
+		*dz += Lz;
+	}
+}
+#else
 void PBC(double* dx, double* dy){
 	if ((!addWallx) && (!addCircularWall)){
 		if (*dx >= halfLx){
@@ -3165,6 +3463,7 @@ void PBC(double* dx, double* dy){
 		}
 	}
 }
+#endif
 
 int cmpDouble(const void * a, const void * b){
     double A = *(double*) a;
@@ -3188,6 +3487,16 @@ double PBCinsideCellY(double dy){
 	return dy;
 }
 
+#if THREE_D
+double PBCinsideCellZ(double dz){
+	if (dz >= halfLz)
+		return dz - Lz;
+	else if (dz < -halfLz)
+		return dz + Lz;
+	return dz;
+}
+#endif
+
 void PBCpostX(double* val){
 	if (*val < 0)
 		*val += Lx;
@@ -3200,18 +3509,33 @@ void PBCpostY(double* val){
 	else if (*val >= Ly)
 		*val -= Ly;
 }
+void PBCpostZ(double* val){
+	if (*val < 0)
+		*val += Lz;
+	else if (*val >= Lz)
+		*val -= Lz;
+}
 
 
 void physicalQ(){
 	px = 0;
 	py = 0;
+	#if THREE_D
+	pz = 0;
+	#endif
 	E = 0;
 	active = 0;
 	for (int i = 0; i < N; i++){
 		px += particles[i].vx*particles[i].m;
 		py += particles[i].vy*particles[i].m;
-		E += 0.5*(pow(particles[i].vx, 2)*particles[i].m + pow(particles[i].vy, 2)*particles[i].m);
+		#if THREE_D
+		pz += particles[i].vz*particles[i].m;
+		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2) +  pow(particles[i].vz, 2)) ;
+		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy + particles[i].vz*particles[i].vz > 1e-6){
+		#else
+		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2)) ;
 		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy > 1e-6){
+		#endif
 			active += 1.;
 		}
 	}

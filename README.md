@@ -17,7 +17,7 @@ At full speed, and for ~2000 particles the algorithm can perform around $10^6$ c
 
 For now, the project can only be compiled on linux but it should be pretty straighforward to modify it to compile on Windows. The graphical part probably only works with x11 but it's a matter of finding the good makefile :).
 
-Use ```make``` for the algorithm with the graphical interface and ```make G=0``` for the algorithm without a graphical interface.
+Use ```make G=1``` for the algorithm with the graphical interface and ```make G=0``` for the algorithm without a graphical interface. If you want to use the graphical interface, make sure that ```#define THREE_D``` in first line of EDMD.c is set to 0 as the graphical interface does not work in 3D yet (and a lot of options are not yet supported in 3D).
 
 ##### Dependencies:
   For the graphical part: [raylib](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)

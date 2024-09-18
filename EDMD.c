@@ -1,4 +1,4 @@
-#define THREE_D 1
+#define THREE_D 0
 
 #include "EDMD.h"
 #include "mersenne.c" 

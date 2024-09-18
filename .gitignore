@@ -1,6 +1,8 @@
 # Ignore everything
 *
 
+.vscode/
+cookie.png
 # Except the docs folder
 !docs/
 

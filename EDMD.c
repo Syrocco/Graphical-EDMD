@@ -1,5 +1,3 @@
-#define THREE_D 0
-
 #include "EDMD.h"
 #include "mersenne.c" 
 #include "quartic.c" 
@@ -16,6 +14,11 @@
 
 #include<getopt.h>
 #include<time.h>
+
+#define THREE_D 0
+#ifndef THREE_D
+#    define THREE_D 0
+#endif
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
@@ -103,13 +106,13 @@ int load = 0;
 int S1 = 0;
 
 //duration of simulation
-double tmax = 11000;  
+double tmax = 1100000;  
 //time between each screenshots
-double dtime = 1;
-double firstScreen = 0;
+double dtime = 1000;
+double firstScreen = 1;
 
-double dtimeThermo = 1;
-double firstThermo = 0;
+double dtimeThermo = 50;
+double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -141,10 +144,10 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
 const int addEnergy = 0;
-const int addDoubleDelta = 0;
+const int addDoubleDelta = 1;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int polydispersity = 0;
@@ -182,12 +185,12 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.022;
+double delta = 0.03;
 
 //values for double delta model
-double deltaM = 0.05;
+double deltaM = 0.03;
 double deltam = 0;
-double ts = 4;
+double ts = 6;
 
 //value for evolving delta model
 double tau = 5;
@@ -203,7 +206,7 @@ double U = -2;
 
 //Value of the energy input at collision
 double deltaE = 50;
-double beta = 6;
+double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.05;
 
@@ -211,7 +214,7 @@ double additionalEnergy = 0.05;
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 1;
+double Einit = 0.3;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -393,8 +396,8 @@ int main(int argc, char *argv[]){
 
 	
 	
-	//init_genrand(time(NULL));
-	init_genrand(666);
+	init_genrand(time(NULL));
+	//init_genrand(666);
 	
 	#if G
 	pthread_t mainThread;

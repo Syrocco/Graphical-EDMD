@@ -49,7 +49,7 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				screenState->particleUnderClick = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
+				screenState->particleUnderClick =  cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
 				while (screenState->particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (pow((screenState->particleUnderClick->x - x), 2) + pow(screenState->particleUnderClick->y - y, 2) < screenState->particleUnderClick->rad*screenState->particleUnderClick->rad){
 						return 1;
@@ -829,7 +829,7 @@ double colorBOOP(particle* p1){
 	double im = 0;
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
-			particle* p2 = cellList[PBCcellX(X + j)*Nycells + PBCcellY(Y + k)];
+			particle* p2 =  cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
 			while ((p2 != NULL) && (p2->type == 1)){ //while there is a particle in the doubly linked list of the cellList do...
 				if ((p1->num != p2->num) && (p1->type == 1)){
 					double dy = p1->y - p2->y;

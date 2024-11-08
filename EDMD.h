@@ -4,6 +4,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#define THREE_D 1
+#ifndef THREE_D
+#    define THREE_D 0
+#endif
+
 enum event{
 	CELLCROSS,
 	COLLISION, 

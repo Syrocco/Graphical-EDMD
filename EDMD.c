@@ -15,17 +15,13 @@
 #include<getopt.h>
 #include<time.h>
 
-#define THREE_D 0
-#ifndef THREE_D
-#    define THREE_D 0
-#endif
+
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
 #endif
 
-#define NONADDITIVE 1
-
+#define NONADDITIVE 0
 
 #if NONADDITIVE == 0
     #define DIST(r1, r2) (sqrt(4 * (r1) * (r2)))
@@ -58,12 +54,12 @@
 //Values if no load file
 int N = 100;
 double phi = 0.05;
-double sizeratio = 0.5;
-double fractionSmallN = 0;
+double sizeratio = 1;
+double fractionSmallN = 0.5;
 double aspectRatio = 1;
 int controlLenght = 0;
 
-int Nbig, Nsmall;
+int Nbig, Nsmall, Nx, Ny;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
 double COM_x = 0;
 double COM_y = 0;
@@ -104,15 +100,15 @@ FILE* file;
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
 int load = 0;
 int S1 = 0;
+int Hex = 0;
 
 //duration of simulation
-double tmax = 1100000;  
-//time between each screenshots
-double dtime = 1000;
-double firstScreen = 1;
-
-double dtimeThermo = 50;
-double firstThermo = 1;
+double tmax = 10000;  
+//time between each screenshots 
+double dtime = 10;
+double firstScreen = 0;
+double dtimeThermo = 100;
+double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -138,7 +134,7 @@ bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
 #else
-const int addWell = 0;
+const int addWell = 1;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
@@ -146,8 +142,8 @@ const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 1;
 const int addDelta = 0;
-const int addEnergy = 0;
-const int addDoubleDelta = 1;
+const int addEnergy = 1;
+const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int polydispersity = 0;
@@ -155,6 +151,7 @@ const int thermoWall = 0;
 const int charged = 0;
 const int addShear = 0;
 const int addShearWall = 0;
+const int liquidliquid = 1;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -185,7 +182,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.03;
+double delta = 0.07;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -201,20 +198,20 @@ double vo = 3.5;
 double ao = 1.5;
 
 //values for square potential model
-double sig = 1.125;
-double U = -2;
+double sig = 1.6;
+double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 50;
+double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.05;
+double additionalEnergy = 0.8;
 
 //value for the field, must be < 0
 double field = -0.1; 
 
 //Initial temperature
-double Einit = 0.3;
+double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1;
@@ -223,11 +220,11 @@ double resW = 1;
 double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.01;
-double T = 1;
+double gamm = 0.25;
+double T = 0.01;
 double expE = 1;
 //time between kicks
-double dtnoise = 1;
+double dtnoise = 0.1;
 
 
 double strainRate = 0.01;
@@ -304,13 +301,16 @@ void* computeEvolution(void *arg){
 	#endif
 
 			nextEvent = findNextEvent();
-			//double dtEventM = nextEvent->t - t;
-			//if (dtEventM < 0.){
-			//	printf("%lf %d %d %d | ", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
-			//}
 			
+			
+			/*
+			double dtEventM = nextEvent->t - t;
+			printf("%lf %d %d %d | \n", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
+			if (dtEventM < -0.001){
+				exit(3);
+			}
+			*/
 			t = nextEvent->t;
-			//printf("%lf %lf %d %d\n", nextEvent->t, 1/vr, nextEvent->type, nextEvent->i);
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
 				case COLLISION:
@@ -396,8 +396,8 @@ int main(int argc, char *argv[]){
 
 	
 	
-	init_genrand(time(NULL));
-	//init_genrand(666);
+	//init_genrand(time(NULL));
+	init_genrand(666);
 	
 	#if G
 	pthread_t mainThread;
@@ -532,6 +532,7 @@ void constantInit(int argc, char *argv[]){
 				if (addDelta != 1)
 					printf("WARNING:\033[0;31m Changing Delta while Delta model is not enabled!\033[0m\n");
 				sscanf(optarg, "%lf", &delta);
+				init_genrand(delta*100);
 				break;
 			case 'g':
 				if ((damping != 1) || (noise != 1))
@@ -609,6 +610,19 @@ void constantInit(int argc, char *argv[]){
 		N = Nbig + Nsmall;
 		Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/phi);
 		Ly = Lx;
+	}
+	else if (Hex){
+
+		Ny = sqrt(N)*aspectRatio;
+		if (Ny%2 == 1){
+			Ny += 1;
+		}
+		Nx = N/Ny;
+		N = Nx*Ny;
+		Ly = sqrt(sqrt(3)/2*Ny/Nx*M_PI*N/phi);
+		Lx = 2/sqrt(3)*Nx/Ny*Ly;
+		Nbig = N;
+		Nsmall = 0;
 	}
 	else{
 		#if THREE_D
@@ -732,7 +746,7 @@ void particlesInit(){
 	}
 	else if (load == 2){
 		int nframes = dump->nframes;
-		jump_to_frame(nframes - 1, dump);
+		jump_to_frame(nframes - 3, dump);
 
 		double* x = calloc(N, sizeof(double));
 		double* y = calloc(N, sizeof(double));
@@ -759,8 +773,8 @@ void particlesInit(){
 			p->type = type[i];
 			p->x = x[i];
 			p->y = y[i];
-			p->vx = vx[i];
-			p->vy = vy[i];
+			p->vx = vx[i] + drand(-0.0000001, 0.0000001);
+			p->vy = vy[i] + drand(-0.0000001, 0.0000001);
 			p->rad = rad[i];
 			p->m = m[i];
 		    Nbig += p->type;
@@ -825,6 +839,33 @@ void particlesInit(){
 				k++;
 			}
 		}
+		normalizePhysicalQ();
+	}
+	else if (Hex){
+		particle* p;
+		int k = 0;
+		double dx = Lx/Nx;
+		double dy = Ly/Ny;
+		for (i = 0; i < Nx; i++){
+			for (int j = 0; j < Ny; j++){
+				p = particles + k;
+				p->x = i*dx + (j%2)*(dx/2);
+				p->y = j*dy;
+				p->type = 1;
+				p->rad = 1;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+		
 		normalizePhysicalQ();
 	}
 	else{
@@ -946,27 +987,41 @@ void pairsInit(){
 
 		int X = p1->cell[0];
 		int Y = p1->cell[1];
+		#if THREE_D
+		int Z = p1->cell[2];
+		#endif
 
 		for (int j = -1; j <= 1; j++){
 			for (int k = -1; k <= 1; k++){
-				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+				#if THREE_D
+				for (int l = -1; l <= 1; l++){
+					particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + j) * Nxcells + PBCcellX(X + l)];
+				#else
+					particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+				#endif
 				//printf("id: %d vs: %d | PBC %d %d | Nxcells: %d Nycells: %d\n", PBCcellX(X + j)*Nycells + PBCcellY(Y + k), Nxcells*Nycells, PBCcellX(X + j), PBCcellX(Y + k), Nxcells, Nycells);
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						double dx = p2->x - p1->x;
 						double dy = p2->y - p1->y;
 						#if THREE_D
-						PBC(&dx, &dy, &dx);
+						double dz = p2->z - p1->z;
+						PBC(&dx, &dy, &dz);
+						if (sqrt(dx*dx + dy*dy + dz*dz) < sig*(p1->rad + p2->rad) && (isParticleInWellList(p1, p2->num) == 0)) //last condition to prevent double counting for small system
+							addParticleInWellList(p1, p2->num);
 						#else
 						PBC(&dx, &dy);
-						#endif
 						if (sqrt(dx*dx + dy*dy) < sig*(p1->rad + p2->rad) && (isParticleInWellList(p1, p2->num) == 0)) //last condition to prevent double counting for small system
 							addParticleInWellList(p1, p2->num);
+						#endif
 					}
 					p2 = p2->nxt;
 				}
+			#if THREE_D
 			}
-		}
+			#endif
+			}
+	 	}
 	}
 
 	fflush(stdout);
@@ -1031,7 +1086,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && S1 == 0){
+	if (load == 0 && S1 == 0 && Hex == 0){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1044,7 +1099,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && S1 == 0){
+	if (load == 0 && S1 == 0 && Hex == 0){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -1492,11 +1547,11 @@ void crossingEventNormal(int i){
 	double travelTimeZ = 10000000;
 	int zz;
 	if (p.vz < 0){
-		travelTimeZ = PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz;
+		travelTimeZ = logTime(PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz);
 		zz = 5;
 	}
 	else{
-		travelTimeZ = PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz;
+		travelTimeZ = logTime(PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz);
 		zz = 6;
 	}
 	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
@@ -1619,7 +1674,6 @@ void doTheCrossing(){
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
-	//p->coll++;
 	crossingEvent(i);
 	removeEventFromQueue(eventList[N + i]);
 	collisionEvent(i);
@@ -1742,7 +1796,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: %lf \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad, dx*dx + dy*dy);
+		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: %lf \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad, sqrt(dx*dx + dy*dy));
 		saveTXT();
 		exit(3);
 	}
@@ -1767,21 +1821,28 @@ double sphereTime(particle* p1, particle* p2){
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
 	#if THREE_D
-	PBC(&dx, &dy, &dx);
+	double dvz = p2->vz - p1->vz;
+	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	PBC(&dx, &dy, &dz);
+	double b = dx*dvx + dy*dvy + dz*dvz;
 	#else
 	PBC(&dx, &dy);
-	#endif
 	double b = dx*dvx + dy*dvy;
+	#endif
 
 	//no collision.
 	if (b > 0)
 		return never;
 
-
+	#if THREE_D
+	double v2 = dvx*dvx + dvy*dvy + dvz*dvz;
+	double distOfSquare = dx*dx + dy*dy  + dz*dz - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	#else
 	double v2 = dvx*dvx + dvy*dvy;
 	double distOfSquare = dx*dx + dy*dy - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	#endif
 	double det = b*b - v2*distOfSquare;
-
+	
 
 	if (det < 0)
 		return never;
@@ -1804,16 +1865,19 @@ double separateTime(particle* p1, particle* p2){
 	double dx = (p2->x + lat2*p2->vx) - p1->x;
 	double dy = (p2->y + lat2*p2->vy) - p1->y;
 	#if THREE_D
-	PBC(&dx, &dy, &dx);
+	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	double dvz = p2->vz - p1->vz;
+	PBC(&dx, &dy, &dz);
+	double b = dx*dvx + dy*dvy + dz*dvz;
+	double v2 = dvx*dvx + dvy*dvy + dvz*dvz;
+	double distOfSquare = dx*dx + dy*dy + dz*dz - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
 	#else
 	PBC(&dx, &dy);
-	#endif
 	double b = dx*dvx + dy*dvy;
-
-
-
 	double v2 = dvx*dvx + dvy*dvy;
 	double distOfSquare = dx*dx + dy*dy - sig*(p1->rad + p2->rad)*sig*(p1->rad + p2->rad);
+	#endif
+
 	double det = b*b - v2*distOfSquare;
 
 
@@ -2590,9 +2654,9 @@ void doTheCollisionNormal(){
 	}
 	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
-		//double dti = t - pi->lastColl;
-		//double dtj = t - pj->lastColl;
-		double deltaETotal = additionalEnergy;// + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		double dti = t - pi->lastColl;
+		double dtj = t - pj->lastColl;
+		double deltaETotal = additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 
 		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
 
@@ -2600,6 +2664,10 @@ void doTheCollisionNormal(){
 		pi->vy += funkyFactor2*pj->m*dy;
 		pj->vx -= funkyFactor2*pi->m*dx;
 		pj->vy -= funkyFactor2*pi->m*dy;
+		#if THREE_D
+		pi->vz += funkyFactor2*pj->m*dz;
+		pj->vz -= funkyFactor2*pi->m*dz;
+		#endif
 
 	}
 	else if (addExpo)
@@ -2654,23 +2722,33 @@ void doIn(){
 	pj->coll++;
 
 	// Insanely hacky!
-	if ((pi->charge*pj->charge != 0) || (charged == 0)) {
+	if (((pi->charge*pj->charge != 0) && (charged == 1))|| ((charged == 0) && (liquidliquid == 0)) || ((liquidliquid == 1) & (pi->type == pj->type))){
 
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
 		#if THREE_D
-		PBC(&dx, &dy, &dx);
+		double dz =  pj->z - pi->z;
+		PBC(&dx, &dy, &dz);
+		double dr = sqrt(dx*dx + dy*dy + dz*dz);
+		double dzr = dz/dr;
 		#else
 		PBC(&dx, &dy);
+		double dr = sqrt(dx*dx + dy*dy);
 		#endif
 
-		double dxr = dx/sqrt(dx*dx + dy*dy);
-		double dyr = dy/sqrt(dx*dx + dy*dy);
+		double dxr = dx/dr;
+		double dyr = dy/dr;
 
 
 		//https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+		#if THREE_D
+		double vi = pi->vx*dxr + pi->vy*dyr + pi->vz*dzr;
+		double vj = pj->vx*dxr + pj->vy*dyr + pj->vz*dzr;
+		#else
 		double vi = pi->vx*dxr + pi->vy*dyr;
 		double vj = pj->vx*dxr + pj->vy*dyr;
+		#endif
+
 		double mi = pi->m;
 		double mj = pj->m;
 		double vif, vjf;
@@ -2704,8 +2782,14 @@ void doIn(){
 
 		double dvjx = (vjf - vj)*dxr;
 		double dvjy = (vjf - vj)*dyr;
+		#if THREE_D
+		double dvjz = (vjf - vj)*dzr;
+		collTerm += dvjy*dy + dvjx*dx + dvjz*dz;
+		pi->vz += (vif - vi)*dzr;
+		pj->vz += dvjz;
+		#else
 		collTerm += dvjy*dy + dvjx*dx;
-
+		#endif
 		pi->vx += (vif - vi)*dxr;
 		pi->vy += (vif - vi)*dyr;
 		pj->vx += dvjx;
@@ -2755,23 +2839,32 @@ void doOut(){
 	pj->coll++;
 
 	// Insanely hacky!
-	if ((pi->charge*pj->charge != 0) || (charged == 0)){
+	if (((pi->charge*pj->charge != 0) && (charged == 1))|| ((charged == 0) && (liquidliquid == 0)) || ((liquidliquid == 1) & (pi->type == pj->type))){
 		double dx = pj->x - pi->x;
 		double dy = pj->y - pi->y;
-
 		#if THREE_D
-		PBC(&dx, &dy, &dx);
+		double dz =  pj->z - pi->z;
+		PBC(&dx, &dy, &dz);
+		double dr = sqrt(dx*dx + dy*dy + dz*dz);
+		double dzr = dz/dr;
 		#else
 		PBC(&dx, &dy);
+		double dr = sqrt(dx*dx + dy*dy);
 		#endif
 
-		double dxr = dx/sqrt(dx*dx + dy*dy);
-		double dyr = dy/sqrt(dx*dx + dy*dy);
+		double dxr = dx/dr;
+		double dyr = dy/dr;
 
 
 		// https://scholarworks.rit.edu/cgi/viewcontent.cgi?article=5982&context=theses
+		#if THREE_D
+		double vi = pi->vx*dxr + pi->vy*dyr + pi->vz*dzr;
+		double vj = pj->vx*dxr + pj->vy*dyr + pj->vz*dzr;
+		#else
 		double vi = pi->vx*dxr + pi->vy*dyr;
 		double vj = pj->vx*dxr + pj->vy*dyr;
+		#endif
+
 		double mi = pi->m;
 		double mj = pj->m;
 		double temporary = mi*mj*(vi - vj)*(vi - vj);
@@ -2802,8 +2895,14 @@ void doOut(){
 
 		double dvjx = (vjf - vj)*dxr;
 		double dvjy = (vjf - vj)*dyr;
+		#if THREE_D
+		double dvjz = (vjf - vj)*dzr;
+		collTerm += dvjy*dy + dvjx*dx + dvjz*dz;
+		pi->vz += (vif - vi)*dzr;
+		pj->vz += dvjz;
+		#else
 		collTerm += dvjy*dy + dvjx*dx;
-
+		#endif
 		pi->vx += (vif - vi)*dxr;
 		pi->vy += (vif - vi)*dyr;
 		pj->vx += dvjx;
@@ -3144,10 +3243,17 @@ void freeFlyGrow(particle* p){
 
 void saveTXT(){
 	if (reduce){
+		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y vx vy\n", t, N, Lx, Ly);
+		for(int i = 0; i < N; i++){
+			fprintf(fichier, "%d %.2lf %.2lf %.2lf %.6lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz);
+		}
+		#else
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id x y z vx vy vz\n", t, N, Lx, Ly, Lz);
 		for(int i = 0; i < N; i++){
 			fprintf(fichier, "%d %.2lf %.2lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
 		}
+		#endif
 	}
 	else{
 	#if THREE_D
@@ -3290,10 +3396,11 @@ double sign(double x){
 
 
 inline double logTime(double time){
-	if (damping == 1){
+	if (damping != 0){
 		double var = (1 - time*gamm);
-		if (var < 0)
+		if (var < 0){
 			return never;
+		}
 		else{
 			return -log(var)/gamm;
 		}
@@ -3568,12 +3675,21 @@ void customName(){
 	mkdir("dump/", 0777);
 	#endif
 	int v = 1;
+	#if THREE_D
+	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
+	while (access(fileName, F_OK) == 0){
+		v += 1;
+			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
+	}
+    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
+	#else
 	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	while (access(fileName, F_OK) == 0){
 		v += 1;
 			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
     snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+	#endif
 }
 
 int mygetline(char* str, FILE* f){

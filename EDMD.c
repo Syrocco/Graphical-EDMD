@@ -107,9 +107,9 @@ int Hex = 1;
 //duration of simulation
 double tmax = 10000;  
 //time between each screenshots 
-double dtime = 100;
+double dtime = 20;
 double firstScreen = 50;
-double dtimeThermo = 200;
+double dtimeThermo = 20;
 double firstThermo = 50;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -139,13 +139,13 @@ const int liquidliquid = 1;
 #else
 const int addWell = 1;
 const int addField = 0;
-const int noise = 0;
+const int noise = 1;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 1;
 const int addDelta = 0;
-const int addEnergy = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -224,7 +224,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 0.01;
+double T = 1.2;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
@@ -717,7 +717,7 @@ void initThermo(){
 	}
 	if (liquidliquid){
 		interface = fopen(interfaceName, "w");
-		init_local_density(Lx, Ly, 5, 5, N, interface);
+		initLocalDensity(Lx, Ly, 4, 4, N, interface);
 	}
 }
 
@@ -3402,7 +3402,7 @@ void saveThermo(){
 	}
 	fflush(thermo);
 	if (liquidliquid){
-		compute_local_concentration(particles);
+		computeInterfacesPos(particles);
 		fflush(interface);
 	}
 

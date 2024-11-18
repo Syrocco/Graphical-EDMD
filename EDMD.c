@@ -1,6 +1,7 @@
 #include "EDMD.h"
 #include "mersenne.c" 
 #include "quartic.c" 
+#include "interface.c"
 #include<math.h>
 #include<stdlib.h>
 #include<string.h>
@@ -93,6 +94,7 @@ unsigned long int ncol = 0;
 unsigned long int ncross = 0;
 char fileName[350];
 char thermoName[350];
+char interfaceName[350];
 char buffer[255];
 FILE* file;
 
@@ -100,15 +102,15 @@ FILE* file;
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
 int load = 0;
 int S1 = 0;
-int Hex = 0;
+int Hex = 1;
 
 //duration of simulation
 double tmax = 10000;  
 //time between each screenshots 
-double dtime = 10;
-double firstScreen = 0;
-double dtimeThermo = 100;
-double firstThermo = 0;
+double dtime = 100;
+double firstScreen = 50;
+double dtimeThermo = 200;
+double firstThermo = 50;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -133,6 +135,7 @@ bool thermoWall = 0;
 bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
+const int liquidliquid = 1;
 #else
 const int addWell = 1;
 const int addField = 0;
@@ -205,7 +208,7 @@ double U = -1.5;
 double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.8;
+double additionalEnergy = 0.18;
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -220,7 +223,7 @@ double resW = 1;
 double res = 1;
 
 //parameter if noise or damping
-double gamm = 0.25;
+double gamm = 0.15;
 double T = 0.01;
 double expE = 1;
 //time between kicks
@@ -257,6 +260,7 @@ int paulListN;
 double t1 = 0;
 FILE *fichier;
 FILE *thermo;
+FILE *interface;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -378,8 +382,12 @@ void* computeEvolution(void *arg){
 		printClose();
 		#if G != 1
 		fclose(fichier);
-		if (ther)
+		if (ther){
 			fclose(thermo);
+			if (liquidliquid){
+				fclose(interface);
+			}
+		}
 		#else
 		graphicsFree(&screenState);
 		#endif
@@ -706,8 +714,13 @@ void initThermo(){
 			fprintf(thermo, "ECOM ");
 		}
 		fprintf(thermo, "\n");
-	}	
+	}
+	if (liquidliquid){
+		interface = fopen(interfaceName, "w");
+		init_local_density(Lx, Ly, 5, 5, N, interface);
+	}
 }
+
 
 /* ------------------------------------------
 	Initializes the array containing all
@@ -851,7 +864,15 @@ void particlesInit(){
 				p = particles + k;
 				p->x = i*dx + (j%2)*(dx/2);
 				p->y = j*dy;
-				p->type = 1;
+				if (liquidliquid){
+					if (k < N/2)
+						p->type = 1;
+					else
+						p->type = 0;
+				}
+				else{
+					p->type = 1;
+				}
 				p->rad = 1;
 				p->m = 1;
 				double U1 = drand(0, 1);
@@ -1147,8 +1168,6 @@ void freeArrays(){
 	}
 	free(eventList);
 	free(eventPaul);
-
-	
 
 }
 /* --------------------------/
@@ -3382,6 +3401,10 @@ void saveThermo(){
 		fprintf(thermo, "\n");
 	}
 	fflush(thermo);
+	if (liquidliquid){
+		compute_local_concentration(particles);
+		fflush(interface);
+	}
 
 }
 
@@ -3689,6 +3712,9 @@ void customName(){
 			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
     snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+	if (liquidliquid){
+		snprintf(interfaceName, sizeof(interfaceName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.interface", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+	}
 	#endif
 }
 

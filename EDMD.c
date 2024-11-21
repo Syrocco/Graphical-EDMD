@@ -56,7 +56,7 @@
 int N = 100;
 double phi = 0.05;
 double sizeratio = 1;
-double fractionSmallN = 0.5;
+double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -68,7 +68,10 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-
+double phig = 0.1;
+double phil = 0.4;
+double Llx, Lly, Lgx, Lgy;
+int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
 int Nxcells, Nycells;
 double halfLx, halfLy; 
@@ -102,15 +105,16 @@ FILE* file;
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
 int load = 0;
 int S1 = 0;
-int Hex = 1;
+int Hex = 0;
+int coexistence = 1;
 
 //duration of simulation
-double tmax = 10000;  
+double tmax = 100000;  
 //time between each screenshots 
-double dtime = 20;
-double firstScreen = 50;
-double dtimeThermo = 20;
-double firstThermo = 50;
+double dtime = 30;
+double firstScreen = 0;
+double dtimeThermo = 200;
+double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -135,17 +139,17 @@ bool thermoWall = 0;
 bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
-const int liquidliquid = 1;
+const int liquidliquid = 0;
 #else
-const int addWell = 1;
+const int addWell = 0;
 const int addField = 0;
-const int noise = 1;
+const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
+const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -154,7 +158,7 @@ const int thermoWall = 0;
 const int charged = 0;
 const int addShear = 0;
 const int addShearWall = 0;
-const int liquidliquid = 1;
+const int liquidliquid = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -224,7 +228,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 1.2;
+double T = 1.3;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
@@ -404,8 +408,8 @@ int main(int argc, char *argv[]){
 
 	
 	
-	//init_genrand(time(NULL));
-	init_genrand(666);
+	init_genrand(time(NULL));
+	//init_genrand(666);
 	
 	#if G
 	pthread_t mainThread;
@@ -629,6 +633,36 @@ void constantInit(int argc, char *argv[]){
 		N = Nx*Ny;
 		Ly = sqrt(sqrt(3)/2*Ny/Nx*M_PI*N/phi);
 		Lx = 2/sqrt(3)*Nx/Ny*Ly;
+		Nbig = N;
+		Nsmall = 0;
+	}
+	else if (coexistence){
+		Ng = N*phig/(phil + phig);
+		Nl = N - Ng;
+
+		Ngy = sqrt(Ng)*aspectRatio;
+		if (Ngy%2 == 1){
+			Ngy += 1;
+		}
+		Ngx = Ng/Ngy;
+		Ng = Ngx*Ngy;
+
+		Nly = sqrt(Nl)*aspectRatio;
+		if (Nly%2 == 1){
+			Nly += 1;
+		}
+		Nlx = Nl/Nly;
+		Nl = Nlx*Nly;
+		N = Nl + Ng;
+
+		Lgy = sqrt(sqrt(3)/2*Ngy/Ngx*M_PI*Ng/phig);
+		Lgx = 2/sqrt(3)*Ngx/Ngy*Lgy;
+		Lly = sqrt(sqrt(3)/2*Nly/Nlx*M_PI*Nl/phil);
+		Llx = 2/sqrt(3)*Nlx/Nly*Lly;
+
+		Lx = Llx + Lgx;
+		Ly = fmax(Lly, Lgy);
+		phi = N/(Lx*Ly)*M_PI;
 		Nbig = N;
 		Nsmall = 0;
 	}
@@ -889,6 +923,66 @@ void particlesInit(){
 		
 		normalizePhysicalQ();
 	}
+	else if (coexistence){
+		particle* p;
+		int k = 0;
+		double dlx = Llx/Nlx;
+		double dly = Lly/Nly;
+		for (i = 0; i < Nlx; i++){
+			for (int j = 0; j < Nly; j++){
+				p = particles + k;
+				p->x = i*dlx + (j%2)*(dlx/2);
+				p->y = j*dly;
+				
+				p->type = 1;
+				
+				p->rad = 1;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+
+
+		double dgx = Lgx/Ngx;
+		double dgy = Lgy/Ngy;
+		for (i = 0; i < Ngx; i++){
+			for (int j = 0; j < Ngy; j++){
+				p = particles + k;
+				p->x = Llx + i*dgx + (j%2)*(dgx/2);
+				p->y = j*dgy;
+				if (liquidliquid){
+					if (k < N/2)
+						p->type = 1;
+					else
+						p->type = 0;
+				}
+				else{
+					p->type = 1;
+				}
+				p->rad = 1;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+		
+		normalizePhysicalQ();
+	}
 	else{
 		
 		double EinitGrow = 0.05;
@@ -1107,7 +1201,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && S1 == 0 && Hex == 0){
+	if (load == 0 && S1 == 0 && Hex == 0 && coexistence == 0){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1120,7 +1214,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && S1 == 0 && Hex == 0){
+	if (load == 0 && S1 == 0 && Hex == 0 && coexistence == 0){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -3402,7 +3496,7 @@ void saveThermo(){
 	}
 	fflush(thermo);
 	if (liquidliquid){
-		computeInterfacesPos(particles);
+		computeInterfacesPos(particles, 0.1);
 		fflush(interface);
 	}
 

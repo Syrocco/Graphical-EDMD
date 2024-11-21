@@ -71,13 +71,13 @@ void computeLocalConcentration(particle *particles){
     }*/
 }
 
-void computeInterfacesPos(particle *particles){
+void computeInterfacesPos(particle *particles, double tresh){
     computeLocalConcentration(particles);
     int J = Nx/4;
     for (int i = 0; i < Ny; i++){
         int count = 0;
         for (int j = J; J < Nx; j++){
-            if (d[j][i] < 0.2){
+            if (d[j][i] < tresh){
                 count++;
             }
             else{
@@ -100,7 +100,7 @@ void computeInterfacesPos(particle *particles){
             if (j < 0){
                 k =  Nx + j;
             }
-            if (d[k][i] < 0.1){
+            if (d[k][i] < tresh){
                 count++;
             }
             else{

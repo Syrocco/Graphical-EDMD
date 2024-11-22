@@ -1,9 +1,10 @@
-void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter);
-void computeLocalConcentration(particle *particles);
 #include "EDMD.h"
 #include <stdio.h>
 #include <stdlib.h>
 
+void saveDensityCoarse(particle *particles);
+void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid);
+void computeLocalConcentration(particle *particles);
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
@@ -19,7 +20,7 @@ double Lx;
 double Ly;
 FILE* interface;
 
-void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter){
+void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid){
     Nx = Lx / Dx; 
     Ny = Ly / Dy;
     dx = Lx/Nx;
@@ -38,6 +39,13 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter){
             d[i][j] = 0;
         }
     }
+    if (liquidliquid == 0){
+        for (int i = 0; i < Nx; i++){
+            fprintf(interface, "%lf ", dx*(i+0.5));
+        }
+        fprintf(interface, "\n");
+    }
+
     for (int i = 0; i < Ny; i++){
         fprintf(interface, "%lf ", dy*(i+0.5));
     }
@@ -54,21 +62,24 @@ void computeLocalConcentration(particle *particles){
     }
     
     for (int i = 0; i < N; i++) {
-        int box_x = (int)(particles[i].x / dx);
-        int box_y = (int)(particles[i].y / dy);
+        int box_x = fmin((int)(particles[i].x / dx), Nx - 1);
+        int box_y = fmin((int)(particles[i].y / dy), Ny - 1);
         
         if (particles[i].type == 1) {
-            d[box_x][box_y] = d[box_x][box_y] + 1/(dx*dy)*M_PI;
+            d[box_x][box_y] += M_PI/(dx*dy);
         }
     }
-    /*
+}
+
+void saveDensityCoarse(particle *particles){
+    computeLocalConcentration(particles);
+    
     for (int i = 0; i < Nx; i++) {
         for (int j = 0; j < Ny; j++) {
-            d[i][j] = d[i][j]/(dx*dy)*M_PI;
-             fprintf(interface, "%lf ", d[i][j]);
+            fprintf(interface, "%lf ", d[i][j]);
         }
         fprintf(interface, "\n");
-    }*/
+    }
 }
 
 void computeInterfacesPos(particle *particles, double tresh){
@@ -76,7 +87,7 @@ void computeInterfacesPos(particle *particles, double tresh){
     int J = Nx/4;
     for (int i = 0; i < Ny; i++){
         int count = 0;
-        for (int j = J; J < Nx; j++){
+        for (int j = J; j < Nx; j++){
             if (d[j][i] < tresh){
                 count++;
             }

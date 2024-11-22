@@ -68,8 +68,8 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.1;
-double phil = 0.4;
+double phig = 0.13;
+double phil = 0.43;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -111,9 +111,9 @@ int coexistence = 1;
 //duration of simulation
 double tmax = 100000;  
 //time between each screenshots 
-double dtime = 30;
+double dtime = 15;
 double firstScreen = 0;
-double dtimeThermo = 200;
+double dtimeThermo = 20;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -147,7 +147,7 @@ const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
 const int addEnergy = 1;
 const int addDoubleDelta = 0;
@@ -209,10 +209,10 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 0;
+double deltaE = 50;
 double beta = 10;
-double taur = 3;
-double additionalEnergy = 0.18;
+double taur = 5;
+double additionalEnergy = 0.03;
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -228,10 +228,11 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 1.3;
+double T = 1.8;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
+double T2 = 0.5;
 
 
 double strainRate = 0.01;
@@ -290,6 +291,9 @@ void* computeEvolution(void *arg){
 	constantInit(argc, argv);
 	runningCheck();
 	particlesInit();
+	customName();
+	fichier = fopen(fileName, "w");
+	initThermo();
 	cellListInit();
 	if (addWell){
 		pairsInit();
@@ -298,9 +302,7 @@ void* computeEvolution(void *arg){
 	physicalQ();
 	format();
 	#if G != 1
-	customName();
-	fichier = fopen(fileName, "w");
-	initThermo();
+
 	while (t <= tmax){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
@@ -388,7 +390,7 @@ void* computeEvolution(void *arg){
 		fclose(fichier);
 		if (ther){
 			fclose(thermo);
-			if (liquidliquid){
+			if ((liquidliquid && Hex)|| coexistence){
 				fclose(interface);
 			}
 		}
@@ -660,8 +662,8 @@ void constantInit(int argc, char *argv[]){
 		Lly = sqrt(sqrt(3)/2*Nly/Nlx*M_PI*Nl/phil);
 		Llx = 2/sqrt(3)*Nlx/Nly*Lly;
 
-		Lx = Llx + Lgx;
-		Ly = fmax(Lly, Lgy);
+		Lx = Llx + Lgx + 1;
+		Ly = fmax(Lly, Lgy) ;
 		phi = N/(Lx*Ly)*M_PI;
 		Nbig = N;
 		Nsmall = 0;
@@ -749,9 +751,15 @@ void initThermo(){
 		}
 		fprintf(thermo, "\n");
 	}
-	if (liquidliquid){
+	if ((liquidliquid && Hex) || coexistence){
 		interface = fopen(interfaceName, "w");
-		initLocalDensity(Lx, Ly, 4, 4, N, interface);
+		if (coexistence == 1){
+			initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid);
+		}
+		else{
+			initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid);
+		}
+		
 	}
 }
 
@@ -956,19 +964,11 @@ void particlesInit(){
 		for (i = 0; i < Ngx; i++){
 			for (int j = 0; j < Ngy; j++){
 				p = particles + k;
-				p->x = Llx + i*dgx + (j%2)*(dgx/2);
+				p->x = Llx  + 1 + i*dgx + (j%2)*(dgx/2);
 				p->y = j*dgy;
-				if (liquidliquid){
-					if (k < N/2)
-						p->type = 1;
-					else
-						p->type = 0;
-				}
-				else{
-					p->type = 1;
-				}
 				p->rad = 1;
 				p->m = 1;
+				p->type = 1;
 				double U1 = drand(0, 1);
 				double U2 = drand(0, 1);
 				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
@@ -2769,7 +2769,7 @@ void doTheCollisionNormal(){
 		double b = dx*dvx + dy*dvy;
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
-		double deltaETotal = additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		double deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 
 		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
 
@@ -3250,7 +3250,15 @@ void addNoise(){
 			freeFly(p);
 			//adds the kick
 			if (noise == 1){
-				randomGaussian(p);
+				randomGaussian(p, T);
+			}
+			else if (noise == 5){
+				if (p->type == 1){
+					randomGaussian(p, T);
+				}
+				else{
+					randomGaussian(p, T2);
+				}
 			}
 			else{
 				p->vx /= sqrt(E/N/T);
@@ -3495,8 +3503,12 @@ void saveThermo(){
 		fprintf(thermo, "\n");
 	}
 	fflush(thermo);
-	if (liquidliquid){
+	if (liquidliquid && Hex){
 		computeInterfacesPos(particles, 0.1);
+		fflush(interface);
+	}
+	else if (coexistence){
+		saveDensityCoarse(particles);
 		fflush(interface);
 	}
 
@@ -3596,7 +3608,7 @@ void optimizeGrowConstant(){
 }
 
 
-void randomGaussian(particle* p){
+void randomGaussian(particle* p, double T){
 	double u1 = genrand_real3();
 	double u2 = genrand_real3();
 	double a = sqrt(-2*log(u1));
@@ -3806,7 +3818,7 @@ void customName(){
 			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
     snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	if (liquidliquid){
+	if ((liquidliquid && Hex)|| coexistence){
 		snprintf(interfaceName, sizeof(interfaceName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.interface", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
 	#endif

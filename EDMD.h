@@ -126,7 +126,7 @@ void initializeThermo();
 double sign(double x);
 double logTime(double time);
 double drand(double min, double max);
-void randomGaussian(particle* p);
+void randomGaussian(particle* p, double T);
 void optimizeGrowConstant();
 #if THREE_D
 void PBC(double* dx, double* dy, double* dz);

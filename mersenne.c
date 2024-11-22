@@ -56,7 +56,7 @@
 
 /* Period parameters */  
 #define NMT 624
-#define M 397
+#define MM 397
 #define MATRIX_A 0x9908b0dfUL   /* constant vector a */
 #define UPPER_MASK 0x80000000UL /* most significant w-r bits */
 #define LOWER_MASK 0x7fffffffUL /* least significant r bits */
@@ -122,16 +122,16 @@ unsigned long genrand_int32(void)
         if (mti == NMT+1)   /* if init_genrand() has not been called, */
             init_genrand(5489UL); /* a default initial seed is used */
 
-        for (kk=0;kk<NMT-M;kk++) {
+        for (kk=0;kk<NMT-MM;kk++) {
             y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-            mt[kk] = mt[kk+M] ^ (y >> 1) ^ mag01[y & 0x1UL];
+            mt[kk] = mt[kk+MM] ^ (y >> 1) ^ mag01[y & 0x1UL];
         }
         for (;kk<NMT-1;kk++) {
             y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-            mt[kk] = mt[kk+(M-NMT)] ^ (y >> 1) ^ mag01[y & 0x1UL];
+            mt[kk] = mt[kk+(MM-NMT)] ^ (y >> 1) ^ mag01[y & 0x1UL];
         }
         y = (mt[NMT-1]&UPPER_MASK)|(mt[0]&LOWER_MASK);
-        mt[NMT-1] = mt[M-1] ^ (y >> 1) ^ mag01[y & 0x1UL];
+        mt[NMT-1] = mt[MM-1] ^ (y >> 1) ^ mag01[y & 0x1UL];
 
         mti = 0;
     }

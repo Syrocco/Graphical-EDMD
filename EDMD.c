@@ -55,10 +55,11 @@
 //Values if no load file
 int N = 100;
 double phi = 0.05;
-double sizeratio = 1;
+double sizeratio = 0.5;
 double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
+
 
 int Nbig, Nsmall, Nx, Ny;
 double px, py, E, pressure, dxr, dyr, dist, active, Ep, MSD;
@@ -68,8 +69,8 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.13;
-double phil = 0.43;
+double phig = 0.0958;
+double phil = 0.45;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -80,6 +81,7 @@ double halfxC, halfyC;
 double cellxFac, cellyFac; 
 #if THREE_D
 	double halfLz, cellzSize, halfzC, cellzFac, Nzcells, dzr, pz;
+	double collTermZ = 0;
 #endif
 
 //for now we only need 3 more events
@@ -87,7 +89,8 @@ const int suppSizeEvent = 10;
 
 double t = 0;
 
-double collTerm = 0;
+double collTermX = 0;
+double collTermY = 0;
 double dp = 0;
 double dpLeft = 0;
 double dpRight = 0;
@@ -105,16 +108,16 @@ FILE* file;
 //load a configuration if == 1 (if nothing specified it loads from data.txt)
 int load = 0;
 int S1 = 0;
-int Hex = 0;
+int Hex = 1;
 int coexistence = 1;
 
 //duration of simulation
-double tmax = 100000;  
+double tmax = 500000;  
 //time between each screenshots 
-double dtime = 15;
-double firstScreen = 0;
-double dtimeThermo = 20;
-double firstThermo = 0;
+double dtime = 20;
+double firstScreen = 10;
+double dtimeThermo = M_PI*3;
+double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -141,15 +144,15 @@ bool addShear = 0;
 bool addShearWall = 0;
 const int liquidliquid = 0;
 #else
-const int addWell = 0;
+const int addWell = 1;
 const int addField = 0;
-const int noise = 0;
+const int noise = 1;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
-const int damping = 1;
+const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -158,7 +161,7 @@ const int thermoWall = 0;
 const int charged = 0;
 const int addShear = 0;
 const int addShearWall = 0;
-const int liquidliquid = 0;
+const int liquidliquid = 1;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -209,10 +212,10 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 50;
+double deltaE = 0;
 double beta = 10;
-double taur = 5;
-double additionalEnergy = 0.03;
+double taur = 3;
+double additionalEnergy = 0.09;
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -228,7 +231,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 1.8;
+double T = 1.2;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.1;
@@ -390,7 +393,7 @@ void* computeEvolution(void *arg){
 		fclose(fichier);
 		if (ther){
 			fclose(thermo);
-			if ((liquidliquid && Hex)|| coexistence){
+			if ((liquidliquid && Hex) || coexistence){
 				fclose(interface);
 			}
 		}
@@ -731,9 +734,15 @@ void initThermo(){
 		if (addEnergyThermo){
 			fprintf(thermo, "E ");
 		}
+		#if THREE_D
 		if (addPressureThermo){
-			fprintf(thermo, "p ");
+			fprintf(thermo, "p px py pz ");
 		}
+		#else
+		if (addPressureThermo){
+			fprintf(thermo, "p px py ");
+		}
+		#endif
 		if (addCircularWall || addWallx || addWally){
 			fprintf(thermo, "pwall ");
 		}
@@ -2700,13 +2709,8 @@ void doTheCollisionNormal(){
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
 	
-
-	
-
 	double dvx = pj->vx - pi->vx;
 	double dvy = pj->vy - pi->vy;
-
-
 
 	if (addShear){
 		correctDistances(pi, pj, 0, &dx, &dvx);
@@ -2724,7 +2728,6 @@ void doTheCollisionNormal(){
 	#endif
 
 	
-	collTerm += pi->m*pj->m*collKernel;
 	double distSquared = DIST2(pi->rad, pj->rad);
 	double funkyFactor = collKernel/distSquared;
 
@@ -2758,7 +2761,12 @@ void doTheCollisionNormal(){
 		dxr = dx/dist;
 		dyr = dy/dist;
 		
-		collTerm -= pi->m*pj->m*invMass*2*delta*dist;
+		double collTerm = pi->m*pj->m*funkyFactor*dist*dist - 2*pi->m*pj->m*invMass*delta*dist;
+		collTermX += collTerm*dxr*dxr;
+		collTermY += collTerm*dyr*dyr;
+		#if THREE_D
+		collTermZ += collTerm*dzr*dzr;
+		#endif
 
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -2767,11 +2775,19 @@ void doTheCollisionNormal(){
 	}
 	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
+		double distSquared = 4*pi->rad*pj->rad;
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
 		double deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 
 		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
+
+		double collTerm = pi->m*pj->m*funkyFactor2;
+		collTermX += collTerm*dx*dx;
+		collTermY += collTerm*dy*dy;
+		#if THREE_D
+		collTermZ += collTerm*dz*dz;
+		#endif
 
 		pi->vx += funkyFactor2*pj->m*dx;
 		pi->vy += funkyFactor2*pj->m*dy;
@@ -2786,7 +2802,13 @@ void doTheCollisionNormal(){
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
 	else{
+
+		double collTerm = pi->m*pj->m*funkyFactor;
+
+		collTermX += collTerm*dx*dx;
+		collTermY += collTerm*dy*dy;
 		#if THREE_D
+		collTermZ += collTerm*dz*dz;
 		pi->vz += funkyFactor*pj->m*dz;
 		pj->vz -= funkyFactor*pi->m*dz;
 		#endif
@@ -2892,16 +2914,20 @@ void doIn(){
 			}
 		}
 
+		
+		double collTerm = -pj->m*(vjf - vj)*dr;
+		collTermX += collTerm*dxr*dxr;
+		collTermY += collTerm*dyr*dyr;
+		#if THREE_D
+		collTermZ += collTerm*dzr*dzr;
+		#endif
 
 		double dvjx = (vjf - vj)*dxr;
 		double dvjy = (vjf - vj)*dyr;
 		#if THREE_D
 		double dvjz = (vjf - vj)*dzr;
-		collTerm += dvjy*dy + dvjx*dx + dvjz*dz;
 		pi->vz += (vif - vi)*dzr;
 		pj->vz += dvjz;
-		#else
-		collTerm += dvjy*dy + dvjx*dx;
 		#endif
 		pi->vx += (vif - vi)*dxr;
 		pi->vy += (vif - vi)*dyr;
@@ -3006,15 +3032,19 @@ void doOut(){
 			removeParticleInWellList(pj, i);
 		}
 
+		double collTerm = -pj->m*(vjf - vj)*dr;
+		collTermX += collTerm*dxr*dxr;
+		collTermY += collTerm*dyr*dyr;
+		#if THREE_D
+		collTermZ += collTerm*dzr*dzr;
+		#endif
+
 		double dvjx = (vjf - vj)*dxr;
 		double dvjy = (vjf - vj)*dyr;
 		#if THREE_D
 		double dvjz = (vjf - vj)*dzr;
-		collTerm += dvjy*dy + dvjx*dx + dvjz*dz;
 		pi->vz += (vif - vi)*dzr;
 		pj->vz += dvjz;
-		#else
-		collTerm += dvjy*dy + dvjx*dx;
 		#endif
 		pi->vx += (vif - vi)*dxr;
 		pi->vy += (vif - vi)*dyr;
@@ -3397,30 +3427,13 @@ void saveTXT(){
 	fflush(fichier);
 }
 
-void initializeThermo(){
-	if ((addWallx) || (addWally) || (addCircularWall)){
-
-		if (addMidWall){
-			fprintf(thermo, "t E pm p\n");
-		}
-		else{
-			fprintf(thermo, "t E p pW\n");
-		}
-	}
-	else{
-		if (addWell){
-			fprintf(thermo, "t E Ep p\n");
-		}
-		else{
-			fprintf(thermo, "t E p\n");
-		}
-	}
-}
 
 
 void saveThermo(){
-	
+	double pressureX = 0;
+	double pressureY = 0;
 	#if THREE_D
+	double pressureZ = 0;
 	double vol = Lx*Ly*Lz;
 	#else
 	double area = Lx*Ly;
@@ -3431,13 +3444,17 @@ void saveThermo(){
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
 	
+	pressureX = -1*collTermX/(area*deltaTime) + E/area;
+	pressureY = -1*collTermY/(area*deltaTime) + E/area;
 	#if THREE_D
-	pressure = (-1/(deltaTime))*collTerm/(3*vol) + (2./3.)*E/vol;
+	pressureZ = -1*collTermY/(area*deltaTime) + E/area;
+	pressure = (-1/(deltaTime))*(collTermX + collTermY + collTermZ)/(3*vol) + (2./3.)*E/vol;
+	collTermZ = 0;
 	#else
-	pressure = (-1/(deltaTime))*collTerm/(2*area) + E/area;
+	pressure = (-1/(deltaTime))*(collTermX + collTermY)/(2*area) + E/area;
 	#endif
-	collTerm = 0;
-
+	collTermX = 0;
+	collTermY = 0;
 
 	if (t != 0){
 		fprintf(thermo, "%lf ", t);
@@ -3447,9 +3464,15 @@ void saveThermo(){
 		if (addEnergyThermo){
 			fprintf(thermo, "%lf ", E/N);
 		}
+		#if THREE_D
 		if (addPressureThermo){
-			fprintf(thermo, "%lf ", pressure);
+			fprintf(thermo, "%lf %lf %lf %lf ", pressure, pressureX, pressureY, pressureZ);
 		}
+		#else
+		if (addPressureThermo){
+			fprintf(thermo, "%lf %lf %lf ", pressure, pressureX, pressureY);
+		}
+		#endif
 		if (addCircularWall || addWallx || addWally){
 			#if THREE_D
 			double wallArea = 0;
@@ -3476,7 +3499,7 @@ void saveThermo(){
 			dp = 0;
 		}
 		if (addMidWall){
-			fprintf(thermo, "%lf %lf", dpMid/(deltaTime*Ly),(dpRight - dpLeft)/(deltaTime*Ly)) ;
+			fprintf(thermo, "%lf %lf ", dpMid/(deltaTime*Ly),(dpRight - dpLeft)/(deltaTime*Ly)) ;
 			dpMid = 0;
 			dpRight = 0;
 			dpLeft = 0;

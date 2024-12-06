@@ -55,7 +55,7 @@
 //Values if no load file
 int N = 100;
 double phi = 0.05;
-double sizeratio = 0.5;
+double sizeratio = 1;
 double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
@@ -105,19 +105,20 @@ char buffer[255];
 FILE* file;
 
 
-//load a configuration if == 1 (if nothing specified it loads from data.txt)
+
 int load = 0;
 int S1 = 0;
-int Hex = 1;
-int coexistence = 1;
+int Hex = 0;
+int coexistence = 0;
+int liquidliquid = 0;
 
 //duration of simulation
-double tmax = 500000;  
+double tmax = 150000;  
 //time between each screenshots 
-double dtime = 20;
+double dtime = 100;
 double firstScreen = 10;
-double dtimeThermo = M_PI*3;
-double firstThermo = 1;
+double dtimeThermo = 20;
+double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -142,17 +143,16 @@ bool thermoWall = 0;
 bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
-const int liquidliquid = 0;
 #else
-const int addWell = 1;
+const int addWell = 0;
 const int addField = 0;
-const int noise = 1;
+const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -161,7 +161,6 @@ const int thermoWall = 0;
 const int charged = 0;
 const int addShear = 0;
 const int addShearWall = 0;
-const int liquidliquid = 1;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -212,10 +211,10 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 0;
+double deltaE = 20;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.09;
+double additionalEnergy = 0.0175;
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -227,14 +226,14 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.95;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 1.2;
+double T = 1.18;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.1;
+double dtnoise = 0.2;
 double T2 = 0.5;
 
 
@@ -665,7 +664,7 @@ void constantInit(int argc, char *argv[]){
 		Lly = sqrt(sqrt(3)/2*Nly/Nlx*M_PI*Nl/phil);
 		Llx = 2/sqrt(3)*Nlx/Nly*Lly;
 
-		Lx = Llx + Lgx + 1;
+		Lx = Llx + Lgx + 2;
 		Ly = fmax(Lly, Lgy) ;
 		phi = N/(Lx*Ly)*M_PI;
 		Nbig = N;
@@ -810,7 +809,7 @@ void particlesInit(){
 	}
 	else if (load == 2){
 		int nframes = dump->nframes;
-		jump_to_frame(nframes - 3, dump);
+		jump_to_frame(nframes - 1, dump);
 
 		double* x = calloc(N, sizeof(double));
 		double* y = calloc(N, sizeof(double));
@@ -3444,13 +3443,16 @@ void saveThermo(){
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
 	
-	pressureX = -1*collTermX/(area*deltaTime) + E/area;
-	pressureY = -1*collTermY/(area*deltaTime) + E/area;
+	
 	#if THREE_D
-	pressureZ = -1*collTermY/(area*deltaTime) + E/area;
+	pressureX = -1*collTermX/(vol*deltaTime);
+	pressureY = -1*collTermY/(vol*deltaTime);
+	pressureZ = -1*collTermY/(vol*deltaTime);
 	pressure = (-1/(deltaTime))*(collTermX + collTermY + collTermZ)/(3*vol) + (2./3.)*E/vol;
 	collTermZ = 0;
 	#else
+	pressureX = -1*collTermX/(area*deltaTime);
+	pressureY = -1*collTermY/(area*deltaTime);
 	pressure = (-1/(deltaTime))*(collTermX + collTermY)/(2*area) + E/area;
 	#endif
 	collTermX = 0;

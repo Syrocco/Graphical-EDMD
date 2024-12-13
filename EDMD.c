@@ -2,6 +2,7 @@
 #include "mersenne.c" 
 #include "quartic.c" 
 #include "interface.c"
+#include "critical.c"
 #include<math.h>
 #include<stdlib.h>
 #include<string.h>
@@ -54,7 +55,7 @@
 
 //Values if no load file
 int N = 100;
-double phi = 0.05;
+double phi = 0.32;
 double sizeratio = 1;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -69,8 +70,9 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.0958;
-double phil = 0.45;
+double phig = 0.11;
+double phil = 0.53;
+double dphi = 0.1;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -107,22 +109,25 @@ FILE* file;
 
 
 int load = 0;
-int S1 = 0;
-int Hex = 0;
-int coexistence = 0;
-int liquidliquid = 0;
+const int S1 = 0;
+const int Hex = 0;
+const int coexistenceOld = 0;
+const int coexistence = 2;
 
-//duration of simulation
-double tmax = 150000;  
-//time between each screenshots 
+const int critical = 1;
+const int snapshotCritical = 1;
+
+double tmax = 2500000;  
 double dtime = 100;
-double firstScreen = 10;
-double dtimeThermo = 20;
+double firstScreen = 0;
+double dtimeThermo = 10;
 double firstThermo = 0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
 
+
+int interfaceThermo = 0;
 
 
 #if G
@@ -143,14 +148,16 @@ bool thermoWall = 0;
 bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
+const int liquidliquid = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
+const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
 const int addEnergy = 1;
 const int addDoubleDelta = 0;
@@ -161,14 +168,14 @@ const int thermoWall = 0;
 const int charged = 0;
 const int addShear = 0;
 const int addShearWall = 0;
+const int liquidliquid = 0;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
 
 
-//add a wall at x = Lx/2
-const int addMidWall = 0;
+
 
 
 
@@ -211,10 +218,10 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 20;
+double deltaE = 100;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.0175;
+double additionalEnergy = 0.025;
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -226,7 +233,7 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
@@ -392,7 +399,7 @@ void* computeEvolution(void *arg){
 		fclose(fichier);
 		if (ther){
 			fclose(thermo);
-			if ((liquidliquid && Hex) || coexistence){
+			if ((liquidliquid && Hex) || interfaceThermo){
 				fclose(interface);
 			}
 		}
@@ -640,35 +647,67 @@ void constantInit(int argc, char *argv[]){
 		Nbig = N;
 		Nsmall = 0;
 	}
-	else if (coexistence){
-		Ng = N*phig/(phil + phig);
-		Nl = N - Ng;
+	else if (coexistenceOld){
+		double effectiveAspectRatio = aspectRatio;
+		double count = 0;
+		int pingpong = 1;
+		double fac = 0.01;
+		while (true){
+			count++;
+			Ng = N*phig/(phil + phig);
+			Nl = N - Ng;
 
-		Ngy = sqrt(Ng)*aspectRatio;
-		if (Ngy%2 == 1){
-			Ngy += 1;
+			Ngy = sqrt(Ng)*effectiveAspectRatio;
+			if (Ngy%2 == 1){
+				Ngy += 1;
+			}
+			Ngx = Ng/Ngy;
+			Ng = Ngx*Ngy;
+
+			Nly = sqrt(Nl)*effectiveAspectRatio;
+			if (Nly%2 == 1){
+				Nly += 1;
+			}
+			Nlx = Nl/Nly;
+			Nl = Nlx*Nly;
+			
+
+			Lgy = sqrt(sqrt(3)/2*Ngy/Ngx*M_PI*Ng/phig);
+			Lgx = 2/sqrt(3)*Ngx/Ngy*Lgy;
+			Lly = sqrt(sqrt(3)/2*Nly/Nlx*M_PI*Nl/phil);
+			Llx = 2/sqrt(3)*Nlx/Nly*Lly;
+
+			Lx = Llx + Lgx + 2;
+			Ly = fmax(Lly, Lgy) ;
+			
+			if (fabs(Ly/Lx - aspectRatio) < 0.01){
+				N = Nl + Ng;
+				phi = N/(Lx*Ly)*M_PI;
+				Nbig = N;
+				Nsmall = 0;
+				break;
+			}
+			else if (Ly/Lx - aspectRatio < 0){
+				effectiveAspectRatio *= 1 + fac;
+				if (pingpong != 1){
+					pingpong = 1;
+					fac /= 2;
+				}
+				printf("1: %lf %.10lf %d\n", Ly/Lx, fac, pingpong);
+			}
+			else{
+				effectiveAspectRatio *= 1 - fac;
+				if (pingpong != 0){
+					pingpong = 0;
+					fac /= 2;
+				}
+				printf("2: %lf %.10lf %d\n", Ly/Lx, fac, pingpong);
+			}
+			if (count > 1e8){
+				printf("NO WAY TO SIZE THE BOX");
+				exit(3);
+			}
 		}
-		Ngx = Ng/Ngy;
-		Ng = Ngx*Ngy;
-
-		Nly = sqrt(Nl)*aspectRatio;
-		if (Nly%2 == 1){
-			Nly += 1;
-		}
-		Nlx = Nl/Nly;
-		Nl = Nlx*Nly;
-		N = Nl + Ng;
-
-		Lgy = sqrt(sqrt(3)/2*Ngy/Ngx*M_PI*Ng/phig);
-		Lgx = 2/sqrt(3)*Ngx/Ngy*Lgy;
-		Lly = sqrt(sqrt(3)/2*Nly/Nlx*M_PI*Nl/phil);
-		Llx = 2/sqrt(3)*Nlx/Nly*Lly;
-
-		Lx = Llx + Lgx + 2;
-		Ly = fmax(Lly, Lgy) ;
-		phi = N/(Lx*Ly)*M_PI;
-		Nbig = N;
-		Nsmall = 0;
 	}
 	else{
 		#if THREE_D
@@ -686,6 +725,17 @@ void constantInit(int argc, char *argv[]){
 		}
 		else{
 			if (controlLenght == 0){
+				if (coexistence == 1){
+					Ng = N*phig/(phil + phig);
+					Nl = N - Ng;
+					phi = (phil + phig)*0.5;
+				}
+				else if (coexistence == 2){
+					phil = phi + dphi;
+					phig = phi - dphi;
+					Ng = N*phig/(phil + phig);
+					Nl = N - Ng;
+				}
 				#if THREE_D
 				Lx = pow((4./3.)*M_PI*N/(phi*aspectRatio)*r2, 1./3.);
 				#else
@@ -757,11 +807,14 @@ void initThermo(){
 		if (addEnergyCenterOfMassThermo){
 			fprintf(thermo, "ECOM ");
 		}
+		if (critical){
+			fprintf(thermo, "dense1 dense2 dilute1 dilute2 ");
+		}
 		fprintf(thermo, "\n");
 	}
-	if ((liquidliquid && Hex) || coexistence){
+	if (interfaceThermo){
 		interface = fopen(interfaceName, "w");
-		if (coexistence == 1){
+		if (liquidliquid == 0){
 			initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid);
 		}
 		else{
@@ -939,7 +992,7 @@ void particlesInit(){
 		
 		normalizePhysicalQ();
 	}
-	else if (coexistence){
+	else if (coexistenceOld){
 		particle* p;
 		int k = 0;
 		double dlx = Llx/Nlx;
@@ -997,6 +1050,7 @@ void particlesInit(){
 		particle* p;
 		optimizeGrowConstant();
 		double *targetRad = calloc(N, sizeof(double));
+
 		if (polydispersity){
 			for (int i = 0; i < N; i++)	
 				targetRad[i] = pow(1 - pow(1 - drand(0, 1), 1/b), 1/a);
@@ -1016,7 +1070,18 @@ void particlesInit(){
 				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > 0.7*halfLx*halfLx); //0.2 because so cool effect !!
 			}
 			else{
-				p->x = drand(2.5, Lx - 2.5); 
+				if (coexistence){
+					if (i < Nl){
+						p->x = drand(2.5, Lx/2 - 2.5); 
+					}
+					else{
+						p->x = drand(Lx/2 + 2.5, Lx - 2.5); 
+					}
+				}
+				else{
+					p->x = drand(2.5, Lx - 2.5); 
+
+				}
 				p->y = drand(2.5, Ly - 2.5);
 				#if THREE_D
 				p->z = drand(2.5, Lz - 2.5);
@@ -1209,7 +1274,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && S1 == 0 && Hex == 0 && coexistence == 0){
+	if (load == 0 && S1 == 0 && Hex == 0 && coexistenceOld == 0){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1222,7 +1287,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && S1 == 0 && Hex == 0 && coexistence == 0){
+	if (load == 0 && S1 == 0 && Hex == 0 && coexistenceOld == 0){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -2295,7 +2360,7 @@ void collisionEventGrow(int i){
 
 	double vrParticle = p1->vr;
 	
-	if (addWally){
+	if (addWally || coexistence){
 		double vyPlus = p1->vy + vrParticle;
 		double vyMinus = p1->vy - vrParticle;
 		if ((Y == 0) && (vyMinus < 0)){
@@ -2310,7 +2375,7 @@ void collisionEventGrow(int i){
 			xy = 1;
 		}
 	}
-	if (addWallx){
+	if (addWallx || coexistence){
 		double vxPlus = p1->vx + vrParticle;
 		double vxMinus = p1->vx - vrParticle;
 		if ((X == 0) && (vxMinus < 0)){
@@ -2347,6 +2412,28 @@ void collisionEventGrow(int i){
 			dt  = (-B + sqrt(B*B - 4*A*C))/(2*A);
 			type = WALL;
 			xy = 2;
+	}
+
+
+	if ((addMidWall  && (p1->type == 1)) || coexistence){
+		double vxPlus = p1->vx + vrParticle;
+		double vxMinus = p1->vx - vrParticle;
+		if ((p1->x > Lx/2 - 4) && (p1->x < Lx/2) && (vxPlus > 0)){
+			dtTemp = (Lx/2 - p1->x - p1->rad)/(vxPlus);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
+		else if ((p1->x < Lx/2 + 4) && (p1->x > Lx/2) && (vxMinus < 0)){
+		dtTemp = ((p1->x - p1->rad) - Lx/2)/(-vxMinus);
+			if (dt > dtTemp){
+				type = WALL;
+				dt = dtTemp;
+			}
+			xy = 0;
+		}
 	}
 
 	for (int j = -1; j <= 1; j++){
@@ -2473,14 +2560,10 @@ void doTheWallGrow(){
 
 	double vrParticle = pi->vr;
 
+	
 	//hacky
 	if (xy == 0){
-		if (pi->x > Lx - 3){
-			pi->vx = -pi->vx - 2*vrParticle;
-		}
-		else{
-			pi->vx = -pi->vx + 2*vrParticle;
-		}
+		pi->vx = -sign(pi->vx)*(fabs(pi->vx) + 2*vrParticle);
 	}
 	else if (xy == 1){
 
@@ -2555,14 +2638,6 @@ void doTheWallNormal(){
 	}
 	else if (xy == 1){
 		dp += fabs((resW + 1)*pi->m*pi->vy);
-		/*
-		if (pi->y + 2*pi->rad > Ly){
-			pi->vy = drand(-3, 0);
-		}
-		else{
-			pi->vy = drand(0, 5);
-		}
-		*/
 		if (thermoWall){
 			pi->vy = -sign(pi->vy)*drand(0, T/pi->m);
 		}
@@ -2581,7 +2656,6 @@ void doTheWallNormal(){
 				pi->vy += delta*sign(pi->vy); 
 			}
 		}
-		//pi->vy = drand(-50, 50);
 	}
 	else{
 		double theta = atan2(pi->y - halfLx, pi->x - halfLx);
@@ -3406,12 +3480,43 @@ void saveTXT(){
 		#endif
 	}
 	else{
-	#if THREE_D
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
-	#else
-	fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
-	#endif
+		#if THREE_D
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
+		#else
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
+		#endif
+		double shift = 0;
+		if (snapshotCritical){
+			shift = getCOMx(particles, N, Lx);
+		}
 		for(int i = 0; i < N; i++){
+			double X = particles[i].x;
+			int type = particles[i].type;
+			if (snapshotCritical){
+				X = particles[i].x + (Lx / 4 - shift);
+				if (X < 0) {
+           		X += Lx;
+				}
+				else if (X > Lx){
+					X -= Lx;
+				}
+				int firstx = ((X > (Lx/6)) && (X < (2*Lx/6)));
+				int seconx = ((X > (4*Lx/6)) && (X < (5*Lx/6)));
+				int firsty = (particles[i].y < (Ly/2));
+				int secony = (particles[i].y > (Ly/2));
+				if (firstx && firsty) {
+					type = 2;
+				}
+				if (firstx && secony) {
+					type = 3;
+				}
+				if (seconx && firsty) {
+					type = 4;
+				}
+				if (seconx && secony) {
+					type = 5;
+				}
+			}
 			
             int synchro = 0;
             if (t - particles[i].lastColl > ts)
@@ -3419,7 +3524,7 @@ void saveTXT(){
 			#if THREE_D
 			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, synchro);
 			#else
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
 			#endif
 		}
 	}
@@ -3525,14 +3630,19 @@ void saveThermo(){
 			}
 			fprintf(thermo, "%lf ", 0.5*(ex*ex + ey*ey)/N);
 		}
+		if (critical){
+			int count[4];
+			countConditions(particles, N, Lx, Ly, count);
+			fprintf(thermo, "%d %d %d %d ", count[0], count[1], count[2], count[3]);
+		}
 		fprintf(thermo, "\n");
 	}
 	fflush(thermo);
-	if (liquidliquid && Hex){
+	if (liquidliquid && interfaceThermo){
 		computeInterfacesPos(particles, 0.1);
 		fflush(interface);
 	}
-	else if (coexistence){
+	else if (interfaceThermo){
 		saveDensityCoarse(particles);
 		fflush(interface);
 	}
@@ -3843,7 +3953,7 @@ void customName(){
 			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
     snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	if ((liquidliquid && Hex)|| coexistence){
+	if (interfaceThermo){
 		snprintf(interfaceName, sizeof(interfaceName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.interface", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
 	#endif

@@ -10,6 +10,7 @@ cookie.png
 !.gitignore
 !.git/
 !interface.c
+!critical.c
 # Do not ignore specific folders or files inside the "docs" directory
 !docs/**
 

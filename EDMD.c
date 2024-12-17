@@ -54,10 +54,10 @@
 #define never 100000000000000000000000000.0
 
 //Values if no load file
-int N = 100;
-double phi = 0.32;
-double sizeratio = 1;
-double fractionSmallN = 0;
+int N = 500;
+double phi = 0.8;
+double sizeratio = 0.478;
+double fractionSmallN = 0.5;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -71,8 +71,8 @@ double lastScreen = 0;
 double lastCollNum = 0;
 
 double phig = 0.11;
-double phil = 0.53;
-double dphi = 0.1;
+double phil = 0.84;
+double dphi = 0.15;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -109,16 +109,18 @@ FILE* file;
 
 
 int load = 0;
-const int S1 = 0;
+const int S1 = 1;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 2;
+const int coexistence = 1;
 
-const int critical = 1;
-const int snapshotCritical = 1;
+int interfaceThermo = 1;
+
+const int critical = 0;
+const int snapshotCritical = 0;
 
 double tmax = 2500000;  
-double dtime = 100;
+double dtime = 10;
 double firstScreen = 0;
 double dtimeThermo = 10;
 double firstThermo = 0;
@@ -127,7 +129,6 @@ double firstThermo = 0;
 double nextScreen = -1;
 
 
-int interfaceThermo = 0;
 
 
 #if G
@@ -136,6 +137,7 @@ bool addField = false;
 int noise = 1;
 int addWally = 0;
 int addWallx = 0;
+int addMidWall = 0;
 int addCircularWall = 0;
 bool damping = false;
 bool addDelta = false;
@@ -218,10 +220,16 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 100;
+double deltaE = 0;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.025;
+
+
+/*double deltaE = 0;
+double beta = 10;
+double taur = 3;
+double additionalEnergy = 0.09;*/
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -303,6 +311,7 @@ void* computeEvolution(void *arg){
 	customName();
 	fichier = fopen(fileName, "w");
 	initThermo();
+	//saveTXT();
 	cellListInit();
 	if (addWell){
 		pairsInit();
@@ -625,14 +634,33 @@ void constantInit(int argc, char *argv[]){
 		char hboxy;
 		Ly = get_boxy(&hboxy, 1, dump);
 	}
+	else if (coexistence && S1){
+
+		double r2 = (1 + 0.5*(sizeratio*sizeratio - 1));
+		Ly = sqrt(M_PI*N/(phi*2)*r2);
+		Lx = Ly*2;
+		
+
+		Nsmall = phil*(Lx/2)*Ly/(M_PI*r2*2);
+		Nlx = (int)sqrt(Nsmall);
+		Nly = (int)sqrt(Nsmall);
+		if (Nlx*Nly < N/2){
+			Nlx += 1;
+			Nly += 1;
+		}
+		Nsmall = Nlx*Nly;
+		Nbig = Nsmall;
+
+	}
 	else if (S1){
 		Nsmall = N/2;
-		Nsmall = (int)sqrt(Nsmall);
-		Nsmall = Nsmall*Nsmall;
+		Nlx = (int)sqrt(Nsmall/aspectRatio);
+		Nly = (int)sqrt(Nsmall*aspectRatio);
+		Nsmall = Nlx*Nly;
 		Nbig = Nsmall;
 		N = Nbig + Nsmall;
-		Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/phi);
-		Ly = Lx;
+        Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/(phi*aspectRatio));
+		Ly = Lx*aspectRatio;
 	}
 	else if (Hex){
 
@@ -911,16 +939,100 @@ void particlesInit(){
 		free(rad);
 		dump_close(dump);
 	}
+	else if (coexistence && S1){
+		optimizeGrowConstant();
+		vr /= 3;
+		double da = 0.1;
+		particle* p;
+		int k = 0;
+        float dx = (Ly - 2)/Nly;
+		float dy = (Ly - 1)/Nly;
+		for (i = 0; i < Nlx; i++){
+			for (int j = 0; j < Nly; j++){
+				p = particles + k;
+				p->x = da + 1 + i*dx;
+				p->y = da + 1 + j*dy;
+				p->type = 1;
+				p->rad = 1;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2)*0.01;
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2)*0.01;
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+		
+		for (i = 0; i < Nlx; i++){
+			for (int j = 0; j < Nly; j++){
+				p = particles + k;
+				p->x = da + 1 + dx/2 + i*dx;
+				p->y = da + 1 + dy/2 + j*dy;
+				p->type = 0;
+				p->rad = sizeratio;
+				p->m = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2)*0.01;
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2)*0.01;
+				p->num = k;
+				p->t = 0;
+				p->coll = 0;
+				p->lastColl = 0;
+				k++;
+			}
+		}
+		for (int i = k; i < N; i++){
+			p = particles + i;
+			p->x = drand(Lx/2 + 2.5, Lx - 2.5); 
+			p->y = drand(2.5, Ly - 2.5);
+
+			p->num = i;
+			p->rad = 0;
+			p->crossX = 0;
+			p->crossY = 0;
+
+			if (i%2 == 0){
+				p->type = 1;
+				p->m = 1;
+				p->vr = vr;
+				
+			}
+			else{
+				p->type = 0;
+				p->m = 1;
+				p->vr = vr*sizeratio;
+			}
+
+
+			p->t = 0;
+			p->coll = 0;
+
+			double U1 = drand(0, 1);
+			double U2 = drand(0, 1);
+			p->vx = sqrt(-2*log(U1)/p->m)*cos(2*M_PI*U2);
+			p->vy = sqrt(-2*log(U1)/p->m)*sin(2*M_PI*U2);
+
+			p->lastColl = 0;
+		}
+		normalizePhysicalQ();
+	}
 	else if (S1){
 		particle* p;
-		int Nsqrt = (int)sqrt(Nsmall);
 		int k = 0;
-		float dx = Lx/Nsqrt;
-		for (i = 0; i < Nsqrt; i++){
-			for (int j = 0; j < Nsqrt; j++){
+        float dx = Lx/Nlx;
+        if (coexistenceOld)
+		    dx = Lx*(phi/phil)/Nlx;
+		float dy = Ly/Nly;
+		for (i = 0; i < Nlx; i++){
+			for (int j = 0; j < Nly; j++){
 				p = particles + k;
 				p->x = i*dx;
-				p->y = j*dx;
+				p->y = j*dy;
 				p->type = 1;
 				p->rad = 1;
 				p->m = 1;
@@ -936,11 +1048,11 @@ void particlesInit(){
 			}
 		}
 		
-		for (i = 0; i < Nsqrt; i++){
-			for (int j = 0; j < Nsqrt; j++){
+		for (i = 0; i < Nlx; i++){
+			for (int j = 0; j < Nly; j++){
 				p = particles + k;
 				p->x = dx/2 + i*dx;
-				p->y = dx/2 + j*dx;
+				p->y = dy/2 + j*dy;
 				p->type = 0;
 				p->rad = sizeratio;
 				p->m = sizeratio*sizeratio*sizeratio;
@@ -1274,7 +1386,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && S1 == 0 && Hex == 0 && coexistenceOld == 0){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((S1 == 0 && coexistence == 0) || ((S1 == 1) && (coexistence)))){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1287,7 +1399,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && S1 == 0 && Hex == 0 && coexistenceOld == 0){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((S1 == 0 && coexistence == 0) || ((S1 == 1) && (coexistence)))){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -2359,7 +2471,6 @@ void collisionEventGrow(int i){
 
 
 	double vrParticle = p1->vr;
-	
 	if (addWally || coexistence){
 		double vyPlus = p1->vy + vrParticle;
 		double vyMinus = p1->vy - vrParticle;
@@ -2848,12 +2959,12 @@ void doTheCollisionNormal(){
 	}
 	else if (addEnergy){
 		double b = dx*dvx + dy*dvy;
-		double distSquared = 4*pi->rad*pj->rad;
+		double distSquared = DIST2(pi->rad, pj->rad);
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
 		double deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 
-		double funkyFactor2 = (b - sqrt(res*res*b*b + 4*distSquared*deltaETotal))/(2*distSquared); //lacking mass xDeltaE
+		double funkyFactor2 = (b - sqrt(res*res*b*b + 2*distSquared*deltaETotal*(pi->m + pj->m)/(pi->m*pj->m)))/(2*distSquared); //lacking mass xDeltaE
 
 		double collTerm = pi->m*pj->m*funkyFactor2;
 		collTermX += collTerm*dx*dx;
@@ -2861,16 +2972,16 @@ void doTheCollisionNormal(){
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		#endif
-
-		pi->vx += funkyFactor2*pj->m*dx;
-		pi->vy += funkyFactor2*pj->m*dy;
-		pj->vx -= funkyFactor2*pi->m*dx;
-		pj->vy -= funkyFactor2*pi->m*dy;
+		//double E = 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy));
+		pi->vx += 2*pj->m*invMass*funkyFactor2*dx;
+		pi->vy += 2*pj->m*invMass*funkyFactor2*dy;
+		pj->vx -= 2*pi->m*invMass*funkyFactor2*dx;
+		pj->vy -= 2*pi->m*invMass*funkyFactor2*dy;
 		#if THREE_D
-		pi->vz += funkyFactor2*pj->m*dz;
-		pj->vz -= funkyFactor2*pi->m*dz;
+		pi->vz += 2*pi->m*invMass*funkyFactor2*dz;
+		pj->vz -= 2*pi->m*invMass*funkyFactor2*dz;
 		#endif
-
+		//printf("%lf %d %d\n", - E + 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy)), pi->type, pj->type);
 	}
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));

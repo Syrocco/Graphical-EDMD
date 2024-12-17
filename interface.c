@@ -11,6 +11,7 @@ void computeLocalConcentration(particle *particles);
 #endif
 
 double** d;
+double** dbis;
 int Nx;
 int Ny;
 double dx;
@@ -29,14 +30,23 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
     Ly = ly;
     N = n;
     d = malloc(Nx * sizeof(double*));
+    if (liquidliquid){
+       dbis = malloc(Nx * sizeof(double*)); 
+    }
     interface = inter;
 
     for (int i = 0; i < Nx; i++) {
         d[i] = calloc(Ny, sizeof(double));
+        if (liquidliquid){
+            dbis[i] = calloc(Ny, sizeof(double));
+        }
     }
     for (int i = 0; i < Nx; i++) {
         for (int j = 0; j < Ny; j++) {
             d[i][j] = 0;
+            if (liquidliquid){
+                dbis[i][j] = 0;
+            }
         }
     }
     if (liquidliquid == 0){
@@ -58,6 +68,8 @@ void computeLocalConcentration(particle *particles){
     for (int i = 0; i < Nx; i++) {
         for (int j = 0; j < Ny; j++) {
             d[i][j] = 0;
+            if (dbis != NULL)
+               dbis[i][j] = 0;
         }
     }
     
@@ -67,6 +79,11 @@ void computeLocalConcentration(particle *particles){
         
         if (particles[i].type == 1) {
             d[box_x][box_y] += M_PI/(dx*dy);
+        }
+        if (dbis != NULL){
+            if (particles[i].type == 0) {
+                dbis[box_x][box_y] += M_PI/(dx*dy);
+            }
         }
     }
 }
@@ -88,7 +105,7 @@ void computeInterfacesPos(particle *particles, double tresh){
     for (int i = 0; i < Ny; i++){
         int count = 0;
         for (int j = J; j < Nx; j++){
-            if (d[j][i] < tresh){
+            if ((d[j][i] < tresh) && (dbis[j][i] > tresh)){
                 count++;
             }
             else{
@@ -111,7 +128,7 @@ void computeInterfacesPos(particle *particles, double tresh){
             if (j < 0){
                 k =  Nx + j;
             }
-            if (d[k][i] < tresh){
+            if ((d[k][i] < tresh) && (dbis[k][i] > tresh)){
                 count++;
             }
             else{

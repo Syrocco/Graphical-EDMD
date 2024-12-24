@@ -58,7 +58,7 @@
 
 //Values if no load file
 int N = 500;
-double phi = 0.8;
+double phi = 0.1;
 double sizeratio = 0.478;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -117,7 +117,7 @@ FILE* file;
 
 int load = 0;
 const int S1 = 0;
-const int Hex = 1;
+const int Hex = 0;
 const int coexistenceOld = 0;
 const int coexistence = 0;
 
@@ -131,7 +131,7 @@ double qmax = 0.3;
 const int critical = 0;
 const int snapshotCritical = 0;
 
-double tmax = 2500000;  
+double tmax = 20000;  
 double dtime = 100;
 double firstScreen = 10;
 double dtimeThermo = 100;
@@ -3019,6 +3019,7 @@ void doTheCollisionNormal(){
 		pi->vy += funkyFactor*pj->m*dy;
 		pj->vx -= funkyFactor*pi->m*dx;
 		pj->vy -= funkyFactor*pi->m*dy;
+		
 	}
 
 
@@ -3612,13 +3613,20 @@ void saveTXT(){
 	else{
 		int* particleCluster;
 		if (clusterThermo){
-			findClusters(particles, N, 3.4, &clusters, &numClusters);
+			clock_t t; 
+			t = clock(); 
+			
+			findClusters(particles, N, 3.4, &clusters, &numClusters, cellList, Nxcells);
 			particleCluster = malloc(N * sizeof(int));
 			for (int i = 0; i < numClusters; i++) {
 				for (int j = 0; j < clusters[i].size; j++) {
-					particleCluster[clusters[i].particles[j] - particles] = i;
+					particleCluster[clusters[i].particles[j]->num] = i;
 				}
 			}
+			t = clock() - t; 
+			double time_taken = ((double)t)/CLOCKS_PER_SEC; // in seconds 
+
+			printf("fun() took %f seconds to execute \n", time_taken); 
 		}
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);

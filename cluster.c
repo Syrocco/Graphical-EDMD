@@ -11,9 +11,10 @@ typedef struct cluster {
 
 bool areParticlesClose(particle* p1, particle* p2, double r_c);
 void addParticleToCluster(cluster* cl, particle* p);
-void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters);
+void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters, particle** cellList, int Nxcells);
 void freeClusters(cluster* clusters, int numClusters);
-
+int compareClusters(const void* a, const void* b);
+void sortClustersBySize(cluster* clusters, int numClusters);
 
 bool areParticlesClose(particle* p1, particle* p2, double r_c) {
     double dx = p2->x - p1->x;
@@ -36,7 +37,17 @@ void addParticleToCluster(cluster* cl, particle* p) {
     cl->particles[cl->size++] = p;
 }
 
-void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters) {
+int compareClusters(const void* a, const void* b){
+    cluster* cl1 = (cluster*)a;
+    cluster* cl2 = (cluster*)b;
+    return cl2->size - cl1->size; // Sort in descending order
+}
+
+void sortClustersBySize(cluster* clusters, int numClusters){
+    qsort(clusters, numClusters, sizeof(cluster), compareClusters);
+}
+
+void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters, particle** cellList, int Nxcells) {
     bool* visited = calloc(N, sizeof(bool));
     *numClusters = 0;
     *clusters = NULL;
@@ -50,22 +61,43 @@ void findClusters(particle* particles, int N, double r_c, cluster** clusters, in
             addParticleToCluster(&cl, &particles[i]);
             visited[i] = true;
 
-            for (int j = 0; j < cl.size; j++) {
+            for (int j = 0; j < cl.size; j++){
                 particle* p1 = cl.particles[j];
-                for (int k = 0; k < N; k++) {
-                    if (!visited[k] && areParticlesClose(p1, &particles[k], r_c)) {
-                        addParticleToCluster(&cl, &particles[k]);
-                        visited[k] = true;
+                int X = p1->cell[0];
+                int Y = p1->cell[1];
+                #if THREE_D
+                int Z = p1->cell[2];
+                #endif
+
+                for (int j = -1; j <= 1; j++){
+                    for (int k = -1; k <= 1; k++){
+                        #if THREE_D
+                        for (int l = -1; l <= 1; l++){
+                            particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + j) * Nxcells + PBCcellX(X + l)];
+                        #else
+                            particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                        #endif
+                        while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+                            if (p1->num != p2->num){
+                                if (!visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
+                                    addParticleToCluster(&cl, p2);
+                                    visited[p2->num] = true;
+                                }
+                            }
+                            p2 = p2->nxt;
+                        }
+                    #if THREE_D
+                    }
+                    #endif
                     }
                 }
             }
-
             *clusters = realloc(*clusters, (*numClusters + 1) * sizeof(cluster));
             (*clusters)[*numClusters] = cl;
             (*numClusters)++;
         }
     }
-
+    sortClustersBySize(*clusters, *numClusters);
     free(visited);
 }
 

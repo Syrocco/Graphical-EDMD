@@ -11,6 +11,7 @@ cookie.png
 !.git/
 !interface.c
 !critical.c
+!cluster.c
 # Do not ignore specific folders or files inside the "docs" directory
 !docs/**
 

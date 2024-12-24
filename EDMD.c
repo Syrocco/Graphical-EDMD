@@ -3,6 +3,9 @@
 #include "quartic.c" 
 #include "interface.c"
 #include "critical.c"
+#include "struc.c"
+#include "cluster.c"
+
 #include<math.h>
 #include<stdlib.h>
 #include<string.h>
@@ -40,7 +43,7 @@
 #if G
 #include "graphics.h"
 #include "raylib.h"
-#include<pthread.h>
+#include <pthread.h>
 #endif
 
 
@@ -57,7 +60,7 @@
 int N = 500;
 double phi = 0.8;
 double sizeratio = 0.478;
-double fractionSmallN = 0.5;
+double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -98,32 +101,41 @@ double dpLeft = 0;
 double dpRight = 0;
 double dpMid = 0;
 
+cluster* clusters;
+int numClusters;
+
 unsigned long int ncol = 0;
 unsigned long int ncross = 0;
 char fileName[350];
 char thermoName[350];
 char interfaceName[350];
 char buffer[255];
+char strucName[350];
 FILE* file;
 
 
 
 int load = 0;
-const int S1 = 1;
-const int Hex = 0;
+const int S1 = 0;
+const int Hex = 1;
 const int coexistenceOld = 0;
-const int coexistence = 1;
+const int coexistence = 0;
 
-int interfaceThermo = 1;
+const int interfaceThermo = 0;
+
+const int clusterThermo = 1;
+
+const int strucThermo = 0;
+double qmax = 0.3;
 
 const int critical = 0;
 const int snapshotCritical = 0;
 
 double tmax = 2500000;  
-double dtime = 10;
-double firstScreen = 0;
-double dtimeThermo = 10;
-double firstThermo = 0;
+double dtime = 100;
+double firstScreen = 10;
+double dtimeThermo = 100;
+double firstThermo = 10;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -220,7 +232,7 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 0;
+double deltaE = 51;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.025;
@@ -283,6 +295,7 @@ double t1 = 0;
 FILE *fichier;
 FILE *thermo;
 FILE *interface;
+FILE *strucFile;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -408,8 +421,11 @@ void* computeEvolution(void *arg){
 		fclose(fichier);
 		if (ther){
 			fclose(thermo);
-			if ((liquidliquid && Hex) || interfaceThermo){
+			if (interfaceThermo){
 				fclose(interface);
+			}
+			if (strucThermo){
+				fclose(strucFile);
 			}
 		}
 		#else
@@ -848,7 +864,10 @@ void initThermo(){
 		else{
 			initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid);
 		}
-		
+	}
+	if (strucThermo){
+		strucFile = fopen(strucName, "w");
+		initStructureFactor(qmax, Lx, Ly, N, strucFile);
 	}
 }
 
@@ -3591,6 +3610,16 @@ void saveTXT(){
 		#endif
 	}
 	else{
+		int* particleCluster;
+		if (clusterThermo){
+			findClusters(particles, N, 3.4, &clusters, &numClusters);
+			particleCluster = malloc(N * sizeof(int));
+			for (int i = 0; i < numClusters; i++) {
+				for (int j = 0; j < clusters[i].size; j++) {
+					particleCluster[clusters[i].particles[j] - particles] = i;
+				}
+			}
+		}
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
 		#else
@@ -3628,15 +3657,19 @@ void saveTXT(){
 					type = 5;
 				}
 			}
-			
-            int synchro = 0;
-            if (t - particles[i].lastColl > ts)
-                synchro = 1;
+			else if (clusterThermo){
+				type = particleCluster[i];
+			}
+
 			#if THREE_D
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, synchro);
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, type);
 			#else
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, synchro);
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, type);
 			#endif
+		}
+		if (clusterThermo){
+			free(particleCluster);
+			free(clusters);
 		}
 	}
 	fflush(fichier);
@@ -3756,6 +3789,10 @@ void saveThermo(){
 	else if (interfaceThermo){
 		saveDensityCoarse(particles);
 		fflush(interface);
+	}
+	if (strucThermo){
+		saveStructureFactor(particles);
+		fflush(strucFile);
 	}
 
 }
@@ -4066,6 +4103,9 @@ void customName(){
     snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	if (interfaceThermo){
 		snprintf(interfaceName, sizeof(interfaceName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.interface", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
+	}
+	if (strucThermo){
+		snprintf(strucName, sizeof(strucName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.struc", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
 	}
 	#endif
 }

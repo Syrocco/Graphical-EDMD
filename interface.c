@@ -5,6 +5,7 @@
 void saveDensityCoarse(particle *particles);
 void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid);
 void computeLocalConcentration(particle *particles);
+void freeInterface();
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
@@ -144,4 +145,18 @@ void computeInterfacesPos(particle *particles, double tresh){
         } 
     }
     fprintf(interface, "\n");
+}
+
+
+void freeInterface(){
+    for (int i = 0; i < Nx; i++) {
+        free(d[i]);
+        if (dbis != NULL) {
+            free(dbis[i]);
+        }
+    }
+    free(d);
+    if (dbis != NULL) {
+        free(dbis);
+    }
 }

@@ -3,18 +3,24 @@
 #include <stdlib.h>
 
 
+
 typedef struct cluster {
     particle** particles;
     int size;
     int capacity;
 } cluster;
 
+int numClusters;
+cluster* clusters;
+
 bool areParticlesClose(particle* p1, particle* p2, double r_c);
 void addParticleToCluster(cluster* cl, particle* p);
-void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters, particle** cellList, int Nxcells);
-void freeClusters(cluster* clusters, int numClusters);
+void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells);
+void freeClusters();
 int compareClusters(const void* a, const void* b);
-void sortClustersBySize(cluster* clusters, int numClusters);
+void sortClustersBySize();
+
+
 
 bool areParticlesClose(particle* p1, particle* p2, double r_c) {
     double dx = p2->x - p1->x;
@@ -43,14 +49,14 @@ int compareClusters(const void* a, const void* b){
     return cl2->size - cl1->size; // Sort in descending order
 }
 
-void sortClustersBySize(cluster* clusters, int numClusters){
+void sortClustersBySize(){
     qsort(clusters, numClusters, sizeof(cluster), compareClusters);
 }
 
-void findClusters(particle* particles, int N, double r_c, cluster** clusters, int* numClusters, particle** cellList, int Nxcells) {
+void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells) {
     bool* visited = calloc(N, sizeof(bool));
-    *numClusters = 0;
-    *clusters = NULL;
+    numClusters = 0;
+    clusters = NULL;
 
     for (int i = 0; i < N; i++) {
         if (!visited[i]) {
@@ -92,18 +98,19 @@ void findClusters(particle* particles, int N, double r_c, cluster** clusters, in
                     }
                 }
             }
-            *clusters = realloc(*clusters, (*numClusters + 1) * sizeof(cluster));
-            (*clusters)[*numClusters] = cl;
-            (*numClusters)++;
+            clusters = realloc(clusters, (numClusters + 1) * sizeof(cluster));
+            clusters[numClusters] = cl;
+            numClusters++;
         }
     }
-    sortClustersBySize(*clusters, *numClusters);
+    sortClustersBySize();
     free(visited);
 }
 
-void freeClusters(cluster* clusters, int numClusters) {
+void freeClusters() {
     for (int i = 0; i < numClusters; i++) {
         free(clusters[i].particles);
     }
     free(clusters);
 }
+

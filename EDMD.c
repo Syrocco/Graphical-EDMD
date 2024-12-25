@@ -58,7 +58,7 @@
 
 //Values if no load file
 int N = 500;
-double phi = 0.1;
+double phi = 0.2;
 double sizeratio = 0.478;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -74,7 +74,7 @@ double lastScreen = 0;
 double lastCollNum = 0;
 
 double phig = 0.11;
-double phil = 0.84;
+double phil = 0.5;
 double dphi = 0.15;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
@@ -101,8 +101,6 @@ double dpLeft = 0;
 double dpRight = 0;
 double dpMid = 0;
 
-cluster* clusters;
-int numClusters;
 
 unsigned long int ncol = 0;
 unsigned long int ncross = 0;
@@ -119,9 +117,9 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 0;
+const int coexistence = 1;
 
-const int interfaceThermo = 0;
+const int interfaceThermo = 1;
 
 const int clusterThermo = 1;
 
@@ -131,9 +129,9 @@ double qmax = 0.3;
 const int critical = 0;
 const int snapshotCritical = 0;
 
-double tmax = 20000;  
-double dtime = 100;
-double firstScreen = 10;
+double tmax = 200;  
+double dtime = 1;
+double firstScreen = 0;
 double dtimeThermo = 100;
 double firstThermo = 10;
 
@@ -1405,7 +1403,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((S1 == 0 && coexistence == 0) || ((S1 == 1) && (coexistence)))){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && (coexistence && (S1 == 0))){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1418,7 +1416,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((S1 == 0 && coexistence == 0) || ((S1 == 1) && (coexistence)))){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && (coexistence && (S1 == 0))){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -1466,6 +1464,10 @@ void freeArrays(){
 	}
 	free(eventList);
 	free(eventPaul);
+
+	if (interfaceThermo){
+		freeInterface();
+	}
 
 }
 /* --------------------------/
@@ -3613,20 +3615,13 @@ void saveTXT(){
 	else{
 		int* particleCluster;
 		if (clusterThermo){
-			clock_t t; 
-			t = clock(); 
-			
-			findClusters(particles, N, 3.4, &clusters, &numClusters, cellList, Nxcells);
+			findClusters(particles, N, 3.4, cellList, Nxcells);
 			particleCluster = malloc(N * sizeof(int));
 			for (int i = 0; i < numClusters; i++) {
 				for (int j = 0; j < clusters[i].size; j++) {
 					particleCluster[clusters[i].particles[j]->num] = i;
 				}
 			}
-			t = clock() - t; 
-			double time_taken = ((double)t)/CLOCKS_PER_SEC; // in seconds 
-
-			printf("fun() took %f seconds to execute \n", time_taken); 
 		}
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
@@ -3676,8 +3671,8 @@ void saveTXT(){
 			#endif
 		}
 		if (clusterThermo){
+			freeClusters();
 			free(particleCluster);
-			free(clusters);
 		}
 	}
 	fflush(fichier);

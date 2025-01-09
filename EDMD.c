@@ -58,7 +58,7 @@
 
 //Values if no load file
 int N = 500;
-double phi = 0.2;
+double phi = 0.32;
 double sizeratio = 0.478;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -75,7 +75,7 @@ double lastCollNum = 0;
 
 double phig = 0.11;
 double phil = 0.5;
-double dphi = 0.15;
+double dphi = 0.05;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -102,6 +102,7 @@ double dpRight = 0;
 double dpMid = 0;
 
 
+
 unsigned long int ncol = 0;
 unsigned long int ncross = 0;
 char fileName[350];
@@ -117,11 +118,13 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 1;
+const int coexistence = 0;
 
-const int interfaceThermo = 1;
+const int interfaceThermo = 0;
 
 const int clusterThermo = 1;
+const int killCluster = 0;
+double clusterCutoff = 3.4;
 
 const int strucThermo = 0;
 double qmax = 0.3;
@@ -129,11 +132,11 @@ double qmax = 0.3;
 const int critical = 0;
 const int snapshotCritical = 0;
 
-double tmax = 200;  
-double dtime = 1;
-double firstScreen = 0;
+double tmax = 405000;  
+double dtime = 10;
+double firstScreen = 10;
 double dtimeThermo = 100;
-double firstThermo = 10;
+double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -230,10 +233,11 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
-double deltaE = 51;
+double deltaE = 50;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.025;
+
 
 
 /*double deltaE = 0;
@@ -852,6 +856,9 @@ void initThermo(){
 		if (critical){
 			fprintf(thermo, "dense1 dense2 dilute1 dilute2 ");
 		}
+		if (clusterThermo){
+			fprintf(thermo, "largestCluster ");
+		}
 		fprintf(thermo, "\n");
 	}
 	if (interfaceThermo){
@@ -958,7 +965,7 @@ void particlesInit(){
 	}
 	else if (coexistence && S1){
 		optimizeGrowConstant();
-		vr /= 3;
+		
 		double da = 0.1;
 		particle* p;
 		int k = 0;
@@ -1403,7 +1410,7 @@ void eventListInit(){
 	
 	#if G != 1
 	
-	if (load == 0 && Hex == 0 && coexistenceOld == 0 && (coexistence && (S1 == 0))){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((coexistence && (S1 == 0)) || (coexistence == 0))){
 		if (firstScreen < 1/vr){
 			firstScreen = 1/vr + firstScreen;
 		}
@@ -1416,7 +1423,7 @@ void eventListInit(){
 	
 	
 	#endif
-	if (load == 0 && Hex == 0 && coexistenceOld == 0 && (coexistence && (S1 == 0))){
+	if (load == 0 && Hex == 0 && coexistenceOld == 0 && ((coexistence && (S1 == 0)) || (coexistence == 0))){
 		tmax += 1/vr;
 		addEventGrow(1/vr);
 		collisionEvent = &collisionEventGrow;
@@ -3615,7 +3622,7 @@ void saveTXT(){
 	else{
 		int* particleCluster;
 		if (clusterThermo){
-			findClusters(particles, N, 3.4, cellList, Nxcells);
+			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
 			particleCluster = malloc(N * sizeof(int));
 			for (int i = 0; i < numClusters; i++) {
 				for (int j = 0; j < clusters[i].size; j++) {
@@ -3782,6 +3789,16 @@ void saveThermo(){
 			countConditions(particles, N, Lx, Ly, count);
 			fprintf(thermo, "%d %d %d %d ", count[0], count[1], count[2], count[3]);
 		}
+		if (clusterThermo){
+			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
+			int n = clusters[0].size;
+			fprintf(thermo, "%d ", n);
+			freeClusters();
+			if ((n > killCluster) && (killCluster > 0)){
+				printf("\nNucleation detected!\nExiting...");
+				exit(3);
+			}
+		}
 		fprintf(thermo, "\n");
 	}
 	fflush(thermo);
@@ -3890,6 +3907,10 @@ void optimizeGrowConstant(){
 	}
 	else{
 		vr = baseGrow*pow(criticalPhi/phi, 30);
+	}
+	// Try to homogenize the system!
+	if (coexistence){
+		vr /= 10;
 	}
 }
 

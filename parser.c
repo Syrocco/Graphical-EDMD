@@ -144,7 +144,10 @@ void jump_to_frame(int i,Dump* dump){
 		exit(1);
 	}
 	fseek(dump->file,dump->framepos[i],SEEK_SET);
-	fread(dump->framebuff,sizeof(char),dump->framesize,dump->file);
+	int num = fread(dump->framebuff,sizeof(char),dump->framesize,dump->file);
+	if (num == 0){
+		printf("fread error");
+	}
 	dump->framebuff[dump->framesize]='\0';
 	dump->curframe=i;
 	find_sections(dump);

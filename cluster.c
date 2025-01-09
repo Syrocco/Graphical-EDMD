@@ -15,7 +15,7 @@ cluster* clusters;
 
 bool areParticlesClose(particle* p1, particle* p2, double r_c);
 void addParticleToCluster(cluster* cl, particle* p);
-void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells);
+void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, int Nycells);
 void freeClusters();
 int compareClusters(const void* a, const void* b);
 void sortClustersBySize();
@@ -53,7 +53,8 @@ void sortClustersBySize(){
     qsort(clusters, numClusters, sizeof(cluster), compareClusters);
 }
 
-void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells) {
+
+void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, __attribute__((unused)) int Nycells) {
     bool* visited = calloc(N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;

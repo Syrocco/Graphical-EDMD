@@ -110,6 +110,7 @@ char thermoName[350];
 char interfaceName[350];
 char buffer[255];
 char strucName[350];
+char clusterName[350];
 FILE* file;
 
 
@@ -124,6 +125,7 @@ const int interfaceThermo = 0;
 
 const int clusterThermo = 1;
 const int killCluster = 0;
+const int dumpCluster = 1;
 double clusterCutoff = 3.4;
 
 const int strucThermo = 0;
@@ -132,10 +134,10 @@ double qmax = 0.3;
 const int critical = 0;
 const int snapshotCritical = 0;
 
-double tmax = 405000;  
-double dtime = 10;
+double tmax = 4050000;  
+double dtime = 1000;
 double firstScreen = 10;
-double dtimeThermo = 100;
+double dtimeThermo = 300;
 double firstThermo = 1;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -298,6 +300,7 @@ FILE *fichier;
 FILE *thermo;
 FILE *interface;
 FILE *strucFile;
+FILE *clusterFile;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -428,6 +431,9 @@ void* computeEvolution(void *arg){
 			}
 			if (strucThermo){
 				fclose(strucFile);
+			}
+			if (dumpCluster && clusterThermo){
+				fclose(clusterFile);
 			}
 		}
 		#else
@@ -873,6 +879,9 @@ void initThermo(){
 	if (strucThermo){
 		strucFile = fopen(strucName, "w");
 		initStructureFactor(qmax, Lx, Ly, N, strucFile);
+	}
+	if (dumpCluster && clusterThermo){
+		clusterFile = fopen(clusterName, "w");
 	}
 }
 
@@ -3793,26 +3802,34 @@ void saveThermo(){
 			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
 			int n = clusters[0].size;
 			fprintf(thermo, "%d ", n);
-			freeClusters();
+			if (dumpCluster == 0){
+				freeClusters();
+			}
 			if ((n > killCluster) && (killCluster > 0)){
 				printf("\nNucleation detected!\nExiting...");
 				exit(3);
 			}
 		}
 		fprintf(thermo, "\n");
-	}
-	fflush(thermo);
-	if (liquidliquid && interfaceThermo){
-		computeInterfacesPos(particles, 0.1);
-		fflush(interface);
-	}
-	else if (interfaceThermo){
-		saveDensityCoarse(particles);
-		fflush(interface);
-	}
-	if (strucThermo){
-		saveStructureFactor(particles);
-		fflush(strucFile);
+	
+		fflush(thermo);
+		if (liquidliquid && interfaceThermo){
+			computeInterfacesPos(particles, 0.1);
+			fflush(interface);
+		}
+		else if (interfaceThermo){
+			saveDensityCoarse(particles);
+			fflush(interface);
+		}
+		if (strucThermo){
+			saveStructureFactor(particles);
+			fflush(strucFile);
+		}
+		if (dumpCluster && clusterThermo){
+			saveHistrogramCluster(clusterFile);
+			freeClusters();
+			fflush(clusterFile);
+		}
 	}
 
 }
@@ -4104,34 +4121,43 @@ void physicalQ(){
 }
 
 void customName(){
-	
 	#if defined(_WIN32)
 	_mkdir("dump/");
 	#else 
-	mkdir("dump/", 0777);
+    mkdir("dump/", 0777);
 	#endif
+
 	int v = 1;
 	#if THREE_D
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
-	while (access(fileName, F_OK) == 0){
-		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
-	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N, v);
+		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N);
 	#else
-	sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	while (access(fileName, F_OK) == 0){
-		v += 1;
-			sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.dump", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	}
-    snprintf(thermoName, sizeof(fileName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.thermo", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	if (interfaceThermo){
-		snprintf(interfaceName, sizeof(interfaceName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.interface", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	}
-	if (strucThermo){
-		snprintf(strucName, sizeof(strucName), "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_%d.struc", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N, v);
-	}
+		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N);
 	#endif
+
+	char baseFileName[256];
+	strcpy(baseFileName, fileName);
+
+	while (1) {
+		sprintf(fileName, "%s%d.dump", baseFileName, v);
+		if (access(fileName, F_OK) != 0) {
+			break;
+		}
+		v += 1;
+	}
+
+	snprintf(thermoName, sizeof(thermoName), "%s%d.thermo", baseFileName, v);
+
+	if (interfaceThermo) {
+		snprintf(interfaceName, sizeof(interfaceName), "%s%d.interface", baseFileName, v);
+	}
+
+	if (strucThermo) {
+		snprintf(strucName, sizeof(strucName), "%s%d.struc", baseFileName, v);
+	}
+
+	if (dumpCluster && clusterThermo) {
+		snprintf(clusterName, sizeof(clusterName), "%s%d.cluster", baseFileName, v);
+	}
 }
 
 int mygetline(char* str, FILE* f){

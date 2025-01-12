@@ -54,11 +54,12 @@ void sortClustersBySize(){
 }
 
 
+
 void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, __attribute__((unused)) int Nycells) {
     bool* visited = calloc(N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;
-
+    int mul = floor(r_c/2) + 1;
     for (int i = 0; i < N; i++) {
         if (!visited[i]) {
             cluster cl;
@@ -75,21 +76,18 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
                 #if THREE_D
                 int Z = p1->cell[2];
                 #endif
-
-                for (int j = -1; j <= 1; j++){
-                    for (int k = -1; k <= 1; k++){
+                for (int m = -mul; m <= mul; m++){
+                    for (int k = -mul; k <= mul; k++){
                         #if THREE_D
-                        for (int l = -1; l <= 1; l++){
-                            particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + j) * Nxcells + PBCcellX(X + l)];
+                        for (int l = -mul; l <= mul; l++){
+                            particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + m) * Nxcells + PBCcellX(X + l)];
                         #else
-                            particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                            particle* p2 = cellList[PBCcellY(Y + m) * Nxcells + PBCcellX(X + k)];
                         #endif
                         while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-                            if (p1->num != p2->num){
-                                if (!visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
-                                    addParticleToCluster(&cl, p2);
-                                    visited[p2->num] = true;
-                                }
+                            if (!visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
+                                addParticleToCluster(&cl, p2);
+                                visited[p2->num] = true;
                             }
                             p2 = p2->nxt;
                         }
@@ -102,11 +100,46 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
             clusters = realloc(clusters, (numClusters + 1) * sizeof(cluster));
             clusters[numClusters] = cl;
             numClusters++;
+            
         }
     }
     sortClustersBySize();
     free(visited);
 }
+
+/*
+void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, __attribute__((unused)) int Nycells)   {
+    bool* visited = calloc(N, sizeof(bool));
+    numClusters = 0;
+    clusters = NULL;
+
+    for (int i = 0; i < N; i++) {
+        if (!visited[i]) {
+            cluster cl;
+            cl.size = 0;
+            cl.capacity = 10;
+            cl.particles = malloc(cl.capacity * sizeof(particle*));
+            addParticleToCluster(&cl, &particles[i]);
+            visited[i] = true;
+
+            for (int j = 0; j < cl.size; j++) {
+                particle* p1 = cl.particles[j];
+                for (int k = 0; k < N; k++) {
+                    if (!visited[k] && areParticlesClose(p1, &particles[k], r_c)) {
+                        addParticleToCluster(&cl, &particles[k]);
+                        visited[k] = true;
+                    }
+                }
+            }
+
+            clusters = realloc(clusters, (numClusters + 1) * sizeof(cluster));
+            (clusters)[numClusters] = cl;
+            numClusters++;
+        }
+    }
+    sortClustersBySize();
+    free(visited);
+}*/
 
 void freeClusters() {
     for (int i = 0; i < numClusters; i++) {
@@ -115,3 +148,12 @@ void freeClusters() {
     free(clusters);
 }
 
+
+void saveHistrogramCluster(FILE* fileout){
+    for (int i = 0; i < numClusters; i++) {
+        if (clusters[i].size < 10){
+            return;
+        }
+        fprintf(fileout, "%d ", clusters[i].size);
+    }
+}

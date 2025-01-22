@@ -123,10 +123,17 @@ const int coexistence = 0;
 
 const int interfaceThermo = 0;
 
+
 const int clusterThermo = 1;
+const double clusterCutoff = 3.55;
+const int dumpCluster = 0;
 const int killCluster = 0;
-const int dumpCluster = 1;
-double clusterCutoff = 3.4;
+
+const int umbrellaSampling = 1;
+double firstUmbrellaSamping = 400;
+double dtimeUmbrella = 30;
+double wantedSizeUmbrella = 100;
+double kUmbrella = 0.05;
 
 const int strucThermo = 0;
 double qmax = 0.3;
@@ -135,10 +142,10 @@ const int critical = 0;
 const int snapshotCritical = 0;
 
 double tmax = 4050000;  
-double dtime = 1000;
-double firstScreen = 10;
-double dtimeThermo = 300;
-double firstThermo = 1;
+double dtime = 400;
+double firstScreen = 400;
+double dtimeThermo = 200;
+double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -235,17 +242,20 @@ double sig = 1.6;
 double U = -1.5;
 
 //Value of the energy input at collision
+
 double deltaE = 50;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.025;
+double randomInjection = 1;
 
 
-
-/*double deltaE = 0;
-double beta = 10;
-double taur = 3;
-double additionalEnergy = 0.09;*/
+/*
+double deltaE = 100;
+double beta = 20;
+double taur = 6;
+double additionalEnergy = 0.05;
+*/
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -261,7 +271,7 @@ double res = 1;
 
 //parameter if noise or damping
 double gamm = 0.15;
-double T = 1.18;
+double T = 0.1;
 double expE = 1;
 //time between kicks
 double dtnoise = 0.2;
@@ -311,6 +321,9 @@ node** eventList;
 node** eventPaul;
 //variable containing the nextEvent
 node* nextEvent;
+double* umbrellaPos;
+double* umbrellaVel;
+double* umbrellaDtimeCol;
 
 void* computeEvolution(void *arg){
 	
@@ -408,6 +421,9 @@ void* computeEvolution(void *arg){
 					break;
 				case GROWSTOP:
 					stopGrow();			
+					break;
+				case UMBRELLA:
+					doUmbrella();
 					break;
 			}
 		#if G
@@ -860,7 +876,7 @@ void initThermo(){
 			fprintf(thermo, "ECOM ");
 		}
 		if (critical){
-			fprintf(thermo, "dense1 dense2 dilute1 dilute2 ");
+			fprintf(thermo, "dense1 dense2 dilute1 dilute2 Edense1 Edense2 Edilute1 Edilute2 ");
 		}
 		if (clusterThermo){
 			fprintf(thermo, "largestCluster ");
@@ -1209,10 +1225,10 @@ void particlesInit(){
 			p = particles + i;
 			if (addCircularWall){
 				do{
-					p->x = drand(0.1, Lx - 0.1);
-					p->y = drand(0.1, Ly - 0.1);
+					p->x = drand(1, Lx - 1);
+					p->y = drand(1, Ly - 1);
 				}
-				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > 0.7*halfLx*halfLx); //0.2 because so cool effect !!
+				while ((p->x - halfLx)*(p->x - halfLx) + (p->y - halfLy)*(p->y - halfLy) > halfLx*halfLx); 
 			}
 			else{
 				if (coexistence){
@@ -1426,6 +1442,9 @@ void eventListInit(){
 		if (firstThermo < 1/vr){
 			firstThermo = 1/vr + firstThermo;
 		}
+		if (firstUmbrellaSamping < 1/vr){
+			firstUmbrellaSamping = 1/vr + firstUmbrellaSamping;
+		}
 	}
 	
 	addEventThermo(firstThermo + 0.000000001);
@@ -1454,6 +1473,8 @@ void eventListInit(){
 		addEventNoise(dtnoise);
 	if (updating)
 		addEventUpdate(updateTime);
+	if (umbrellaSampling)
+		addEventUmbrella(firstUmbrellaSamping);
 
 	for (int i = 0; i < N; i++){
 		eventList[i]->i = i;
@@ -2831,8 +2852,8 @@ void doTheWallNormal(){
 ----------------------------------- */
 void doTheCollisionGrow(){
 
-	double delta = 0.1;
-	double res = 0.75;
+	double delta = 0.1*0;
+	double res = 0.75*0 + 1;
 
 	int i = nextEvent->i;
 	int j = nextEvent->j;
@@ -2999,9 +3020,13 @@ void doTheCollisionNormal(){
 		double distSquared = DIST2(pi->rad, pj->rad);
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
+		
 		double deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		if (randomInjection){
+			deltaETotal *= drand(0.9, 1./0.9);
+		}
 
-		double funkyFactor2 = (b - sqrt(res*res*b*b + 2*distSquared*deltaETotal*(pi->m + pj->m)/(pi->m*pj->m)))/(2*distSquared); //lacking mass xDeltaE
+		double funkyFactor2 = (b - sqrt(res*res*b*b + 2*distSquared*deltaETotal*(pi->m + pj->m)/(pi->m*pj->m)))/(2*distSquared);
 
 		double collTerm = pi->m*pj->m*funkyFactor2;
 		collTermX += collTerm*dx*dx;
@@ -3314,6 +3339,94 @@ void addEventThermo(double tscreen){
 	addEventToQueue(toAdd);
 }
 
+void addEventUmbrella(double tscreen){
+	node* toAdd;
+
+	toAdd = eventList[2*N + 4];
+	toAdd->type = UMBRELLA;
+	toAdd->t = tscreen;
+	toAdd->j = 0; //whatever.
+
+	addEventToQueue(toAdd);
+}
+
+void doUmbrella(){
+	//keep its value accross calls
+	static int n = 0;
+
+	for (int i = 0; i < N; i++){
+		freeFly(particles + i);
+	}
+
+	findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
+	int m = clusters[0].size;
+	freeClusters();
+	
+	if (fabs(t - firstUmbrellaSamping) < 0.0001){
+		n = m;
+		umbrellaPos = calloc((unsigned int)2*N, sizeof(double));
+		umbrellaVel = calloc((unsigned int)2*N, sizeof(double));
+		if (addEnergy > 0)
+			umbrellaDtimeCol = calloc((unsigned int)N, sizeof(double));
+		for (int i = 0; i < N; i++){
+			umbrellaPos[i] = particles[i].x;
+			umbrellaPos[N + i] = particles[i].y;
+			umbrellaVel[i] = particles[i].vx;
+			umbrellaVel[N + i] = particles[i].vy;
+			if (addEnergy > 0)
+				umbrellaDtimeCol[i] = t - particles[i].lastColl;
+		}
+	}
+	else{
+		double proba = exp(kUmbrella*(pow(n - wantedSizeUmbrella, 2) - pow(m - wantedSizeUmbrella, 2)));
+		if (proba >- 0.000000000001){
+			printf("proba: %lf\n", proba);
+			printf("old: %d, new: %d \n", n, m);
+		}
+		if (proba > drand(0, 1)){
+			n = m;
+			for (int i = 0; i < N; i++){
+				umbrellaPos[i] = particles[i].x;
+				umbrellaPos[N + i] = particles[i].y;
+				umbrellaVel[i] = particles[i].vx;
+				umbrellaVel[N + i] = particles[i].vy;
+				if (addEnergy > 0)
+					umbrellaDtimeCol[i] = t - particles[i].lastColl;
+			}
+		}
+		else{
+			for (int i = 0; i < N; i++){
+				particles[i].x = umbrellaPos[i];
+				particles[i].y = umbrellaPos[N + i];
+				particles[i].vx = umbrellaVel[i];
+				particles[i].vy = umbrellaVel[N + i];
+				if (addEnergy > 0)
+					particles[i].lastColl = t - umbrellaDtimeCol[i];
+			}
+
+			#if THREE_D
+			memset(cellList, 0, ssizeof(particle**)*Nxcells*Nycells*Nzcells);
+			#else
+			memset(cellList, 0, sizeof(particle**)*Nxcells*Nycells);
+			#endif
+
+			for (int i = 0; i < N; i++){
+				particles[i].nxt = NULL;
+				particles[i].prv = NULL;
+				addToCell(i);
+			}
+			for (int j = 0; j < N; j++){
+				removeEventFromQueue(eventList[j]);
+				crossingEvent(j);
+
+				removeEventFromQueue(eventList[N + j]);
+				collisionEvent(j);
+			}
+		}
+	
+	}
+	addEventUmbrella(t + dtimeUmbrella);
+}
 /* ---------------------------------------------
 	Updates the position of the particles
 	at actual time and take a screenshot of
@@ -3795,8 +3908,9 @@ void saveThermo(){
 		}
 		if (critical){
 			int count[4];
-			countConditions(particles, N, Lx, Ly, count);
-			fprintf(thermo, "%d %d %d %d ", count[0], count[1], count[2], count[3]);
+			double energyCount[4];
+			countConditions(particles, N, Lx, Ly, count, energyCount);
+			fprintf(thermo, "%d %d %d %d %lf %lf %lf %lf", count[0], count[1], count[2], count[3], energyCount[0], energyCount[1], energyCount[2], energyCount[3]);
 		}
 		if (clusterThermo){
 			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
@@ -3926,7 +4040,7 @@ void optimizeGrowConstant(){
 		vr = baseGrow*pow(criticalPhi/phi, 30);
 	}
 	// Try to homogenize the system!
-	if (coexistence){
+	if (coexistence || clusterThermo){
 		vr /= 10;
 	}
 }

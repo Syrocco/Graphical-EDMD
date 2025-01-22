@@ -7,7 +7,7 @@
 #endif
 
 double getCOMx(particle* particles, double N, double Lx);
-void countConditions(particle* particles, int N, double Lx, double Ly, int* counts);
+void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts);
 
 double getCOMx(particle* particles, double N, double Lx){
     double* xi = (double*)malloc(N * sizeof(double));
@@ -39,15 +39,17 @@ double getCOMx(particle* particles, double N, double Lx){
     return Lx/(2*M_PI)*(atan2(-mean_zi, -mean_xi) + M_PI);
 }
 
-void countConditions(particle* particles, int N, double Lx, double Ly, int* counts){
+void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts){
 
     double COMx = getCOMx(particles, N, Lx);
 
     for (int i = 0; i < 4; ++i) {
         counts[i] = 0;
+        energyCounts[i] = 0;
     }
-
+    particle* p;
     for (int i = 0; i < N; ++i) {
+        p = particles + i;
         double X = particles[i].x + (Lx / 4 - COMx);
         if (X < 0) {
             X += Lx;
@@ -57,20 +59,27 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
         }
         int firstx = ((X > (Lx/6)) && (X < (2*Lx/6)));
         int seconx = ((X > (4*Lx/6)) && (X < (5*Lx/6)));
-        int firsty = (particles[i].y < (Ly/2));
-        int secony = (particles[i].y > (Ly/2));
+        int firsty = (p->y < (Ly/2));
+        int secony = (p->y > (Ly/2));
 
         if (firstx && firsty) {
             counts[0]++;
+            energyCounts[0] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
         }
         if (firstx && secony) {
             counts[1]++;
+            energyCounts[1] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
         }
         if (seconx && firsty) {
             counts[2]++;
+            energyCounts[2] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
         }
         if (seconx && secony) {
             counts[3]++;
+            energyCounts[3] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
         }
+    }
+    for (int i = 0; i < 4; i++){
+        energyCounts[i] /= counts[i];
     }
 }

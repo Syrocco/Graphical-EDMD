@@ -19,6 +19,7 @@ enum event{
 	UPDATE,
 	OUT, IN,
 	GROWSTOP,
+	UMBRELLA,
 };
 
 typedef struct arguments arguments;
@@ -117,6 +118,8 @@ void addNoise();
 void addEventUpdate(double tupdate);
 void updateT();
 
+void addEventUmbrella(double tscreen);
+void doUmbrella();
 
 void freeFlyGrow(particle* p);
 void freeFlyNormal(particle* p);

@@ -11,8 +11,8 @@
 #define NUM_THREADS 11
 int nSym = 4; 
 
-double qx[qN] = {0};
-float structFactor[qN][qN] = {0};
+double qxG[qN] = {0};
+float structFactorGraphics[qN][qN] = {0};
 bool structFactorActivated = 0;
 position* positions;
 pthread_t threads[NUM_THREADS];
@@ -777,7 +777,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			//printf("time took NORMALIZE: %lf\n", time_spent);
 
 			//begin = clock();
-			UpdateTexture(texture, structFactor);
+			UpdateTexture(texture, structFactorGraphics);
 			//end = clock();
 			//time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
 			//printf("time took UPDATE: %lf\n", time_spent);
@@ -855,7 +855,7 @@ Color colorSelect(double value, Color* colorArray){
 	return colorArray[(int)(value*color_size)];
 }
 
-void* computeStructureFactor(void* arg){
+void* computeStructureFactorGraphic(void* arg){
 	threadArg* threadArgument = (threadArg*)arg;
     int start = threadArgument->start;
     int end = threadArgument->end;
@@ -870,16 +870,16 @@ void* computeStructureFactor(void* arg){
 			for (int n = 0; n < N - (int)(N*fractionSmallN); n++)
 			{
 				p = positions + n;
-				float qr = qx[i]*p->x + qx[j]*p->y;
+				float qr = qxG[i]*p->x + qxG[j]*p->y;
 
 				re += cos(qr);
 				im += sin(qr);
 
 			}
-			structFactor[i][j] = (re*re + im*im) / N;
-			structFactor[i][j] = log(structFactor[i][j]*structFactor[i][j] + 1);
+			structFactorGraphics[i][j] = (re*re + im*im) / N;
+			structFactorGraphics[i][j] = log(structFactorGraphics[i][j]*structFactorGraphics[i][j] + 1);
 			if ((i <= qN/2 + 3) && (i >= qN/2 - 3) && (j >= qN/2 - 3) && (j <= qN/2 + 3)){
-				structFactor[i][j] = 0;
+				structFactorGraphics[i][j] = 0;
 			}
 		}
 	}
@@ -891,15 +891,15 @@ void normalizeStruct(){
 	float max = 0;
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
-			if (structFactor[i][j] > max){
-				max = structFactor[i][j];
+			if (structFactorGraphics[i][j] > max){
+				max = structFactorGraphics[i][j];
 			}
 		}
 	}
 
 	for (int i = 0; i < qN; i++){
 		for (int j = 0; j < qN; j++){
-			structFactor[i][j] = structFactor[i][j]/max;
+			structFactorGraphics[i][j] = structFactorGraphics[i][j]/max;
 		}
 	}
 }
@@ -931,7 +931,7 @@ bool finishedStructComputation(){
 void asyncStructFactor(){
 	for (int i = 0; i < NUM_THREADS; i++){
 		threadArgs[i].resting = 0;
-		pthread_create(&threads[i], NULL, computeStructureFactor, (void*)&threadArgs[i]);
+		pthread_create(&threads[i], NULL, computeStructureFactorGraphic, (void*)&threadArgs[i]);
 	}
 }
 
@@ -1036,7 +1036,7 @@ window graphicalInit(){
     cam.zoom = 1;
 
 	for (int i = 0; i < qN; i++){
-		qx[i] = -10 + 20.0*i/(double)qN;
+		qxG[i] = -10 + 20.0*i/(double)qN;
 	}
 	
 	threadPoolInit();
@@ -1046,7 +1046,7 @@ window graphicalInit(){
 	SetTargetFPS(144);
 	image = GenImageColor(qN, qN, BLANK);
 	UnloadImageColors(image.data);
-	image.data = structFactor;
+	image.data = structFactorGraphics;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);
 	circleTexture = LoadTexture("tex.png");

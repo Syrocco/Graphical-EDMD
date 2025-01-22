@@ -114,7 +114,7 @@ double colorCollision(particle* p);
 double colorRadius(particle* p);
 double colorBOOP(particle* p1);
 double colorCharge(particle* p);
-void* computeStructureFactor(void* arg);
+void* computeStructureFactorGraphic(void* arg);
 void normalizeStruct();
 void awaitStructFactor();
 void asyncStructFactor();

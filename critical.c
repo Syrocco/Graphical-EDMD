@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
 #endif
 
 double getCOMx(particle* particles, double N, double Lx);
-void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts);
+void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts, double dfrac);
 
 double getCOMx(particle* particles, double N, double Lx){
     double* xi = (double*)malloc(N * sizeof(double));
@@ -39,7 +40,7 @@ double getCOMx(particle* particles, double N, double Lx){
     return Lx/(2*M_PI)*(atan2(-mean_zi, -mean_xi) + M_PI);
 }
 
-void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts){
+void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts, double dfrac){
 
     double COMx = getCOMx(particles, N, Lx);
 
@@ -57,8 +58,12 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
         else if (X > Lx){
             X -= Lx;
         }
-        int firstx = ((X > (Lx/6)) && (X < (2*Lx/6)));
-        int seconx = ((X > (4*Lx/6)) && (X < (5*Lx/6)));
+
+        double left = Lx/4;
+        double right = 3*Lx/4;
+
+        int firstx = ( (X > (left - dfrac)) && (X < (left + dfrac)) );
+        int seconx = ( (X > (right - dfrac)) && (X < (right + dfrac)) );
         int firsty = (p->y < (Ly/2));
         int secony = (p->y > (Ly/2));
 

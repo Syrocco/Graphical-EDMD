@@ -119,17 +119,17 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 0;
+const int coexistence = 2;
 
 const int interfaceThermo = 0;
 
 
-const int clusterThermo = 1;
+const int clusterThermo = 0;;
 const double clusterCutoff = 3.55;
 const int dumpCluster = 0;
 const int killCluster = 0;
 
-const int umbrellaSampling = 1;
+const int umbrellaSampling = 0;
 double firstUmbrellaSamping = 400;
 double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
@@ -138,8 +138,9 @@ double kUmbrella = 0.05;
 const int strucThermo = 0;
 double qmax = 0.3;
 
-const int critical = 0;
-const int snapshotCritical = 0;
+const int critical = 1;
+const int snapshotCritical = 1;
+double fracCritical = -1./6.;
 
 double tmax = 4050000;  
 double dtime = 400;
@@ -247,7 +248,7 @@ double deltaE = 50;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.025;
-double randomInjection = 1;
+const double randomInjection = 0;
 
 
 /*
@@ -830,7 +831,9 @@ void constantInit(int argc, char *argv[]){
 		}
 		
 	}
-
+	if ((critical > 0) && (fracCritical < 0)){
+		fracCritical = 2*aspectRatio;
+	}
 	
 
 	if (nextScreen == -1)
@@ -3767,13 +3770,17 @@ void saveTXT(){
 			if (snapshotCritical){
 				X = particles[i].x + (Lx / 4 - shift);
 				if (X < 0) {
-           		X += Lx;
+           			X += Lx;
 				}
 				else if (X > Lx){
 					X -= Lx;
 				}
-				int firstx = ((X > (Lx/6)) && (X < (2*Lx/6)));
-				int seconx = ((X > (4*Lx/6)) && (X < (5*Lx/6)));
+				double dfrac = Lx*fracCritical/4.;
+				double left = Lx/4;
+				double right = 3*Lx/4;
+				
+				int firstx = ( (X > (left - dfrac)) && (X < (left + dfrac)) );
+				int seconx = ( (X > (right - dfrac)) && (X < (right + dfrac)) );
 				int firsty = (particles[i].y < (Ly/2));
 				int secony = (particles[i].y > (Ly/2));
 				if (firstx && firsty) {
@@ -3909,7 +3916,8 @@ void saveThermo(){
 		if (critical){
 			int count[4];
 			double energyCount[4];
-			countConditions(particles, N, Lx, Ly, count, energyCount);
+			double dfrac = Lx*fracCritical/4.;
+			countConditions(particles, N, Lx, Ly, count, energyCount, dfrac);
 			fprintf(thermo, "%d %d %d %d %lf %lf %lf %lf", count[0], count[1], count[2], count[3], energyCount[0], energyCount[1], energyCount[2], energyCount[3]);
 		}
 		if (clusterThermo){

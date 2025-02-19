@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 void saveDensityCoarse(particle *particles);
-void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid);
+void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid, int temperature);
 void computeLocalConcentration(particle *particles);
 void freeInterface();
 
@@ -13,6 +13,7 @@ void freeInterface();
 
 double** d;
 double** dbis;
+double** tp;
 int Nx;
 int Ny;
 double dx;
@@ -22,7 +23,7 @@ double Lx;
 double Ly;
 FILE* interface;
 
-void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid){
+void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid, int temperature){
     Nx = Lx / Dx; 
     Ny = Ly / Dy;
     dx = Lx/Nx;
@@ -31,6 +32,9 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
     Ly = ly;
     N = n;
     d = malloc(Nx * sizeof(double*));
+    if (temperature){
+        tp = malloc(Nx * sizeof(double*));
+    }
     if (liquidliquid){
        dbis = malloc(Nx * sizeof(double*)); 
     }
@@ -40,6 +44,9 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
         d[i] = calloc(Ny, sizeof(double));
         if (liquidliquid){
             dbis[i] = calloc(Ny, sizeof(double));
+        }
+        if (temperature){
+            tp[i] = calloc(Ny, sizeof(double));
         }
     }
     for (int i = 0; i < Nx; i++) {
@@ -57,10 +64,12 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
         fprintf(interface, "\n");
     }
 
-    for (int i = 0; i < Ny; i++){
-        fprintf(interface, "%lf ", dy*(i+0.5));
+    if (temperature == 0){
+        for (int i = 0; i < Ny; i++){
+            fprintf(interface, "%lf ", dy*(i+0.5));
+        }
+        fprintf(interface, "\n");
     }
-    fprintf(interface, "\n");
 }
 
 
@@ -71,6 +80,9 @@ void computeLocalConcentration(particle *particles){
             d[i][j] = 0;
             if (dbis != NULL)
                dbis[i][j] = 0;
+            if (tp != NULL){
+                tp[i][j] = 0;
+            }
         }
     }
     
@@ -86,15 +98,38 @@ void computeLocalConcentration(particle *particles){
                 dbis[box_x][box_y] += M_PI/(dx*dy);
             }
         }
+        if (tp != NULL){
+            tp[box_x][box_y] += 0.5*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+        }
     }
 }
 
 void saveDensityCoarse(particle *particles){
     computeLocalConcentration(particles);
-    
-    for (int i = 0; i < Nx; i++) {
-        for (int j = 0; j < Ny; j++) {
-            fprintf(interface, "%lf ", d[i][j]);
+    if (tp == NULL){
+        for (int i = 0; i < Nx; i++) {
+            for (int j = 0; j < Ny; j++) {
+                fprintf(interface, "%lf ", d[i][j]);
+            }
+            fprintf(interface, "\n");
+        }
+    }
+    else{
+        for (int i = 0; i < Nx; i++) {
+            double sss = 0;
+            for (int j = 0; j < Ny; j++) {
+                sss += d[i][j];
+            }
+            fprintf(interface, "%lf ", sss/Ny);
+        }
+        fprintf(interface, "\n");
+
+        for (int i = 0; i < Nx; i++) {
+            double sss = 0;
+            for (int j = 0; j < Ny; j++) {
+                sss += tp[i][j]/(d[i][j]/(M_PI/(dx*dy)));
+            }
+            fprintf(interface, "%lf ", sss/Ny);
         }
         fprintf(interface, "\n");
     }

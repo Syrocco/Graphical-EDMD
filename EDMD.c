@@ -58,7 +58,7 @@
 
 //Values if no load file
 int N = 500;
-double phi = 0.32;
+double phi = 0.3168;
 double sizeratio = 0.478;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -75,7 +75,7 @@ double lastCollNum = 0;
 
 double phig = 0.11;
 double phil = 0.5;
-double dphi = 0.05;
+double dphi = 0.2;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -119,10 +119,10 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 2;
+const int coexistence = 0;
 
-const int interfaceThermo = 0;
-
+const int interfaceThermo = 1;
+const int interfaceThermoTemp = 0;
 
 const int clusterThermo = 0;;
 const double clusterCutoff = 3.55;
@@ -135,17 +135,17 @@ double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
-const int strucThermo = 0;
-double qmax = 0.3;
+const int strucThermo = 1;
+double qmax = 0.12;
 
-const int critical = 1;
-const int snapshotCritical = 1;
-double fracCritical = -1./6.;
+const int critical = 0;
+const int snapshotCritical = 0;
+double fracCritical = 1./6.;
 
 double tmax = 4050000;  
 double dtime = 400;
-double firstScreen = 400;
-double dtimeThermo = 200;
+double firstScreen = 0.01;
+double dtimeThermo = 2;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -182,7 +182,7 @@ const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 1;
+const int damping = 0;
 const int addDelta = 0;
 const int addEnergy = 1;
 const int addDoubleDelta = 0;
@@ -239,8 +239,8 @@ double vo = 3.5;
 double ao = 1.5;
 
 //values for square potential model
-double sig = 1.6;
-double U = -1.5;
+double sig = 1.375;
+double U = -2;
 
 //Value of the energy input at collision
 
@@ -268,14 +268,15 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.9;
 
 //parameter if noise or damping
-double gamm = 0.15;
-double T = 0.1;
+double gamm = 1;
+//double gamm = 0.15;
+double T = 1;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.2;
+double dtnoise = 0.1;
 double T2 = 0.5;
 
 
@@ -888,16 +889,24 @@ void initThermo(){
 	}
 	if (interfaceThermo){
 		interface = fopen(interfaceName, "w");
-		if (liquidliquid == 0){
-			initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid);
+		if (interfaceThermoTemp == 0){
+			if (liquidliquid == 0){
+				initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid, 0);
+			}
+			else{
+				initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid, 0);
+			}
 		}
 		else{
-			initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid);
+			initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid, 1);
 		}
 	}
 	if (strucThermo){
 		strucFile = fopen(strucName, "w");
-		initStructureFactor(qmax, Lx, Ly, N, strucFile);
+		if (strucThermo == 1)
+			initStructureFactor(qmax, Lx, Ly, N, strucFile, 0);
+		else
+			initStructureFactor(qmax, Lx, Ly, N, strucFile, 1);
 	}
 	if (dumpCluster && clusterThermo){
 		clusterFile = fopen(clusterName, "w");
@@ -3367,10 +3376,10 @@ void doUmbrella(){
 	
 	if (fabs(t - firstUmbrellaSamping) < 0.0001){
 		n = m;
-		umbrellaPos = calloc((unsigned int)2*N, sizeof(double));
-		umbrellaVel = calloc((unsigned int)2*N, sizeof(double));
+		umbrellaPos = calloc(2*N, sizeof(double));
+		umbrellaVel = calloc(2*N, sizeof(double));
 		if (addEnergy > 0)
-			umbrellaDtimeCol = calloc((unsigned int)N, sizeof(double));
+			umbrellaDtimeCol = calloc(N, sizeof(double));
 		for (int i = 0; i < N; i++){
 			umbrellaPos[i] = particles[i].x;
 			umbrellaPos[N + i] = particles[i].y;
@@ -3944,7 +3953,11 @@ void saveThermo(){
 			fflush(interface);
 		}
 		if (strucThermo){
+			clock_t start_time = clock();
 			saveStructureFactor(particles);
+			clock_t end_time = clock();
+			double time_spent = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+			printf("Time taken to execute saveStructureFactor: %f seconds\n", time_spent);
 			fflush(strucFile);
 		}
 		if (dumpCluster && clusterThermo){

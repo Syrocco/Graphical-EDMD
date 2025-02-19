@@ -109,8 +109,8 @@ void findClustersOld(particle* particles, int N, double r_c, particle** cellList
 }
 
 void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, __attribute__((unused)) int Nycells) {
-    bool* visited = calloc(N, sizeof(bool));
-    bool* liquidlike = calloc(N, sizeof(bool));
+    bool* visited = calloc((unsigned int)N, sizeof(bool));
+    bool* liquidlike = calloc((unsigned int)N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;
     int mul = floor(r_c/2) + 1;

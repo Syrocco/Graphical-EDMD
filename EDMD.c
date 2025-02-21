@@ -75,7 +75,7 @@ double lastCollNum = 0;
 
 double phig = 0.11;
 double phil = 0.5;
-double dphi = 0.1;
+double dphi = -0.15;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -119,7 +119,7 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 2;
+const int coexistence = 0;
 
 const int interfaceThermo = 0;
 const int interfaceThermoTemp = 0;
@@ -3824,7 +3824,7 @@ void saveTXT(){
 			}
 
 			#if THREE_D
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, type);
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, X, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, type);
 			#else
 			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, type);
 			#endif

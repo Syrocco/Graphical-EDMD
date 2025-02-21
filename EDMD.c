@@ -75,7 +75,7 @@ double lastCollNum = 0;
 
 double phig = 0.11;
 double phil = 0.5;
-double dphi = 0.2;
+double dphi = 0.1;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -119,12 +119,12 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 0;
+const int coexistence = 2;
 
-const int interfaceThermo = 1;
+const int interfaceThermo = 0;
 const int interfaceThermoTemp = 0;
 
-const int clusterThermo = 0;;
+const int clusterThermo = 0;
 const double clusterCutoff = 3.55;
 const int dumpCluster = 0;
 const int killCluster = 0;
@@ -135,17 +135,17 @@ double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
-const int strucThermo = 1;
-double qmax = 0.12;
+const int strucThermo = 0;
+double qmax = 0.05;
 
-const int critical = 0;
-const int snapshotCritical = 0;
-double fracCritical = 1./6.;
+const int critical = 1;
+const int snapshotCritical = 1;
+double fracCritical = -1./6.;
 
 double tmax = 4050000;  
-double dtime = 400;
+double dtime = 10;
 double firstScreen = 0.01;
-double dtimeThermo = 2;
+double dtimeThermo = 20;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -246,16 +246,17 @@ double U = -2;
 
 double deltaE = 50;
 double beta = 10;
-double taur = 3;
+double taur = 1.5;
 double additionalEnergy = 0.025;
 const double randomInjection = 0;
 
 
 /*
-double deltaE = 100;
-double beta = 20;
-double taur = 6;
-double additionalEnergy = 0.05;
+double deltaE = 50;
+double beta = 10;
+double taur = 3;
+double additionalEnergy = 0.025;
+const double randomInjection = 0;
 */
 
 //value for the field, must be < 0
@@ -807,11 +808,11 @@ void constantInit(int argc, char *argv[]){
 					Nl = N - Ng;
 				}
 				#if THREE_D
-				Lx = pow((4./3.)*M_PI*N/(phi*aspectRatio)*r2, 1./3.);
+				Lx = pow((4./3.)*M_PI*N/(phi*aspectRatio*aspectRatio)*r2, 1./3.);
+				Lz = Lx*aspectRatio;
 				#else
 				Lx = sqrt(M_PI*N/(phi*aspectRatio)*r2);
 				#endif
-				Lz = Lx;
 				Ly = Lx*aspectRatio;
 				
 			}
@@ -880,7 +881,11 @@ void initThermo(){
 			fprintf(thermo, "ECOM ");
 		}
 		if (critical){
-			fprintf(thermo, "dense1 dense2 dilute1 dilute2 Edense1 Edense2 Edilute1 Edilute2 ");
+			#if THREE_D
+			fprintf(thermo, "dense1 dense2 dense3 dense4 dilute1 dilute2 dilute3 dilute4 Edense1 Edense2 Edense3 Edense4 Edilute1 Edilute2 Edilute3 Edilute4 ");
+			#else
+			fprintf(thermo, "dense1 dense2 dense2 dilute1 dilute2 Edense1 Edense2 Edilute1 Edilute2 ");
+			#endif
 		}
 		if (clusterThermo){
 			fprintf(thermo, "largestCluster ");
@@ -906,7 +911,7 @@ void initThermo(){
 		if (strucThermo == 1)
 			initStructureFactor(qmax, Lx, Ly, N, strucFile, 0);
 		else
-			initStructureFactor(qmax, Lx, Ly, N, strucFile, 1);
+			initStructureFactor(qmax, Lx, Ly, N, strucFile, dtime);
 	}
 	if (dumpCluster && clusterThermo){
 		clusterFile = fopen(clusterName, "w");
@@ -3028,7 +3033,11 @@ void doTheCollisionNormal(){
 		pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
 	}
 	else if (addEnergy){
+		#if THREE_D
+		double b = dx*dvx + dy*dvy + dz*dvz;
+		#else
 		double b = dx*dvx + dy*dvy;
+		#endif
 		double distSquared = DIST2(pi->rad, pj->rad);
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
@@ -3046,7 +3055,7 @@ void doTheCollisionNormal(){
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		#endif
-		//double E = 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy));
+		//double E = 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy + pi->vz*pi->vz) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy + pj->vz*pj->vz));
 		pi->vx += 2*pj->m*invMass*funkyFactor2*dx;
 		pi->vy += 2*pj->m*invMass*funkyFactor2*dy;
 		pj->vx -= 2*pi->m*invMass*funkyFactor2*dx;
@@ -3055,7 +3064,7 @@ void doTheCollisionNormal(){
 		pi->vz += 2*pi->m*invMass*funkyFactor2*dz;
 		pj->vz -= 2*pi->m*invMass*funkyFactor2*dz;
 		#endif
-		//printf("%lf %d %d\n", - E + 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy)), pi->type, pj->type);
+		//printf("%lf\n", - E + 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy + pi->vz*pi->vz) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy + pj->vz*pj->vz)));
 	}
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
@@ -3417,7 +3426,7 @@ void doUmbrella(){
 			}
 
 			#if THREE_D
-			memset(cellList, 0, ssizeof(particle**)*Nxcells*Nycells*Nzcells);
+			memset(cellList, 0, sizeof(particle**)*Nxcells*Nycells*Nzcells);
 			#else
 			memset(cellList, 0, sizeof(particle**)*Nxcells*Nycells);
 			#endif
@@ -3784,7 +3793,7 @@ void saveTXT(){
 				else if (X > Lx){
 					X -= Lx;
 				}
-				double dfrac = Lx*fracCritical/4.;
+				double dfrac = Lx*fracCritical/8.;
 				double left = Lx/4;
 				double right = 3*Lx/4;
 				
@@ -3792,18 +3801,23 @@ void saveTXT(){
 				int seconx = ( (X > (right - dfrac)) && (X < (right + dfrac)) );
 				int firsty = (particles[i].y < (Ly/2));
 				int secony = (particles[i].y > (Ly/2));
-				if (firstx && firsty) {
-					type = 2;
-				}
-				if (firstx && secony) {
-					type = 3;
-				}
-				if (seconx && firsty) {
-					type = 4;
-				}
-				if (seconx && secony) {
-					type = 5;
-				}
+				#if THREE_D
+				int firstz = (particles[i].z < (Lz/2));
+				int seconz = (particles[i].z > (Lz/2));
+				type = (firstx && firsty && firstz) ? 2 :
+					   (firstx && secony && firstz) ? 3 :
+					   (firstx && firsty && seconz) ? 4 :
+					   (firstx && secony && seconz) ? 5 :
+					   (seconx && firsty && firstz) ? 6 :
+					   (seconx && secony && firstz) ? 7 :
+					   (seconx && firsty && seconz) ? 8 :
+					   (seconx && secony && seconz) ? 9 : type;
+				#else
+				type = (firstx && firsty) ? 2 :
+					   (firstx && secony) ? 3 :
+					   (seconx && firsty) ? 4 :
+					   (seconx && secony) ? 5 : type;
+				#endif
 			}
 			else if (clusterThermo){
 				type = particleCluster[i];
@@ -3923,11 +3937,15 @@ void saveThermo(){
 			fprintf(thermo, "%lf ", 0.5*(ex*ex + ey*ey)/N);
 		}
 		if (critical){
-			int count[4];
-			double energyCount[4];
-			double dfrac = Lx*fracCritical/4.;
+			int count[8];
+			double energyCount[8];
+			double dfrac = Lx*fracCritical/8.;
 			countConditions(particles, N, Lx, Ly, count, energyCount, dfrac);
+			#if THREE_D
+			fprintf(thermo, "%d %d %d %d %d %d %d %d %lf %lf %lf %lf %lf %lf %lf %lf", count[0], count[1], count[2], count[3], count[4], count[5], count[6], count[7], energyCount[0], energyCount[1], energyCount[2], energyCount[3], energyCount[4], energyCount[5], energyCount[6], energyCount[7]);
+			#else
 			fprintf(thermo, "%d %d %d %d %lf %lf %lf %lf", count[0], count[1], count[2], count[3], energyCount[0], energyCount[1], energyCount[2], energyCount[3]);
+			#endif
 		}
 		if (clusterThermo){
 			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);

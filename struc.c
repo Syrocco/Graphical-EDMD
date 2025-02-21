@@ -10,10 +10,10 @@
 int nqx, nqy, N;
 double *qx, *qy;
 double *structFactor;
-double complex *fqt;
+double complex *structFactorComplex;
 FILE *fileout;
 
-void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file, int doFQT){
+void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file, double doFQT){
     double xx = 2*M_PI/Lx;
     double yy = 2*M_PI/Ly;
     nqx = 2*qmax/xx + 1;
@@ -31,7 +31,7 @@ void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
 
 
     fileout = file;
-    fprintf(file, "-1 \n");
+    fprintf(file, "-%lf \n", doFQT);
     for (int i = 0; i < nqx; ++i)
         fprintf(fileout, "%g ", qx[i]);
     fprintf(fileout, "\n");
@@ -41,7 +41,7 @@ void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
     fprintf(fileout, "\n");
     
     if (doFQT)
-        fqt = calloc(nqy*nqx, sizeof(double complex));
+        structFactorComplex = calloc(nqy*nqx, sizeof(double complex));
     else
         structFactor = calloc(nqy*nqx, sizeof(double));
 }
@@ -61,8 +61,8 @@ void computeStructureFactor(particle* particles){
 				im += sin(qr);
 
 			}
-            if (fqt != NULL)    
-                structFactor[i*nqy + j] = re + I*im;
+            if (structFactorComplex != NULL)    
+                structFactorComplex[i*nqy + j] = re + I*im;
             else
 			    structFactor[i*nqy + j] = (re*re + im*im)/N;
 		}
@@ -74,8 +74,8 @@ void saveStructureFactor(particle* particles){
 
     for (int i = 0; i < nqx; ++i){
         for (int j = 0; j < nqy; ++j){
-            if (fqt != NULL)
-                fprintf(fileout, "%g+%gi", creal(fqt[i*nqy + j]), cimag(fqt[i*nqy + j]));
+            if (structFactorComplex != NULL)
+                fprintf(fileout, "(%g+%gj) ", creal(structFactorComplex[i*nqy + j]), cimag(structFactorComplex[i*nqy + j]));
             else
                 fprintf(fileout, "%g ", structFactor[i*nqy + j]);
         }

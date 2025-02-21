@@ -44,7 +44,13 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
 
     double COMx = getCOMx(particles, N, Lx);
 
-    for (int i = 0; i < 4; ++i) {
+    #if THREE_D
+    int size = 8;
+    #else
+    int size = 4;
+
+    #endif
+    for (int i = 0; i < size; ++i) {
         counts[i] = 0;
         energyCounts[i] = 0;
     }
@@ -64,27 +70,36 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
 
         int firstx = ( (X > (left - dfrac)) && (X < (left + dfrac)) );
         int seconx = ( (X > (right - dfrac)) && (X < (right + dfrac)) );
-        int firsty = (p->y < (Ly/2));
-        int secony = (p->y > (Ly/2));
+        int firsty = (particles[i].y < (Ly/2));
+        int secony = (particles[i].y > (Ly/2));
+        #if THREE_D //Warming Ly and not Lz here!!
+        int firstz = (particles[i].z < (Ly/2));
+        int seconz = (particles[i].z > (Ly/2));
+        int type = (firstx && firsty && firstz) ? 0 :
+                   (firstx && secony && firstz) ? 1 :
+                   (firstx && firsty && seconz) ? 2 :
+                   (firstx && secony && seconz) ? 3 :
+                   (seconx && firsty && firstz) ? 4 :
+                   (seconx && secony && firstz) ? 5 :
+                   (seconx && firsty && seconz) ? 6 :
+                   (seconx && secony && seconz) ? 7 : -1;
+        #else
+        int type = (firstx && firsty) ? 0 :
+                   (firstx && secony) ? 1 :
+                   (seconx && firsty) ? 2 :
+                   (seconx && secony) ? 3 : -1;
+        #endif
 
-        if (firstx && firsty) {
-            counts[0]++;
-            energyCounts[0] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
-        }
-        if (firstx && secony) {
-            counts[1]++;
-            energyCounts[1] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
-        }
-        if (seconx && firsty) {
-            counts[2]++;
-            energyCounts[2] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
-        }
-        if (seconx && secony) {
-            counts[3]++;
-            energyCounts[3] += 0.5*p->m*(p->vx*p->vx + p->vy*p->vy);
+        if (type != -1) {
+            counts[type]++;
+            energyCounts[type] += 0.5 * p->m*(p->vx*p->vx + p->vy*p->vy
+            #if THREE_D
+            + p->vz*p->vz
+            #endif
+            );
         }
     }
-    for (int i = 0; i < 4; i++){
+    for (int i = 0; i < size; i++){
         energyCounts[i] /= counts[i];
     }
 }

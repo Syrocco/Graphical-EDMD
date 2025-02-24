@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#define THREE_D 1
+#define THREE_D 0
 #ifndef THREE_D
 #    define THREE_D 0
 #endif

@@ -135,18 +135,18 @@ double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
-const int strucThermo = 0;
-double qmax = 0.05;
+const int strucThermo = 2;
+double qmax = 0.1;
 
-const int critical = 1;
-const int snapshotCritical = 1;
+const int critical = 0;
+const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 4050000;  
-double dtime = 10;
+double dtime = 1000000;
 double firstScreen = 0.01;
 double dtimeThermo = 20;
-double firstThermo = 0.01;
+double firstThermo = 2000;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -3971,11 +3971,11 @@ void saveThermo(){
 			fflush(interface);
 		}
 		if (strucThermo){
-			clock_t start_time = clock();
+			double start_time = omp_get_wtime();
 			saveStructureFactor(particles);
-			clock_t end_time = clock();
-			double time_spent = (double)(end_time - start_time) / CLOCKS_PER_SEC;
-			printf("Time taken to execute saveStructureFactor: %f seconds\n", time_spent);
+			double end_time = omp_get_wtime();
+			double time_spent = end_time - start_time;
+			printf("\n Time struc: %f seconds\n", time_spent);
 			fflush(strucFile);
 		}
 		if (dumpCluster && clusterThermo){

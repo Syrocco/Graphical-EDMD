@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <complex.h>
+#include <omp.h>
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
@@ -47,26 +48,25 @@ void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
 }
 
 void computeStructureFactor(particle* particles){
-	particle* p = particles;
-	for (int i = 0; i < nqx; i++){
-		for (int j = 0; j < nqy; j++){
-			double im = 0;
-			double re = 0;
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < nqx; i++){
+        for (int j = 0; j < nqy; j++){
+            double im = 0;
+            double re = 0;
 
-			for (int n = 0; n < N; n++){
-				p = particles + n;
-				double qr = qx[i]*p->x + qy[j]*p->y;
+            for (int n = 0; n < N; n++){
+                particle* p = particles + n;
+                double qr = qx[i]*p->x + qy[j]*p->y;
 
-				re += cos(qr);
-				im += sin(qr);
-
-			}
+                re += cos(qr);
+                im += sin(qr);
+            }
             if (structFactorComplex != NULL)    
                 structFactorComplex[i*nqy + j] = re + I*im;
             else
-			    structFactor[i*nqy + j] = (re*re + im*im)/N;
-		}
-	}
+                structFactor[i*nqy + j] = (re*re + im*im)/N;
+        }
+    }
 }
 
 void saveStructureFactor(particle* particles){

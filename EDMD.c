@@ -58,7 +58,7 @@
 
 //Values if no load file
 int N = 500;
-double phi = 0.3168;
+double phi = 0.38;
 double sizeratio = 0.478;
 double fractionSmallN = 0;
 double aspectRatio = 1;
@@ -75,7 +75,7 @@ double lastCollNum = 0;
 
 double phig = 0.11;
 double phil = 0.5;
-double dphi = -0.15;
+double dphi = 0.05;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -135,18 +135,18 @@ double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
-const int strucThermo = 2;
-double qmax = 0.1;
+const int strucThermo = 0;
+double qmax = 0.2;
 
 const int critical = 0;
 const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 4050000;  
-double dtime = 1000000;
+double dtime = 0.2;
 double firstScreen = 0.01;
 double dtimeThermo = 20;
-double firstThermo = 2000;
+double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -184,7 +184,7 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -246,7 +246,7 @@ double U = -2;
 
 double deltaE = 50;
 double beta = 10;
-double taur = 1.5;
+double taur = 3;
 double additionalEnergy = 0.025;
 const double randomInjection = 0;
 
@@ -269,10 +269,11 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.9;
+double res = 1;
+double resBeta = 0;
 
 //parameter if noise or damping
-double gamm = 1;
+double gamm = 0.25;
 //double gamm = 0.15;
 double T = 1;
 double expE = 1;
@@ -1292,7 +1293,9 @@ void particlesInit(){
 				}
 			}
 
-
+			#if TANGENTIAL
+			p->J = 1;
+			#endif
 			p->t = 0;
 			p->coll = 0;
 
@@ -2985,7 +2988,6 @@ void doTheCollisionNormal(){
 	PBC(&dx, &dy);
 	double collKernel = invMass*(1 + res)*(dx*dvx + dy*dvy);
 	#endif
-
 	
 	double distSquared = DIST2(pi->rad, pj->rad);
 	double funkyFactor = collKernel/distSquared;
@@ -3074,18 +3076,39 @@ void doTheCollisionNormal(){
 
 		collTermX += collTerm*dx*dx;
 		collTermY += collTerm*dy*dy;
+		
+
+		pi->vx += funkyFactor*pj->m*dx;
+		pi->vy += funkyFactor*pj->m*dy;
+		pj->vx -= funkyFactor*pi->m*dx;
+		pj->vy -= funkyFactor*pi->m*dy; 
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		pi->vz += funkyFactor*pj->m*dz;
 		pj->vz -= funkyFactor*pi->m*dz;
 		#endif
-		pi->vx += funkyFactor*pj->m*dx;
-		pi->vy += funkyFactor*pj->m*dy;
-		pj->vx -= funkyFactor*pi->m*dx;
-		pj->vy -= funkyFactor*pi->m*dy;
 		
-	}
+		
+		#if TANGENTIAL
+		dist = sqrt(dx*dx + dy*dy);
+		double dxr = dx/dist;
+		double dyr = dy/dist;
+		double gnx = (dvx*dxr + dvy*dyr)*dxr;
+		double gny = (dvx*dxr + dvy*dyr)*dyr;
+		double gtx = dvx - gnx + dist/2*(dyr*(pi->omega + pj->omega));
+		double gty = dvy - gny - dist/2*(dxr*(pi->omega + pj->omega));
+		double q = pi->J/(pi->m*dist*dist/4.);
+		
 
+		pi->vx += (1 - resBeta)/(2*(1 + 1/q))*gtx;
+		pi->vy += (1 - resBeta)/(2*(1 + 1/q))*gty;
+		pj->vx -= (1 - resBeta)/(2*(1 + 1/q))*gtx;
+		pj->vy -= (1 - resBeta)/(2*(1 + 1/q))*gty;
+
+		pi->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr);
+		pj->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr);
+		#endif
+	}
 
     pi->lastColl = t;
     pj->lastColl = t;
@@ -3775,8 +3798,13 @@ void saveTXT(){
 		}
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type x y z vx vy vz radius m coll\n", t, N, Lx, Ly, Lz);
+
 		#else
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll\n", t, N, Lx, Ly);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll", t, N, Lx, Ly);
+		#if TANGENTIAL
+		fprintf(fichier, " w");
+		#endif
+		fprintf(fichier, "\n");
 		#endif
 		double shift = 0;
 		if (snapshotCritical){
@@ -3826,7 +3854,11 @@ void saveTXT(){
 			#if THREE_D
 			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, X, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz, particles[i].rad, particles[i].m, type);
 			#else
-			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d\n", i, particles[i].type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, type);
+			fprintf(fichier, "%d %d %.3lf %lf %lf %lf %lf %lf %d", i, particles[i].type, X, particles[i].y, particles[i].vx, particles[i].vy, particles[i].rad, particles[i].m, type);
+			#if TANGENTIAL
+			fprintf(fichier, " %lf", particles[i].omega);
+			#endif
+			fprintf(fichier, "\n");
 			#endif
 		}
 		if (clusterThermo){

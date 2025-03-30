@@ -9,6 +9,8 @@
 #    define THREE_D 0
 #endif
 
+#define TANGENTIAL 0
+
 enum event{
 	CELLCROSS,
 	COLLISION, 
@@ -42,6 +44,10 @@ struct particle{
 	#else
 	int cell[2];
 	#endif
+	#if TANGENTIAL
+    double omega;     // Angular velocity
+    double J;         // Moment of inertia
+    #endif
 
 };
 

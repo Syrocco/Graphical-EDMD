@@ -59,8 +59,8 @@
 //Values if no load file
 int N = 500;
 double phi = 0.38;
-double sizeratio = 0.478;
-double fractionSmallN = 0;
+double sizeratio = 0.7;
+double fractionSmallN = 0.5;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -73,8 +73,8 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.11;
-double phil = 0.5;
+double phig = 0.0152;
+double phil = 0.75;
 double dphi = 0.05;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
@@ -119,9 +119,9 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 0;
+const int coexistence = 1;
 
-const int interfaceThermo = 0;
+const int interfaceThermo = 1;
 const int interfaceThermoTemp = 0;
 
 const int clusterThermo = 0;
@@ -138,14 +138,15 @@ double kUmbrella = 0.05;
 const int strucThermo = 0;
 double qmax = 0.2;
 
-const int critical = 0;
-const int snapshotCritical = 0;
+const int critical = 1;
+const int snapshotCritical = 1;
 double fracCritical = -1./6.;
 
-double tmax = 4050000;  
-double dtime = 0.2;
-double firstScreen = 0.01;
-double dtimeThermo = 20;
+double tmax = 40500000;  
+double dtime = 100;
+int logSpacing = 0;
+double firstScreen = 1;
+double dtimeThermo = 100;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -184,7 +185,7 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -269,16 +270,16 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 1;
-double resBeta = 0;
+double res = 0.9;
+double resBeta = -1;
 
 //parameter if noise or damping
-double gamm = 0.25;
+double gamm = 0.15;
 //double gamm = 0.15;
-double T = 1;
+double T = 0.1;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.1;
+double dtnoise = 1;
 double T2 = 0.5;
 
 
@@ -564,13 +565,15 @@ void constantInit(int argc, char *argv[]){
 		{"Ly", required_argument, NULL, 'L'},
 		{"Lx", required_argument, NULL, 'X'},
 		{"deltaE", required_argument, NULL, 'e'},
+		{"additionalEnergy", required_argument, NULL, 'A'},
+		{"dtimeThermo", required_argument, NULL, 'o'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -657,6 +660,12 @@ void constantInit(int argc, char *argv[]){
 				break;
 			case 'e':
 				sscanf(optarg, "%lf", &deltaE);
+				break;
+			case 'A':
+				sscanf(optarg, "%lf", &additionalEnergy);
+				break;
+			case 'o':
+				sscanf(optarg, "%lf", &dtimeThermo);
 				break;
 		}
 	}
@@ -823,6 +832,17 @@ void constantInit(int argc, char *argv[]){
 				N = (int)(phi*Lx*Ly/(M_PI*r2));
 				phi = M_PI*N*r2/(Lx*Ly);
 				Lz = Ly;
+				if (coexistence == 1){
+					Ng = N*phig/(phil + phig);
+					Nl = N - Ng;
+					phi = (phil + phig)*0.5;
+				}
+				else if (coexistence == 2){
+					phil = phi + dphi;
+					phig = phi - dphi;
+					Ng = N*phig/(phil + phig);
+					Nl = N - Ng;
+				}
 			}
 			else{
 				Ly = Lx*aspectRatio;
@@ -1239,6 +1259,22 @@ void particlesInit(){
 			Nsmall= (int)(N*fractionSmallN);
 			Nbig = N - Nsmall;
 		}
+		int* indices;
+		if (coexistence){
+			//Random placement of particles
+			indices = calloc(N, sizeof(int));
+			for (int idx = 0; idx < N; idx++) {
+				indices[idx] = idx;
+			}
+
+			// Shuffle the indices array
+			for (int idx = N - 1; idx > 0; idx--) {
+				int j = rand() % (idx + 1);
+				int temp = indices[idx];
+				indices[idx] = indices[j];
+				indices[j] = temp;
+			}
+		}
 		for (int i = 0; i < N; i++){
 			p = particles + i;
 			if (addCircularWall){
@@ -1250,11 +1286,11 @@ void particlesInit(){
 			}
 			else{
 				if (coexistence){
-					if (i < Nl){
-						p->x = drand(2.5, Lx/2 - 2.5); 
-					}
-					else{
-						p->x = drand(Lx/2 + 2.5, Lx - 2.5); 
+					particle *p = particles + indices[i];
+					if (i < Nl) {
+						p->x = drand(2.5, Lx / 2 - 2.5);
+					} else {
+						p->x = drand(Lx / 2 + 2.5, Lx - 2.5);
 					}
 				}
 				else{
@@ -1324,6 +1360,9 @@ void particlesInit(){
 		}
 		if (polydispersity){
 			free(targetRad);
+		}
+		if (coexistence){
+			free(indices);
 		}
 	}
 	
@@ -3494,7 +3533,7 @@ void takeAScreenshot(){
 }
 
 void takeAThermo(){
-
+	static int count = 0;
 	if ((damping == 1) || (msd)){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
@@ -3518,7 +3557,12 @@ void takeAThermo(){
 	physicalQ();
 	saveThermo();
 
-	addEventThermo(t + dtimeThermo);
+	double nextTime = t + dtimeThermo;
+	if (logSpacing){
+		nextTime = t + dtimeThermo*pow(10, count);
+		count++;
+	}
+	addEventThermo(nextTime);
 	printInfo();
 
 }
@@ -4111,7 +4155,7 @@ void optimizeGrowConstant(){
 		vr = baseGrow*pow(criticalPhi/phi, 30);
 	}
 	// Try to homogenize the system!
-	if (coexistence || clusterThermo){
+	if (coexistence || clusterThermo || phi > 0.7){
 		vr /= 10;
 	}
 }
@@ -4281,7 +4325,10 @@ void physicalQ(){
 		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2) +  pow(particles[i].vz, 2)) ;
 		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy + particles[i].vz*particles[i].vz > 1e-6){
 		#else
-		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2)) ;
+		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2));
+		#if TANGENTIAL
+		E += 0.5*particles[i].J*pow(particles[i].omega, 2);
+		#endif
 		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy > 1e-6){
 		#endif
 			active += 1.;

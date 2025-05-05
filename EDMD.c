@@ -60,7 +60,7 @@
 int N = 500;
 double phi = 0.38;
 double sizeratio = 0.7;
-double fractionSmallN = 0.5;
+double fractionSmallN = 0;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -138,14 +138,14 @@ double kUmbrella = 0.05;
 const int strucThermo = 0;
 double qmax = 0.2;
 
-const int critical = 1;
-const int snapshotCritical = 1;
+const int critical = 0;
+const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 40500000;  
-double dtime = 100;
+double dtime = 1;
 int logSpacing = 0;
-double firstScreen = 1;
+double firstScreen = 0;
 double dtimeThermo = 100;
 double firstThermo = 0.01;
 
@@ -248,7 +248,7 @@ double U = -2;
 double deltaE = 50;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.025;
+double additionalEnergy = 0.002;
 const double randomInjection = 0;
 
 
@@ -367,13 +367,13 @@ void* computeEvolution(void *arg){
 			nextEvent = findNextEvent();
 			
 			
-			/*
-			double dtEventM = nextEvent->t - t;
+			
+			/*double dtEventM = nextEvent->t - t;
 			printf("%lf %d %d %d | \n", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
 			if (dtEventM < -0.001){
 				exit(3);
-			}
-			*/
+			}*/
+			
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
 			switch(nextEvent->type){
@@ -989,34 +989,50 @@ void particlesInit(){
 
 		get_doubleatomprop("x", x, N, dump);
 		get_doubleatomprop("y", y, N, dump);
-		get_doubleatomprop("vx", vx, N, dump);
-		get_doubleatomprop("vy", vy, N, dump);
-		get_doubleatomprop("radius", rad, N, dump);
-		get_doubleatomprop("m", m, N, dump);
-		get_intatomprop("type", type, N, dump);
-
+		if (reduce != 0){
+			get_doubleatomprop("vx", vx, N, dump);
+			get_doubleatomprop("vy", vy, N, dump);
+			get_doubleatomprop("radius", rad, N, dump);
+			get_doubleatomprop("m", m, N, dump);
+			get_intatomprop("type", type, N, dump);
+		}
 		
 		
-
 		particle* p;
 		for (i = 0; i < N; i++){
 		    p = particles + i;
-			p->type = type[i];
 			p->x = x[i];
 			p->y = y[i];
-			p->vx = vx[i] + drand(-0.0000001, 0.0000001);
-			p->vy = vy[i] + drand(-0.0000001, 0.0000001);
-			p->rad = rad[i];
-			p->m = m[i];
+			PBCpostX(&(p->x));
+			PBCpostY(&(p->y));
+			if (reduce != 0){		
+				p->type = type[i];
+				p->vx = vx[i] + drand(-0.0000001, 0.0000001);
+				p->vy = vy[i] + drand(-0.0000001, 0.0000001);
+				p->rad = rad[i];
+				p->m = m[i];
+			}
+			else{
+				p->type = 1;
+				double U1 = drand(0, 1);
+				double U2 = drand(0, 1);
+				p->m = 1;
+				p->vx = sqrt(-2*log(U1)/p->m*Einit)*cos(2*M_PI*U2);
+				p->vy = sqrt(-2*log(U1)/p->m*Einit)*sin(2*M_PI*U2);
+				p->rad = 0.95;
+			}
 		    Nbig += p->type;
 			p->num = i;
 			p->t = 0;
 			p->coll = 0;
             p->lastColl = 0;
 		}
+		if (reduce != 0){
+			normalizePhysicalQ();
+		}
 		fclose(file);
 		Nsmall = N - Nbig;
-		sizeratio = particles[N-1].rad;
+		sizeratio = particles[N - 1].rad;
 		free(x);
 		free(y);
 		free(vx);
@@ -1325,6 +1341,7 @@ void particlesInit(){
 				else{
 					p->type = 0;
 					p->m = pow(sizeratio, 3);
+					p->m = 1;
 					p->vr = vr*sizeratio;
 				}
 			}
@@ -3034,7 +3051,6 @@ void doTheCollisionNormal(){
 	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
-
 			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts)){
 				delta = deltam;
 			}
@@ -3045,8 +3061,6 @@ void doTheCollisionNormal(){
 		else if (addEvolvingDelta){
 			double dti = t - pi->lastColl;
 			double dtj = t - pj->lastColl;
-			//delta = deltaMax*(2 - (exp(-dtj/tau) + exp(-dti/tau)))/2;
-			//delta = deltaMax*(pow(dtj/tau, 3) + pow(dti/tau, 3));
 			delta = deltaMax*pow((2 - (exp(-dtj/tau) + exp(-dti/tau)))/2, 3);
 		}
 
@@ -3096,7 +3110,7 @@ void doTheCollisionNormal(){
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		#endif
-		//double E = 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy + pi->vz*pi->vz) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy + pj->vz*pj->vz));
+		//double E = 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy ));
 		pi->vx += 2*pj->m*invMass*funkyFactor2*dx;
 		pi->vy += 2*pj->m*invMass*funkyFactor2*dy;
 		pj->vx -= 2*pi->m*invMass*funkyFactor2*dx;
@@ -3105,7 +3119,7 @@ void doTheCollisionNormal(){
 		pi->vz += 2*pi->m*invMass*funkyFactor2*dz;
 		pj->vz -= 2*pi->m*invMass*funkyFactor2*dz;
 		#endif
-		//printf("%lf\n", - E + 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy + pi->vz*pi->vz) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy + pj->vz*pj->vz)));
+		//printf("%lf %lf\n", deltaETotal, - E + 0.5*(pi->m*(pi->vx*pi->vx + pi->vy*pi->vy) + pj->m*(pj->vx*pj->vx + pj->vy*pj->vy)));
 	}
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));

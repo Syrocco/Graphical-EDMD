@@ -78,7 +78,6 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
 
 
 void computeLocalConcentration(particle *particles){
-    
     for (int i = 0; i < Nx; i++) {
         for (int j = 0; j < Ny; j++) {
             d[i][j] = 0;

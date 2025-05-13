@@ -60,7 +60,7 @@
 int N = 500;
 double phi = 0.38;
 double sizeratio = 0.7;
-double fractionSmallN = 0;
+double fractionSmallN = 0.5;
 double aspectRatio = 1;
 int controlLenght = 0;
 
@@ -73,8 +73,8 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.0152;
-double phil = 0.75;
+double phig = 0.03;
+double phil = 0.776;
 double dphi = 0.05;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
@@ -142,11 +142,12 @@ const int critical = 0;
 const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 40500000;  
-double dtime = 1;
+double tmax = 1e4;  
+double dtime = 100;
 int logSpacing = 0;
-double firstScreen = 0;
-double dtimeThermo = 100;
+double base = 1.01;
+double firstScreen = 0.01;
+double dtimeThermo = 10;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -219,7 +220,7 @@ const int ther = 1;
 
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
-const int msd = 0;
+const int msd = 1;
 double* posxInitial = NULL;
 double* posyInitial = NULL;
 
@@ -245,20 +246,13 @@ double U = -2;
 
 //Value of the energy input at collision
 
+const double randomInjection = 0;
+const int simplifyInjection = 0;
 double deltaE = 50;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.002;
-const double randomInjection = 0;
+double additionalEnergy = 0.005;
 
-
-/*
-double deltaE = 50;
-double beta = 10;
-double taur = 3;
-double additionalEnergy = 0.025;
-const double randomInjection = 0;
-*/
 
 //value for the field, must be < 0
 double field = -0.1; 
@@ -368,11 +362,11 @@ void* computeEvolution(void *arg){
 			
 			
 			
-			/*double dtEventM = nextEvent->t - t;
-			printf("%lf %d %d %d | \n", dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
+			/* double dtEventM = nextEvent->t - t;
+			printf("%lf %lf %d %d %d | \n", t, dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
 			if (dtEventM < -0.001){
 				exit(3);
-			}*/
+			} */
 			
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
@@ -567,13 +561,15 @@ void constantInit(int argc, char *argv[]){
 		{"deltaE", required_argument, NULL, 'e'},
 		{"additionalEnergy", required_argument, NULL, 'A'},
 		{"dtimeThermo", required_argument, NULL, 'o'},
+		{"phil", required_argument, NULL, 'P'},
+		{"phig", required_argument, NULL, 'G'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -666,6 +662,12 @@ void constantInit(int argc, char *argv[]){
 				break;
 			case 'o':
 				sscanf(optarg, "%lf", &dtimeThermo);
+				break;
+			case 'P':
+				sscanf(optarg, "%lf", &phil);
+				break;
+			case 'G':
+				sscanf(optarg, "%lf", &phig);
 				break;
 		}
 	}
@@ -774,7 +776,6 @@ void constantInit(int argc, char *argv[]){
 					pingpong = 1;
 					fac /= 2;
 				}
-				printf("1: %lf %.10lf %d\n", Ly/Lx, fac, pingpong);
 			}
 			else{
 				effectiveAspectRatio *= 1 - fac;
@@ -782,7 +783,6 @@ void constantInit(int argc, char *argv[]){
 					pingpong = 0;
 					fac /= 2;
 				}
-				printf("2: %lf %.10lf %d\n", Ly/Lx, fac, pingpong);
 			}
 			if (count > 1e8){
 				printf("NO WAY TO SIZE THE BOX");
@@ -829,20 +829,22 @@ void constantInit(int argc, char *argv[]){
 			// NO 3d
 			else if (controlLenght == 1){
 				Lx = Ly/aspectRatio;
-				N = (int)(phi*Lx*Ly/(M_PI*r2));
-				phi = M_PI*N*r2/(Lx*Ly);
 				Lz = Ly;
 				if (coexistence == 1){
+					phi = (phil + phig)*0.5;
+					N = (int)(phi*Lx*Ly/(M_PI*r2));
 					Ng = N*phig/(phil + phig);
 					Nl = N - Ng;
-					phi = (phil + phig)*0.5;
+					
 				}
 				else if (coexistence == 2){
+					N = (int)(phi*Lx*Ly/(M_PI*r2));
 					phil = phi + dphi;
 					phig = phi - dphi;
 					Ng = N*phig/(phil + phig);
 					Nl = N - Ng;
 				}
+				
 			}
 			else{
 				Ly = Lx*aspectRatio;
@@ -917,14 +919,26 @@ void initThermo(){
 		interface = fopen(interfaceName, "w");
 		if (interfaceThermoTemp == 0){
 			if (liquidliquid == 0){
+				#if THREE_D
+				initLocalDensity(Lx, Ly, Lz, 8, 8, 8, N, interface, liquidliquid, 0);
+				#else
 				initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid, 0);
+				#endif
 			}
 			else{
+				#if THREE_D
+				initLocalDensity(Lx, Ly, Lz, 4, 4, 4, N, interface, liquidliquid, 0);
+				#else
 				initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid, 0);
+				#endif
 			}
 		}
 		else{
-			initLocalDensity(Lx, Ly, 8, 8, N, interface, liquidliquid, 1);
+			#if THREE_D
+			initLocalDensity(Lx, Ly, Lz, 4, 4, 4, N, interface, liquidliquid, 1);
+			#else
+			initLocalDensity(Lx, Ly, 4, 4, N, interface, liquidliquid, 1);
+			#endif
 		}
 	}
 	if (strucThermo){
@@ -3097,7 +3111,11 @@ void doTheCollisionNormal(){
 		double dti = t - pi->lastColl;
 		double dtj = t - pj->lastColl;
 		
-		double deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
+		double deltaETotal;
+		if (simplifyInjection)
+			deltaETotal = 2*additionalEnergy + deltaE*(2 + sign(dti - taur) + sign(dtj - taur));
+		else
+			deltaETotal = 2*additionalEnergy + deltaE*(pow(1 - exp(-dtj/taur), beta) + pow(1 - exp(-dti/taur), beta));
 		if (randomInjection){
 			deltaETotal *= drand(0.9, 1./0.9);
 		}
@@ -3573,7 +3591,7 @@ void takeAThermo(){
 
 	double nextTime = t + dtimeThermo;
 	if (logSpacing){
-		nextTime = t + dtimeThermo*pow(10, count);
+		nextTime = t + dtimeThermo*pow(base, count);
 		count++;
 	}
 	addEventThermo(nextTime);
@@ -3837,9 +3855,9 @@ void saveTXT(){
 			fprintf(fichier, "%d %.2lf %.2lf %.2lf %.6lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz);
 		}
 		#else
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id x y z vx vy vz\n", t, N, Lx, Ly, Lz);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type radius xu yu x y vx vy\n", t, N, Lx, Ly, Lz);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %.2lf %.2lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
+			fprintf(fichier, "%d %d %.2lf %.2lf %.2lf %.2lf %.2lf %.6lf %.6lf\n", i, particles[i].type, particles[i].rad, particles[i].x + Lx*particles[i].crossX, particles[i].y + Ly*particles[i].crossY, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
 		}
 		#endif
 	}
@@ -4170,7 +4188,7 @@ void optimizeGrowConstant(){
 	}
 	// Try to homogenize the system!
 	if (coexistence || clusterThermo || phi > 0.7){
-		vr /= 10;
+		vr /= 8;
 	}
 }
 

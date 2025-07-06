@@ -60,8 +60,8 @@
 int N = 500;
 double phi = 0.38;
 double sizeratio = 0.7;
-double fractionSmallN = 0.5;
-double aspectRatio = 1;
+double fractionSmallN = 0.;
+double aspectRatio = 2.5;
 int controlLenght = 0;
 
 
@@ -73,9 +73,9 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.03;
-double phil = 0.776;
-double dphi = 0.05;
+double phig = 0.1;
+double phil = 0.5;
+double dphi = 0.3;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -119,9 +119,9 @@ int load = 0;
 const int S1 = 0;
 const int Hex = 0;
 const int coexistenceOld = 0;
-const int coexistence = 1;
+const int coexistence = 0;
 
-const int interfaceThermo = 1;
+const int interfaceThermo = 0;
 const int interfaceThermoTemp = 0;
 
 const int clusterThermo = 0;
@@ -142,12 +142,12 @@ const int critical = 0;
 const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 1e4;  
+double tmax = 90000;  
 double dtime = 100;
 int logSpacing = 0;
 double base = 1.01;
-double firstScreen = 0.01;
-double dtimeThermo = 10;
+double firstScreen = 1;
+double dtimeThermo = 300;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -220,7 +220,7 @@ const int ther = 1;
 
 //reduce the number of properties dumped into the dump files
 const int reduce = 0;
-const int msd = 1;
+const int msd = 0;
 double* posxInitial = NULL;
 double* posyInitial = NULL;
 
@@ -248,7 +248,7 @@ double U = -2;
 
 const double randomInjection = 0;
 const int simplifyInjection = 0;
-double deltaE = 50;
+double deltaE = 4;
 double beta = 10;
 double taur = 3;
 double additionalEnergy = 0.005;
@@ -2516,7 +2516,7 @@ void collisionEventNormal(int i){
 	if (addShear){
 		if (Y == 0){
 			for (int k = 0; k < Nxcells; k++){
-				particle* p2 = cellList[k*Nycells + Nycells - 1];
+				particle* p2 = cellList[(Nycells - 1)*Nxcells + k];
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						if (addWell){
@@ -2553,7 +2553,7 @@ void collisionEventNormal(int i){
 		}
 		else if (Y == Nycells - 1){
 			for (int k = 0; k < Nxcells; k++){
-				particle* p2 = cellList[k*Nycells];
+				particle* p2 = cellList[k];
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1->num != p2->num){
 						if (addWell){
@@ -3966,7 +3966,7 @@ void saveThermo(){
 	#if THREE_D
 	pressureX = -1*collTermX/(vol*deltaTime);
 	pressureY = -1*collTermY/(vol*deltaTime);
-	pressureZ = -1*collTermY/(vol*deltaTime);
+	pressureZ = -1*collTermZ/(vol*deltaTime);
 	pressure = (-1/(deltaTime))*(collTermX + collTermY + collTermZ)/(3*vol) + (2./3.)*E/vol;
 	collTermZ = 0;
 	#else
@@ -4227,11 +4227,11 @@ void shearCorrection(double* x, double* vx, int sign){
 
 void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx){
 	if (p1->cell[1] == 0 && p2->cell[1] == Nycells - 1){
-			double x = p2->x + lat2*p2->vx;
-			double vx = p2->vx;
-			shearCorrection(&x, &vx, 1);
-			*dx = x - p1->x;
-			*dvx = vx - p1->vx;
+		double x = p2->x + lat2*p2->vx;
+		double vx = p2->vx;
+		shearCorrection(&x, &vx, 1);
+		*dx = x - p1->x;
+		*dvx = vx - p1->vx;
 		}
 	if (p1->cell[1] == Nycells - 1 && p2->cell[1] == 0){
 		double x = p2->x + lat2*p2->vx;
@@ -4393,9 +4393,11 @@ void customName(){
 
 	int v = 1;
 	#if THREE_D
-		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, Lz, (double)Nsmall/N);
+		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfdeltaE_%.3lfdelta_%.3lfaddEnergy_%lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_",
+						        N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, additionalEnergy, Lx, Ly, Lz, (double)Nsmall/N);
 	#else
-		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfao_%.3lfdelta_%.3lfLx_%.3lfLy_%.3lfq_%.3lfv_", N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, Lx, Ly, (double)Nsmall/N);
+		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfdeltaE_%.3lfdelta_%.3lfaddEnergy_%lfLx_%.3lfLy_%.3lfq_%.3lfv_",
+								 N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, additionalEnergy, Lx, Ly, (double)Nsmall/N);
 	#endif
 
 	char baseFileName[256];

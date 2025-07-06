@@ -175,12 +175,16 @@ void computeLocalConcentration(particle *particles){
         int box_y = fmin((int)(particles[i].y / dy), Ny - 1);
         int box_z = fmin((int)(particles[i].z / dz), Nz - 1);
         
-        if (particles[i].type == 1) {
-            d[box_x][box_y][box_z] += (4.0/3.0)*M_PI/(dx*dy*dz);  // Volume of sphere / volume of cell
+        if (dbis == NULL){
+            d[box_x][box_y] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
         }
-        if (dbis != NULL){
-            if (particles[i].type == 0) {
-                dbis[box_x][box_y][box_z] += (4.0/3.0)*M_PI/(dx*dy*dz);
+        
+        else{
+            if (particles[i].type == 1) {
+                d[box_x][box_y] +=  4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
+            }
+            else{
+                dbis[box_x][box_y] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
             }
         }
         if (tp != NULL){
@@ -205,12 +209,16 @@ void computeLocalConcentration(particle *particles){
         int box_x = fmin((int)(particles[i].x / dx), Nx - 1);
         int box_y = fmin((int)(particles[i].y / dy), Ny - 1);
         
-        if (particles[i].type == 1) {
-            d[box_x][box_y] += M_PI/(dx*dy);
+        if (dbis == NULL){
+            d[box_x][box_y] += particles[i].rad*particles[i].rad*M_PI/(dx*dy);
         }
-        if (dbis != NULL){
-            if (particles[i].type == 0) {
-                dbis[box_x][box_y] += M_PI/(dx*dy);
+        
+        else{
+            if (particles[i].type == 1) {
+                d[box_x][box_y] += particles[i].rad*particles[i].rad*M_PI/(dx*dy);
+            }
+            else{
+                dbis[box_x][box_y] += particles[i].rad*particles[i].rad*M_PI/(dx*dy);
             }
         }
         if (tp != NULL){

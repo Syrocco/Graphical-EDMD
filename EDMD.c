@@ -179,7 +179,7 @@ const int liquidliquid = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 0;
+const int noise = 1;
 const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;

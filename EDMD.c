@@ -61,7 +61,7 @@ int N = 500;
 double phi = 0.38;
 double sizeratio = 0.7;
 double fractionSmallN = 0.;
-double aspectRatio = 2.5;
+double aspectRatio = 1;
 int controlLenght = 0;
 
 
@@ -186,7 +186,7 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -248,10 +248,10 @@ double U = -2;
 
 const double randomInjection = 0;
 const int simplifyInjection = 0;
-double deltaE = 4;
+double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.005;
+double additionalEnergy = 0.1;
 
 
 //value for the field, must be < 0
@@ -264,7 +264,7 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.9;
+double res = 1;
 double resBeta = -1;
 
 //parameter if noise or damping

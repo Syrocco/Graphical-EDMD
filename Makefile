@@ -25,12 +25,12 @@ ifeq ($(SANITIZE), 1)
 endif
 
 # Default target (G=0)
-EDMD: EDMD.c parser.o
-	$(CC) EDMD.c parser.c $(CFLAGS) $(EDMD_FLAGS) -DG=0
+EDMD: EDMD.c parser.o boop.c pcf.c
+	$(CC) EDMD.c parser.c boop.c pcf.c $(CFLAGS) $(EDMD_FLAGS) -DG=0
 
 # Graphics target (G=1)
-graphics: EDMD.c parser.o
-	$(CC) EDMD.c parser.c -Ofast graphics.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 $(EDMD_FLAGS) -DG=1
+graphics: EDMD.c parser.o boop.c pcf.c
+	$(CC) EDMD.c parser.c boop.c pcf.c -Ofast graphics.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 $(EDMD_FLAGS) -DG=1
 
 # Make EDMD the default target
 .DEFAULT_GOAL := EDMD

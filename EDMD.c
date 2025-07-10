@@ -1,3 +1,4 @@
+#include "pcf.h"
 #include "EDMD.h"
 #include "mersenne.c" 
 #include "quartic.c" 
@@ -5,7 +6,8 @@
 #include "critical.c"
 #include "struc.c"
 #include "cluster.c"
-
+#include "boop.h"
+#include "jc_voronoi.h"
 #include<math.h>
 #include<stdlib.h>
 #include<string.h>
@@ -16,7 +18,6 @@
 #include<sys/types.h>
 #include<stdbool.h>
 #include"parser.h"
-
 #include<getopt.h>
 #include<time.h>
 
@@ -61,7 +62,7 @@ int N = 500;
 double phi = 0.38;
 double sizeratio = 0.7;
 double fractionSmallN = 0.;
-double aspectRatio = 1;
+double aspectRatio = 1.0;
 int controlLenght = 0;
 
 
@@ -89,7 +90,6 @@ double cellxFac, cellyFac;
 	double collTermZ = 0;
 #endif
 
-//for now we only need 3 more events
 const int suppSizeEvent = 10;
 
 double t = 0;
@@ -111,13 +111,16 @@ char interfaceName[350];
 char buffer[255];
 char strucName[350];
 char clusterName[350];
+char pcfName[350];
+char pcfBondOrderName[350];
+char pcfg6Name[350];
 FILE* file;
 
 
 
 int load = 0;
 const int S1 = 0;
-const int Hex = 0;
+const int Hex = 1;
 const int coexistenceOld = 0;
 const int coexistence = 0;
 
@@ -138,16 +141,22 @@ double kUmbrella = 0.05;
 const int strucThermo = 0;
 double qmax = 0.2;
 
+const int boopThermo = 0;
+
+const int pcfThermo = 0;
+const int pcfBondOrderThermo = 1;
+const int pcfg6Thermo = 1;
+
 const int critical = 0;
 const int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 90000;  
-double dtime = 100;
+double dtime = 300;
 int logSpacing = 0;
 double base = 1.01;
 double firstScreen = 1;
-double dtimeThermo = 300;
+double dtimeThermo = 30;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -179,14 +188,14 @@ const int liquidliquid = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 1;
+const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
-const int addEnergy = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -200,8 +209,6 @@ const int liquidliquid = 0;
 
 //update the thermostat temperature to reach a wanted temperature for the system
 const int updating = 0;
-
-
 
 
 
@@ -251,7 +258,7 @@ const int simplifyInjection = 0;
 double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.1;
+double additionalEnergy = 0.05;
 
 
 //value for the field, must be < 0
@@ -3848,6 +3855,7 @@ void freeFlyGrow(particle* p){
 }
 
 void saveTXT(){
+	boop_data* boop;
 	if (reduce){
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y vx vy\n", t, N, Lx, Ly);
@@ -3877,6 +3885,15 @@ void saveTXT(){
 
 		#else
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id type x y vx vy radius m coll", t, N, Lx, Ly);
+		if (boopThermo == 1){
+			fprintf(fichier, " q5 q6 q7 argq6 neighbors");
+			boop = computeBOOPVoronoi(particles, N, Lx, Ly);
+		}
+		else if (boopThermo == 2){
+			fprintf(fichier, " q5 q6 q7 argq6 neighbors");
+			boop = computeBOOPCutoff(particles, N, 2.5, cellList, Nxcells);
+		}
+		
 		#if TANGENTIAL
 		fprintf(fichier, " w");
 		#endif
@@ -3934,6 +3951,9 @@ void saveTXT(){
 			#if TANGENTIAL
 			fprintf(fichier, " %lf", particles[i].omega);
 			#endif
+			if (boopThermo){
+				fprintf(fichier, " %.2lf %.2lf %.2lf %.2lf %d", boop[i].q5, boop[i].q6, boop[i].q7, boop[i].q6_arg, boop[i].neighbors);
+			}
 			fprintf(fichier, "\n");
 			#endif
 		}
@@ -3941,6 +3961,9 @@ void saveTXT(){
 			freeClusters();
 			free(particleCluster);
 		}
+	}
+	if (boopThermo){
+		free(boop);
 	}
 	fflush(fichier);
 }
@@ -4090,6 +4113,15 @@ void saveThermo(){
 			saveHistrogramCluster(clusterFile);
 			freeClusters();
 			fflush(clusterFile);
+		}
+		if (pcfBondOrderThermo){
+			save_pcf_boop(pcfName, pcfBondOrderName, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly, phi);
+		}
+		else if (pcfThermo){
+			save_pcf(pcfName, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly);
+		}
+		if (pcfg6Thermo){
+			save_pcf_g6(pcfg6Name, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly);
 		}
 	}
 
@@ -4423,6 +4455,17 @@ void customName(){
 
 	if (dumpCluster && clusterThermo) {
 		snprintf(clusterName, sizeof(clusterName), "%s%d.cluster", baseFileName, v);
+	}
+
+	if (pcfBondOrderThermo) {
+		snprintf(pcfBondOrderName, sizeof(pcfBondOrderName), "%s%d.pcfBO", baseFileName, v);
+		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, v);
+	}
+	else if (pcfThermo){
+		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, v);
+	}
+	if (pcfg6Thermo){
+		snprintf(pcfg6Name, sizeof(pcfg6Name), "%s%d.pcfg6", baseFileName, v);
 	}
 }
 

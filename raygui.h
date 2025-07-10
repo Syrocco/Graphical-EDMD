@@ -3754,7 +3754,7 @@ void GuiLoadStyle(const char *fileName)
                             if (charValues != NULL)
                             {
                                 int glyphCount = 0;
-                                const char **chars = TextSplit(charValues, '\n', &glyphCount);
+                                char **chars = TextSplit(charValues, '\n', &glyphCount);
 
                                 int *values = (int *)RAYGUI_MALLOC(glyphCount*sizeof(int));
                                 for (int i = 0; i < glyphCount; i++) values[i] = TextToInteger(chars[i]);

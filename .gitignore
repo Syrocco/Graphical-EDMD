@@ -13,6 +13,13 @@ cookie.png
 !critical.c
 !cluster.c
 !struc.c
+!jc_voronoi.h
+!boop.c
+!boop.h
+!EDMD.h
+!EDMD.c
+!pcf.c
+!pcf.h
 # Do not ignore specific folders or files inside the "docs" directory
 !docs/**
 

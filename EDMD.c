@@ -141,7 +141,7 @@ double kUmbrella = 0.05;
 const int strucThermo = 0;
 double qmax = 0.2;
 
-const int boopThermo = 0;
+const int boopThermo = 1;
 
 const int pcfThermo = 0;
 const int pcfBondOrderThermo = 1;
@@ -258,7 +258,7 @@ const int simplifyInjection = 0;
 double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.05;
+double additionalEnergy = 0.03;
 
 
 //value for the field, must be < 0
@@ -919,6 +919,9 @@ void initThermo(){
 		}
 		if (clusterThermo){
 			fprintf(thermo, "largestCluster ");
+		}
+		if (boopThermo){
+			fprintf(thermo, "q6 ");
 		}
 		fprintf(thermo, "\n");
 	}
@@ -4090,8 +4093,23 @@ void saveThermo(){
 				exit(3);
 			}
 		}
+		if (boopThermo){
+			boop_data* boop;
+			if (boopThermo == 1){
+				boop = computeBOOPVoronoi(particles, N, Lx, Ly);
+			}
+			else if (boopThermo == 2){
+				boop = computeBOOPCutoff(particles, N, 2.5, cellList, Nxcells);
+			}
+			
+			double q6 = 0;
+			for (int i = 0; i < N; i++){
+				q6 += boop[i].q6;
+			}
+			fprintf(thermo, "%lf ", q6/N);
+			free(boop);
+		}
 		fprintf(thermo, "\n");
-	
 		fflush(thermo);
 		if (liquidliquid && interfaceThermo){
 			computeInterfacesPos(particles, 0.1);
@@ -4115,13 +4133,13 @@ void saveThermo(){
 			fflush(clusterFile);
 		}
 		if (pcfBondOrderThermo){
-			save_pcf_boop(pcfName, pcfBondOrderName, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly, phi);
+			save_pcf_boop(pcfName, pcfBondOrderName, particles, N, 2, fmin(Lx, Ly)/2, Lx, Ly, phi);
 		}
 		else if (pcfThermo){
 			save_pcf(pcfName, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly);
 		}
 		if (pcfg6Thermo){
-			save_pcf_g6(pcfg6Name, particles, N, 0.1, fmin(Lx, Ly)/2, Lx, Ly);
+			save_pcf_g6(pcfg6Name, particles, N, 2, fmin(Lx, Ly)/2, Lx, Ly);
 		}
 	}
 

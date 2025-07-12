@@ -39,10 +39,7 @@ pcf_data* calculate_pcf(particle* particles, int N, double dr, double max_r, dou
             double dx = particles[j].x - particles[i].x;
             double dy = particles[j].y - particles[i].y;
             
-            // Apply periodic boundary conditions explicitly for large distances
-            dx -= Lx * round(dx / Lx);
-            dy -= Ly * round(dy / Ly);
-            // Calculate distance
+            PBC(&dx, &dy);
             double r = sqrt(dx*dx + dy*dy);
             
             if (r < max_r) {
@@ -118,13 +115,8 @@ bond_order_pcf_data* calculate_bond_order_pcf(particle* particles, int N, double
                     int bin = (int)(r / data->bin_width);
                     if (bin >= 0 && bin < num_bins) {
                         g_r_local[bin] += 1.0;
-                        double k_dot_r_i = k_vector[0] * particles[i].x + k_vector[1] * particles[i].y;
-                        double k_dot_r_j = k_vector[0] * particles[j].x + k_vector[1] * particles[j].y;
-                        double cos_i = cos(k_dot_r_i);
-                        double sin_i = sin(k_dot_r_i);
-                        double cos_j = cos(k_dot_r_j);
-                        double sin_j = sin(k_dot_r_j);
-                        double bond_order = cos_i * cos_j + sin_i * sin_j;
+
+                        double bond_order = cos(k_vector[0]*dx + k_vector[1]*dy);
                         g6_r_local[bin] += bond_order;
                     }
                 }
@@ -399,28 +391,45 @@ void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle
     free_bond_order_pcf_data(data);
 }
 
+int angle_not_between(double angle, double start, double end) {
+
+    if (angle < start || angle > end) {
+        return 1; // Angle is not between start and end
+    }
+    return 0; 
+}
+
 void find_max_structure_factor_bragg(particle* particles, int N, double Lx, double Ly, double expected_bragg, double k[2]) {
     double max_S = -1;
     double best_k[2] = {0.0, 0.0};
     double dkx = 2 * M_PI / Lx;
     double dky = 2 * M_PI / Ly;
-    double kx_min = dkx;
-    double kx_max = expected_bragg + 0.5;
-    double ky_min = dky;
-    double ky_max = expected_bragg + 0.5;
+    double kx_min = -expected_bragg - 0.8;
+    double kx_max = expected_bragg + 0.8;
+    double ky_min = -expected_bragg - 0.8;
+    double ky_max = expected_bragg + 0.8;
+    
+    kx_min = floor(kx_min / dkx) * dkx;
+    kx_max = ceil(kx_max / dkx) * dkx;
+    ky_min = floor(ky_min / dky) * dky;
+    ky_max = ceil(ky_max / dky) * dky;
 
     #pragma omp parallel
     {
         double local_max_S = -1;
         double local_k[2] = {0.0, 0.0};
         #pragma omp for collapse(2) schedule(dynamic)
-        for (int ikx = 0; ikx < (int)((kx_max - kx_min) / dkx); ikx++) {
-            for (int iky = 0; iky < (int)((ky_max - ky_min) / dky); iky++) {
+        //printf("\n");
+        for (int iky = 0; iky <= (int)((ky_max - ky_min) / dky); iky++) {
+            for (int ikx = 0; ikx <= (int)((kx_max - kx_min) / dkx); ikx++) {
                 double kx = kx_min + ikx * dkx;
-                double ky = ky_min + iky * dky;
+                double ky = ky_max - iky * dky;
                 double k_abs = sqrt(kx*kx + ky*ky);
                 double theta = atan2(ky, kx);
-                if (k_abs < expected_bragg - 0.5 || k_abs > expected_bragg + 0.5 || theta < 0 || theta > 2*M_PI/5){   
+
+                //M_PI/6 should be good for 6-fold symmetry
+                if (k_abs < 1.5 || angle_not_between(theta, M_PI/2 - M_PI/5, M_PI/2 + M_PI/5)) {
+                    //printf("  .  ");
                     continue;
                 }
                 double re = 0.0, im = 0.0;
@@ -435,7 +444,10 @@ void find_max_structure_factor_bragg(particle* particles, int N, double Lx, doub
                     local_k[0] = kx;
                     local_k[1] = ky;
                 }
+                //printf("%4.2lf ", theta);
+                //printf("%4.1lf ", S);
             }
+            //printf("\n");
         }
         #pragma omp critical
         {
@@ -448,6 +460,7 @@ void find_max_structure_factor_bragg(particle* particles, int N, double Lx, doub
     }
     k[0] = best_k[0];
     k[1] = best_k[1];
+    printf("Max structure factor S = %.6f at k = (%.6f, %.6f)\n", max_S, k[0], k[1]);
 }
 
 

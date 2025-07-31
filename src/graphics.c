@@ -3,6 +3,7 @@
 #include "color.h"
 #include "graphics.h"
 #include "EDMD.h"
+#include "tex_data.h"  
 #include <pthread.h>
 
 #define qN 180
@@ -1050,7 +1051,12 @@ window graphicalInit(){
 	image.data = structFactorGraphics;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);
-	circleTexture = LoadTexture("tex.png");
+	
+	// Load circle texture from embedded data
+	Image circleImage = LoadImageFromMemory(".png", src_tex_png, src_tex_png_len);
+	circleTexture = LoadTextureFromImage(circleImage);
+	UnloadImage(circleImage);  // Free the image data after creating texture
+	
     return (window){
         .screenWidth = 1800,
         .screenHeight = 900,

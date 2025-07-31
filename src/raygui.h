@@ -1599,7 +1599,7 @@ int GuiTabBar(Rectangle bounds, const char **text, int count, int *active)
     #define RAYGUI_TABBAR_ITEM_WIDTH    160
 
     int result = -1;
-    GuiState state = guiState;
+    (void)guiState; // Suppress unused variable warning
 
     Rectangle tabBounds = { bounds.x, bounds.y, RAYGUI_TABBAR_ITEM_WIDTH, bounds.height };
 
@@ -3389,11 +3389,12 @@ int GuiColorPicker(Rectangle bounds, const char *text, Color *color)
 int GuiColorPickerHSV(Rectangle bounds, const char *text, Vector3 *colorHsv)
 {
     int result = 0;
+    static Vector3 tempHsv; // Make static to avoid dangling pointer
 
     if (colorHsv == NULL)
     {
         const Vector3 tempColor = { 200.0f/255.0f, 0.0f, 0.0f };
-        Vector3 tempHsv = ConvertRGBtoHSV(tempColor);
+        tempHsv = ConvertRGBtoHSV(tempColor);
         colorHsv = &tempHsv;
     }
 
@@ -4400,13 +4401,11 @@ const char **GetTextLines(const char *text, int *count)
     lines[0] = text;
     int len = 0;
     *count = 1;
-    int lineSize = 0;   // Stores current line size, not returned
 
     for (int i = 0, k = 0; (i < textSize) && (*count < RAYGUI_MAX_TEXT_LINES); i++)
     {
         if (text[i] == '\n')
         {
-            lineSize = len;
             k++;
             lines[k] = &text[i + 1];     // WARNING: next value is valid?
             len = 0;

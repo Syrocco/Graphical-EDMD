@@ -45,7 +45,12 @@
 #if G
 #include "graphics.h"
 #include "raylib.h"
+#ifndef PLATFORM_WEB
 #include <pthread.h>
+#endif
+#ifdef PLATFORM_WEB
+#include <emscripten/emscripten.h>
+#endif
 #endif
 
 
@@ -334,6 +339,80 @@ double* umbrellaPos;
 double* umbrellaVel;
 double* umbrellaDtimeCol;
 
+#ifdef PLATFORM_WEB
+// Global variables for web main loop
+static int web_argc;
+static char** web_argv;
+static window* web_screenWindow;
+static state* web_screenState;
+static bool web_initialized = false;
+
+void web_main_loop() {
+	if (!web_initialized) return;
+	
+	if (!WindowShouldClose()) {
+		if (!((!web_screenState->running) || (web_screenState->wallMoving))) {
+			if (t <= tmax) {
+				nextEvent = findNextEvent();
+				
+				t = nextEvent->t;
+				removeEventFromQueue(nextEvent);
+				switch(nextEvent->type){
+					case COLLISION:
+						doTheCollision();
+						break;
+					case WALL:
+						doTheWall();
+						break;
+					case CELLCROSS:
+						ncross++;
+						doTheCrossing();
+						break;
+					case ADDINGNOISE:
+						addNoise();
+						break;
+					case SCREENSHOT:
+						takeAScreenshot();
+						draw(web_argc, web_argv, web_screenWindow, web_screenState);
+						getInput(web_screenWindow, web_screenState);
+						fflush(stdout);
+						break;
+					case THERMO:
+						takeAThermo();
+						fflush(stdout);
+						break;
+					case UPDATE:
+						updateT();
+						break;
+					case IN:
+						doIn();
+						break;
+					case OUT:
+						doOut();
+						break;
+					case GROWSTOP:
+						stopGrow();			
+						break;
+					case UMBRELLA:
+						doUmbrella();
+						break;
+				}
+			}
+		} else {
+			draw(web_argc, web_argv, web_screenWindow, web_screenState);
+			getInput(web_screenWindow, web_screenState);
+		}
+	} else {
+		// Window should close - cleanup and exit
+		printInfo();
+		printClose();
+		graphicsFree(web_screenState);
+		freeArrays();
+		emscripten_cancel_main_loop();
+	}
+}
+#endif
+
 int main(int argc, char *argv[]){
 	
 	init_genrand(time(NULL));
@@ -362,8 +441,20 @@ int main(int argc, char *argv[]){
 	while (t <= tmax){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
+	
+	#ifdef PLATFORM_WEB
+	// Set up web main loop
+	web_argc = argc;
+	web_argv = argv;
+	web_screenWindow = &screenWindow;
+	web_screenState = &screenState;
+	web_initialized = true;
+	emscripten_set_main_loop(web_main_loop, 0, 1);
+	#else
+	// Desktop main loop
 	while (!WindowShouldClose()){
 		if (!((!screenState.running) || (screenState.wallMoving))){
+	#endif
 	#endif
 
 			nextEvent = findNextEvent();

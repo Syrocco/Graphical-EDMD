@@ -2,35 +2,65 @@
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	# Find the Homebrew gcc version (e.g., gcc-14, gcc-15, etc.)
-	CC := $(shell ls /opt/homebrew/bin/gcc-* 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo gcc)
-	ifeq ($(CC),gcc)
+	CC := $(shell ls /opt/homebrew/bin/gcc-* 2>/dev/null | head -1 | xargs basename 2>/dev/null)
+	ifeq ($(CC),)
 		# Fallback: try /usr/local/bin for Intel Macs
-		CC := $(shell ls /usr/local/bin/gcc-* 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo gcc)
+		CC := $(shell ls /usr/local/bin/gcc-* 2>/dev/null | head -1 | xargs basename 2>/dev/null)
+	endif
+	ifeq ($(CC),)
+		# No real GCC found, use clang but warn about potential issues
+		CC = clang
+		$(warning Warning: No GCC found, using clang. OpenMP support may be limited.)
 	endif
 else
 	CC = gcc
 endif
 
-G ?= 0
-SANITIZE ?= 0
 
-ifeq ($(G), 0)
-	CFLAGS = -Ofast -Wall -Wextra -lm -fopenmp
+# Check if OpenMP is supported by the compiler
+# For clang on macOS, might need libomp installed via: brew install libomp
+OPENMP_SUPPORT := $(shell echo 'int main(){return 0;}' | $(CC) -fopenmp -x c - -o /tmp/openmp_test 2>/dev/null && echo "yes" || echo "no"; rm -f /tmp/openmp_test 2>/dev/null)
+ifeq ($(OPENMP_SUPPORT),no)
+	ifneq ($(findstring clang,$(CC)),)
+		# Try clang with explicit libomp path (common on macOS with Homebrew)
+		OPENMP_SUPPORT := $(shell echo 'int main(){return 0;}' | $(CC) -Xpreprocessor -fopenmp -lomp -x c - -o /tmp/openmp_test 2>/dev/null && echo "clang" || echo "no"; rm -f /tmp/openmp_test 2>/dev/null)
+	endif
+endif
+
+
+# Source files in src directory
+SRC_DIR = src
+SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c
+GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c
+
+# Include directory for headers
+INCLUDE_FLAGS = -I$(SRC_DIR)
+
+ifeq ($(OPENMP_SUPPORT),yes)
+	OPENMP_FLAGS = -fopenmp
 else
-	CFLAGS = -Ofast graphics.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+	OPENMP_FLAGS = 
 endif
 
-ifeq ($(SANITIZE), 1)
-	CFLAGS += -fsanitize=address -g
+# Detect OpenMP flags for clang
+ifeq ($(OPENMP_SUPPORT),clang)
+	OPENMP_FLAGS = -Xpreprocessor -fopenmp -lomp
 endif
 
-# Default target (G=0)
-EDMD: EDMD.c parser.o boop.c pcf.c
-	$(CC) EDMD.c parser.c boop.c pcf.c $(CFLAGS) $(EDMD_FLAGS) -DG=0
+EDMD: $(SOURCES)
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0
 
-# Graphics target (G=1)
-graphics: EDMD.c parser.o boop.c pcf.c
-	$(CC) EDMD.c parser.c boop.c pcf.c -Ofast graphics.c -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 $(EDMD_FLAGS) -DG=1
+# Graphics target - optimized build with graphics libraries
+graphics: $(GRAPHICS_SOURCES)
+	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) -Ofast -Wall -Wextra -lraylib -lGL -lm -lpthread $(OPENMP_FLAGS) -ldl -lrt -lX11 -DG=1
+
+# Debug target - no optimization, with debug symbols
+debug: $(SOURCES)
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
+
+# Clean target
+clean:
+	rm -f a.out *.o
 
 # Make EDMD the default target
 .DEFAULT_GOAL := EDMD

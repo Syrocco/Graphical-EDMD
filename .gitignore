@@ -1,28 +1,10 @@
 # Ignore everything
 *
 
-.vscode/
-cookie.png
-# Except the docs folder
 !docs/
-
-# Also do not ignore hidden files or folders
+!.vscode/
 !.gitignore
-!.git/
-!interface.c
-!critical.c
-!cluster.c
-!struc.c
-!jc_voronoi.h
-!boop.c
-!boop.h
-!EDMD.h
-!EDMD.c
-!pcf.c
-!pcf.h
-# Do not ignore specific folders or files inside the "docs" directory
-!docs/**
-
-# Ignore specific generated files or build artifacts
-*.out
-*N_
+!Makefile
+!src/
+README.md
+!LICENSE

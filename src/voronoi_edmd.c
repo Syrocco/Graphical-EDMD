@@ -5,6 +5,30 @@
 #include <stdlib.h>
 
 
+inline jcv_real jcv_cross(const jcv_point a, const jcv_point b){
+    return a.x*b.y - a.y*b.x;
+}
+
+inline double jcv_perimeter(const jcv_site* a){
+    double perimeter = 0;
+    const jcv_graphedge* e = a->edges;
+    while (e){
+        perimeter += jcv_point_dist(&e->pos[0], &e->pos[1]);
+        e = e->next;
+        
+    }
+    return perimeter;
+}
+
+inline double jcv_area(const jcv_site* a){
+    double area = 0;
+    const jcv_graphedge* e = a->edges;
+    while (e){
+        area += jcv_cross(e->pos[0], e->pos[1]);
+        e = e->next;
+    }
+    return 0.5*jcv_abs(area);
+}
 
 jcv_diagram get_particle_voronoi(particle* particles, int N, double Lx, double Ly) {
     int image_count = 0;
@@ -94,4 +118,32 @@ jcv_diagram get_particle_voronoi(particle* particles, int N, double Lx, double L
     jcv_diagram_generate(Nall, points, NULL, NULL, &diagram);
     free(points);
     return diagram;
+}
+
+double* get_particle_voronoi_area(particle* particles, int N, double Lx, double Ly) {
+    jcv_diagram diagram = get_particle_voronoi(particles, N, Lx, Ly);
+    double* areas = malloc(N * sizeof(double));
+    const jcv_site* sites = jcv_diagram_get_sites(&diagram);
+    for (int i = 0; i < diagram.numsites; i++) {
+        int index = sites[i].index;
+        if (index >= N) continue;
+        areas[index] = jcv_area(&sites[i]);
+    }
+    jcv_diagram_free(&diagram);
+    return areas;
+}
+
+
+double* get_particle_voronoi_perimeter(particle* particles, int N, double Lx, double Ly) {
+    jcv_diagram diagram = get_particle_voronoi(particles, N, Lx, Ly);
+    double* perimeters = malloc(N * sizeof(double));
+    const jcv_site* sites = jcv_diagram_get_sites(&diagram);
+    for (int i = 0; i < diagram.numsites; i++) {
+        int index = sites[i].index;
+        if (index >= N) continue;
+        perimeters[index] = jcv_perimeter(&sites[i]);
+    }
+
+    jcv_diagram_free(&diagram);
+    return perimeters;
 }

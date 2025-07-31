@@ -3,7 +3,8 @@
         {
             "name": "Mac",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "/opt/homebrew/opt/raylib/include"
             ],
             "defines": [],
             "compilerPath": "/opt/homebrew/bin/gcc-15",

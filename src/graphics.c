@@ -1,4 +1,3 @@
-#include "raylib.h"
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h" 
 #include "color.h"
@@ -1040,12 +1039,14 @@ window graphicalInit(){
 	}
 	
 	threadPoolInit();
-
 	SetConfigFlags(FLAG_WINDOW_RESIZABLE);// | FLAG_VSYNC_HINT);
+	
     InitWindow(1800, 900, "EDMD");
 	SetTargetFPS(144);
 	image = GenImageColor(qN, qN, BLANK);
 	UnloadImageColors(image.data);
+
+	
 	image.data = structFactorGraphics;
 	image.format = PIXELFORMAT_UNCOMPRESSED_R32;
 	texture = LoadTextureFromImage(image);

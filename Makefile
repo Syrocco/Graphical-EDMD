@@ -47,20 +47,32 @@ ifeq ($(OPENMP_SUPPORT),clang)
 	OPENMP_FLAGS = -Xpreprocessor -fopenmp -lomp
 endif
 
+# Platform-specific graphics libraries
+ifeq ($(UNAME_S),Darwin)
+	# macOS - use the exact same flags as the working raylib Makefile
+	RAYLIB_PREFIX = $(shell brew --prefix raylib)
+	GRAPHICS_LIBS = -L$(RAYLIB_PREFIX)/lib -lraylib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreAudio -framework CoreVideo
+	GRAPHICS_INCLUDES = -I$(RAYLIB_PREFIX)/include
+else
+	# Linux - use X11 and GL libraries
+	GRAPHICS_LIBS = -lraylib -lGL -lm  -ldl -lrt -lX11
+	GRAPHICS_INCLUDES =
+endif
+
 EDMD: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0
 
 # Graphics target - optimized build with graphics libraries
 graphics: $(GRAPHICS_SOURCES)
-	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) -Ofast -Wall -Wextra -lraylib -lGL -lm -lpthread $(OPENMP_FLAGS) -ldl -lrt -lX11 -DG=1
+	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) -DG=1 
 
 # Debug target - no optimization, with debug symbols
 debug: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0 
 
 # Clean target
 clean:
-	rm -f a.out *.o
+	rm -f EDMD EDMD_debug graphics_build *.o
 
 # Make EDMD the default target
 .DEFAULT_GOAL := EDMD

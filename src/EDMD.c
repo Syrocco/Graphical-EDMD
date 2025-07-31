@@ -20,6 +20,7 @@
 #include"parser.h"
 #include<getopt.h>
 #include<time.h>
+#include "voronoi_edmd.h"
 
 
 
@@ -120,7 +121,7 @@ FILE* file;
 
 int load = 0;
 const int S1 = 0;
-const int Hex = 1;
+const int Hex = 0;
 const int coexistenceOld = 0;
 const int coexistence = 0;
 
@@ -140,6 +141,8 @@ double kUmbrella = 0.05;
 
 const int strucThermo = 0;
 double qmax = 0.2;
+
+const int areaThermo = 1;
 
 const int boopThermo = 1;
 
@@ -331,16 +334,15 @@ double* umbrellaPos;
 double* umbrellaVel;
 double* umbrellaDtimeCol;
 
-void* computeEvolution(void *arg){
+int main(int argc, char *argv[]){
+	
+	init_genrand(time(NULL));
 	
 	#if G
 	window screenWindow = graphicalInit();
 	state screenState = GUIinit();
 	#endif
 
-	arguments* argument = (arguments*)arg;
-	int argc = argument->argc;
-	char** argv = argument->argv;
 
 	constantInit(argc, argv);
 	runningCheck();
@@ -348,7 +350,6 @@ void* computeEvolution(void *arg){
 	customName();
 	fichier = fopen(fileName, "w");
 	initThermo();
-	//saveTXT();
 	cellListInit();
 	if (addWell){
 		pairsInit();
@@ -441,51 +442,32 @@ void* computeEvolution(void *arg){
 		#endif
 	}
 
+	#if G != 1
 	exiting:
-		printInfo();
-		printClose();
-		#if G != 1
-		fclose(fichier);
-		if (ther){
-			fclose(thermo);
-			if (interfaceThermo){
-				fclose(interface);
-			}
-			if (strucThermo){
-				fclose(strucFile);
-			}
-			if (dumpCluster && clusterThermo){
-				fclose(clusterFile);
-			}
+	#endif
+	printInfo();
+	printClose();
+	#if G != 1
+	fclose(fichier);
+	if (ther){
+		fclose(thermo);
+		if (interfaceThermo){
+			fclose(interface);
 		}
-		#else
-		graphicsFree(&screenState);
-		#endif
-		freeArrays();
-	#if G
-	pthread_exit(NULL);
+		if (strucThermo){
+			fclose(strucFile);
+		}
+		if (dumpCluster && clusterThermo){
+			fclose(clusterFile);
+		}
+	}
 	#else
-	return NULL;
+	graphicsFree(&screenState);
 	#endif
+	freeArrays();
+	return 1;
 }
 
-
-int main(int argc, char *argv[]){
-
-	
-	
-	init_genrand(time(NULL));
-	//init_genrand(666);
-	
-	#if G
-	pthread_t mainThread;
-	pthread_create(&mainThread, NULL, computeEvolution,&(arguments){argc, argv});
-	pthread_join(mainThread, NULL);
-	#else
-	computeEvolution(&(arguments){argc, argv});
-	#endif
-	return 0;
-}
 
 
 /* ------------------------------------------/
@@ -3859,6 +3841,7 @@ void freeFlyGrow(particle* p){
 
 void saveTXT(){
 	boop_data* boop;
+	double* area;
 	if (reduce){
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y vx vy\n", t, N, Lx, Ly);
@@ -3895,6 +3878,10 @@ void saveTXT(){
 		else if (boopThermo == 2){
 			fprintf(fichier, " q5 q6 q7 argq6 neighbors");
 			boop = computeBOOPCutoff(particles, N, 2.5, cellList, Nxcells);
+		}
+		if (areaThermo){
+			fprintf(fichier, " packingFraction");
+			area = get_particle_voronoi_area(particles, N, Lx, Ly);
 		}
 		
 		#if TANGENTIAL
@@ -3957,6 +3944,9 @@ void saveTXT(){
 			if (boopThermo){
 				fprintf(fichier, " %.2lf %.2lf %.2lf %.2lf %d", boop[i].q5, boop[i].q6, boop[i].q7, boop[i].q6_arg, boop[i].neighbors);
 			}
+			if (areaThermo){
+				fprintf(fichier, " %lf", M_PI*particles[i].rad*particles[i].rad/area[i]);
+			}
 			fprintf(fichier, "\n");
 			#endif
 		}
@@ -3964,9 +3954,12 @@ void saveTXT(){
 			freeClusters();
 			free(particleCluster);
 		}
-	}
-	if (boopThermo){
-		free(boop);
+		if (boopThermo){
+			free(boop);
+		}
+		if (areaThermo){
+			free(area);
+		}
 	}
 	fflush(fichier);
 }

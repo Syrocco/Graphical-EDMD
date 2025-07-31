@@ -3,6 +3,7 @@
         "getopt.h": "c",
         "variant": "c",
         "chrono": "c",
-        "ranges": "c"
+        "ranges": "c",
+        "cstdlib": "c"
     }
 }

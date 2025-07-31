@@ -125,18 +125,19 @@ FILE* file;
 
 
 int load = 0;
-const int S1 = 0;
-const int Hex = 0;
-const int coexistenceOld = 0;
-const int coexistence = 0;
+int S1 = 0;
+int Hex = 0;
+int coexistenceOld = 0;
+int coexistence = 0;
 
-const int interfaceThermo = 1;
-const int interfaceThermoTemp = 0;
+int interfaceThermo = 1;
+int interfaceThermoTemp = 0;
 
-const int clusterThermo = 0;
+int clusterThermo = 0;
+int dumpCluster = 0;
+int killCluster = 0;
 const double clusterCutoff = 3.55;
-const int dumpCluster = 0;
-const int killCluster = 0;
+
 
 const int umbrellaSampling = 0;
 double firstUmbrellaSamping = 400;
@@ -144,19 +145,19 @@ double dtimeUmbrella = 30;
 double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
-const int strucThermo = 0;
+int strucThermo = 0;
 double qmax = 0.2;
 
-const int areaThermo = 1;
+int areaThermo = 1;
 
-const int boopThermo = 1;
+int boopThermo = 1;
 
-const int pcfThermo = 0;
-const int pcfBondOrderThermo = 0;
-const int pcfg6Thermo = 0;
+int pcfThermo = 0;
+int pcfBondOrderThermo = 0;
+int pcfg6Thermo = 0;
 
-const int critical = 1;
-const int snapshotCritical = 1;
+int critical = 1;
+int snapshotCritical = 1;
 double fracCritical = -1./6.;
 
 double tmax = 200;  
@@ -1372,7 +1373,7 @@ void particlesInit(){
 			Nsmall= (int)(N*fractionSmallN);
 			Nbig = N - Nsmall;
 		}
-		int* indices;
+		int* indices = NULL;
 		if (coexistence){
 			//Random placement of particles
 			indices = calloc(N, sizeof(int));
@@ -3931,8 +3932,6 @@ void freeFlyGrow(particle* p){
 }
 
 void saveTXT(){
-	boop_data* boop;
-	double* area;
 	if (reduce){
 		#if THREE_D
 		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 0\nITEM: ATOMS id x y vx vy\n", t, N, Lx, Ly);
@@ -3947,7 +3946,9 @@ void saveTXT(){
 		#endif
 	}
 	else{
-		int* particleCluster;
+		boop_data* boop = NULL;
+		double* area = NULL;
+		int* particleCluster = NULL;
 		if (clusterThermo){
 			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
 			particleCluster = malloc(N * sizeof(int));
@@ -4178,7 +4179,7 @@ void saveThermo(){
 			}
 		}
 		if (boopThermo){
-			boop_data* boop;
+			boop_data* boop = NULL;
 			if (boopThermo == 1){
 				boop = computeBOOPVoronoi(particles, N, Lx, Ly);
 			}

@@ -54,6 +54,26 @@ extern void (*freeFly)(particle*);
 extern void (*doTheWall)(void);
 extern void (*crossingEvent)(int);
 
+
+extern int S1;
+extern int Hex;
+extern int coexistenceOld;
+extern int coexistence;
+extern int interfaceThermo;
+extern int interfaceThermoTemp;
+extern int clusterThermo;
+extern int dumpCluster;
+extern int killCluster;
+
+extern int strucThermo;
+extern int areaThermo;
+extern int boopThermo;
+extern int pcfThermo;
+extern int pcfBondOrderThermo;
+extern int pcfg6Thermo;
+extern int critical;
+extern int snapshotCritical;
+
 typedef struct window window;
 struct window{
     int screenWidth;

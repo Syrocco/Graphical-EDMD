@@ -1031,6 +1031,28 @@ window graphicalInit(){
 	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;
+
+	load = 0;
+	S1 = 0;
+	Hex = 0;
+	coexistenceOld = 0;
+	coexistence = 0;
+
+	interfaceThermo = 0;
+	interfaceThermoTemp = 0;
+
+	clusterThermo = 0;
+	dumpCluster = 0;
+	killCluster = 0;
+	strucThermo = 0;
+	areaThermo = 0;
+	boopThermo = 0;
+	pcfThermo = 0;
+	pcfBondOrderThermo = 0;
+	pcfg6Thermo = 0;
+	critical = 0;
+	snapshotCritical = 0;
+
 	aspectRatio = 1;
     Camera2D cam = {0};
     cam.zoom = 1;

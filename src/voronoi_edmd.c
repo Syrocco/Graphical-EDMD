@@ -5,11 +5,11 @@
 #include <stdlib.h>
 
 
-inline jcv_real jcv_cross(const jcv_point a, const jcv_point b){
+static inline jcv_real jcv_cross(const jcv_point a, const jcv_point b){
     return a.x*b.y - a.y*b.x;
 }
 
-inline double jcv_perimeter(const jcv_site* a){
+static inline double jcv_perimeter(const jcv_site* a){
     double perimeter = 0;
     const jcv_graphedge* e = a->edges;
     while (e){
@@ -20,7 +20,7 @@ inline double jcv_perimeter(const jcv_site* a){
     return perimeter;
 }
 
-inline double jcv_area(const jcv_site* a){
+static inline double jcv_area(const jcv_site* a){
     double area = 0;
     const jcv_graphedge* e = a->edges;
     while (e){

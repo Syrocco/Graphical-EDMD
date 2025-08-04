@@ -64,11 +64,11 @@ EDMD: $(SOURCES)
 
 # Graphics target - optimized build with graphics libraries
 graphics: $(GRAPHICS_SOURCES)
-	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) -DG=1 
+	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) -DG=1
 
 # Debug target - no optimization, with debug symbols
 debug: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0 
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
 
 # Clean target
 clean:

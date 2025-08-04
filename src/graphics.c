@@ -558,21 +558,10 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	}
 
 	GuiCheckBox((Rectangle){start + 250*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Delta", &addDelta);
-	bool dirtyDoubleDelta = addDoubleDelta;
-	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Synchro Delta", &addDoubleDelta);
-	if (addDelta && addDoubleDelta == false){
+	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Tangent Delta", &addDeltaTangent);
+	if (addDelta || addDeltaTangent){
 		sprintf(name, "%.3f", delta);
 		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 0.1);
-	}
-	if (addDoubleDelta){
-		if (dirtyDoubleDelta != addDoubleDelta){
-			deltaM = delta;
-			
-		}
-		sprintf(name, "%.3f", deltaM);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &deltaM, 0, 0.1);
-		sprintf(name, "%.3f", ts);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 380*yGUI, 505*xGUI, 20*yGUI}, "Synch. Time", name, &ts, 0.000001, 10);
 	}
 
 	if (addField){
@@ -597,7 +586,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 
 	float Ntemp = N;
 	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 10000.f);
+	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI}, "N. of particles", name, &Ntemp, 50.f, 50000.f);
 	if ((int)Ntemp != N){
 		if (structFactorActivated)
 			free(positions);

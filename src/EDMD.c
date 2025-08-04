@@ -41,16 +41,10 @@
 #ifndef G
 #define G 0
 #endif
-#define SIGN 1
 #if G
 #include "graphics.h"
 #include "raylib.h"
-#ifndef PLATFORM_WEB
 #include <pthread.h>
-#endif
-#ifdef PLATFORM_WEB
-#include <emscripten/emscripten.h>
-#endif
 #endif
 
 
@@ -82,7 +76,7 @@ double lastCollNum = 0;
 
 double phig = 0.1;
 double phil = 0.5;
-double dphi = 0.3;
+double dphi = 0.2;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
 
@@ -130,7 +124,7 @@ int Hex = 0;
 int coexistenceOld = 0;
 int coexistence = 0;
 
-int interfaceThermo = 1;
+int interfaceThermo = 0;
 int interfaceThermoTemp = 0;
 
 int clusterThermo = 0;
@@ -148,19 +142,19 @@ double kUmbrella = 0.05;
 int strucThermo = 0;
 double qmax = 0.2;
 
-int areaThermo = 1;
+int areaThermo = 0;
 
-int boopThermo = 1;
+int boopThermo = 0;
 
 int pcfThermo = 0;
 int pcfBondOrderThermo = 0;
 int pcfg6Thermo = 0;
 
-int critical = 1;
-int snapshotCritical = 1;
+int critical = 0;
+int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 200;  
+double tmax = 200000;  
 double dtime = 10;
 int logSpacing = 0;
 double base = 1.01;
@@ -175,7 +169,7 @@ double nextScreen = -1;
 
 
 #if G
-bool addWell = true;
+bool addWell = false;
 bool addField = false;
 int noise = 1;
 int addWally = 0;
@@ -184,6 +178,7 @@ int addMidWall = 0;
 int addCircularWall = 0;
 bool damping = false;
 bool addDelta = false;
+bool addDeltaTangent = false;
 bool addDoubleDelta = false;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -204,7 +199,8 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addEnergy = 1;
+const int addDeltaTangent = 0;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -241,7 +237,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.07;
+double delta = 0.03;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -280,11 +276,11 @@ double Einit = 1;
 double resW = 1;
 
 //coeff of restitution of particles
-double res = 0.95;
-double resBeta = -1;
+double res = 1;
+double resBeta = 0;
 
 //parameter if noise or damping
-double gamm = 0.15;
+double gamm = 0.001;
 //double gamm = 0.15;
 double T = 0.1;
 double expE = 1;
@@ -340,79 +336,6 @@ double* umbrellaPos;
 double* umbrellaVel;
 double* umbrellaDtimeCol;
 
-#ifdef PLATFORM_WEB
-// Global variables for web main loop
-static int web_argc;
-static char** web_argv;
-static window* web_screenWindow;
-static state* web_screenState;
-static bool web_initialized = false;
-
-void web_main_loop() {
-	if (!web_initialized) return;
-	
-	if (!WindowShouldClose()) {
-		if (!((!web_screenState->running) || (web_screenState->wallMoving))) {
-			if (t <= tmax) {
-				nextEvent = findNextEvent();
-				
-				t = nextEvent->t;
-				removeEventFromQueue(nextEvent);
-				switch(nextEvent->type){
-					case COLLISION:
-						doTheCollision();
-						break;
-					case WALL:
-						doTheWall();
-						break;
-					case CELLCROSS:
-						ncross++;
-						doTheCrossing();
-						break;
-					case ADDINGNOISE:
-						addNoise();
-						break;
-					case SCREENSHOT:
-						takeAScreenshot();
-						draw(web_argc, web_argv, web_screenWindow, web_screenState);
-						getInput(web_screenWindow, web_screenState);
-						fflush(stdout);
-						break;
-					case THERMO:
-						takeAThermo();
-						fflush(stdout);
-						break;
-					case UPDATE:
-						updateT();
-						break;
-					case IN:
-						doIn();
-						break;
-					case OUT:
-						doOut();
-						break;
-					case GROWSTOP:
-						stopGrow();			
-						break;
-					case UMBRELLA:
-						doUmbrella();
-						break;
-				}
-			}
-		} else {
-			draw(web_argc, web_argv, web_screenWindow, web_screenState);
-			getInput(web_screenWindow, web_screenState);
-		}
-	} else {
-		// Window should close - cleanup and exit
-		printInfo();
-		printClose();
-		graphicsFree(web_screenState);
-		freeArrays();
-		emscripten_cancel_main_loop();
-	}
-}
-#endif
 
 int main(int argc, char *argv[]){
 	
@@ -443,30 +366,22 @@ int main(int argc, char *argv[]){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
 	
-	#ifdef PLATFORM_WEB
-	// Set up web main loop
-	web_argc = argc;
-	web_argv = argv;
-	web_screenWindow = &screenWindow;
-	web_screenState = &screenState;
-	web_initialized = true;
-	emscripten_set_main_loop(web_main_loop, 0, 1);
-	#else
+	
 	// Desktop main loop
 	while (!WindowShouldClose()){
 		if (!((!screenState.running) || (screenState.wallMoving))){
-	#endif
+
 	#endif
 
 			nextEvent = findNextEvent();
 			
 			
 			
-			/* double dtEventM = nextEvent->t - t;
+			/*double dtEventM = nextEvent->t - t;
 			printf("%lf %lf %d %d %d | \n", t, dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
 			if (dtEventM < -0.001){
 				exit(3);
-			} */
+			}*/
 			
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
@@ -3146,7 +3061,8 @@ void doTheCollisionNormal(){
 	double distSquared = DIST2(pi->rad, pj->rad);
 	double funkyFactor = collKernel/distSquared;
 
-	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta))){
+	#if !TANGENTIAL
+	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta) || (addDeltaTangent))){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
 			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts)){
@@ -3180,10 +3096,18 @@ void doTheCollisionNormal(){
 		collTermZ += collTerm*dzr*dzr;
 		#endif
 
+		//perp
+		if (addDeltaTangent){
+			double dxrTemp = dxr;
+			dxr = dyr;  
+			dyr = -dxrTemp;
+		}
+		
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
 		pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
 		pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
+		
 	}
 	else if (addEnergy){
 		#if THREE_D
@@ -3226,7 +3150,7 @@ void doTheCollisionNormal(){
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
 	else{
-
+	#endif
 		double collTerm = pi->m*pj->m*funkyFactor;
 
 		collTermX += collTerm*dx*dx;
@@ -3255,15 +3179,28 @@ void doTheCollisionNormal(){
 		double q = pi->J/(pi->m*dist*dist/4.);
 		
 
+		
+		
 		pi->vx += (1 - resBeta)/(2*(1 + 1/q))*gtx;
 		pi->vy += (1 - resBeta)/(2*(1 + 1/q))*gty;
 		pj->vx -= (1 - resBeta)/(2*(1 + 1/q))*gtx;
 		pj->vy -= (1 - resBeta)/(2*(1 + 1/q))*gty;
+		if (addDeltaTangent){
+			double dxrTemp = dxr;
+			dxr = dyr;  
+			dyr = -dxrTemp;
+			pi->vx +=  - 2*pj->m*invMass*delta*dxr;
+			pi->vy += - 2*pj->m*invMass*delta*dyr;
+			pj->vx -=  - 2*pi->m*invMass*delta*dxr;
+			pj->vy -=- 2*pi->m*invMass*delta*dyr;
+		}
 
-		pi->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr);
-		pj->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr);
+		pi->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) - 0.5;
+		pj->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) - 0.5;
 		#endif
+	#if !TANGENTIAL
 	}
+	#endif
 
     pi->lastColl = t;
     pj->lastColl = t;

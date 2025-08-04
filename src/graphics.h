@@ -13,6 +13,7 @@ extern int noise;
 extern double delta;
 extern bool addDelta;
 extern bool addDoubleDelta;
+extern bool addDeltaTangent;
 extern double ts;
 extern double deltaM;
 extern bool damping;

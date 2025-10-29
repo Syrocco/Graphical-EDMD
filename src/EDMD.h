@@ -9,7 +9,7 @@
 #    define THREE_D 0
 #endif
 
-#define TANGENTIAL 1
+#define TANGENTIAL 0
 
 enum event{
 	CELLCROSS,

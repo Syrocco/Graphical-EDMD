@@ -97,6 +97,7 @@ struct state{
     int colorParam;
     bool colorEditing2;
     int colorParam2;
+    bool arrow;
     Color* colorArray;
     double (*colorFunction)(particle*);
     double* colorFunctionArray;

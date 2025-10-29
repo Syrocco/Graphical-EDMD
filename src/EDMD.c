@@ -21,6 +21,7 @@
 #include<getopt.h>
 #include<time.h>
 #include "voronoi_edmd.h"
+#include "osmosis.h"
 
 
 
@@ -28,7 +29,7 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
-#define NONADDITIVE 0
+#define NONADDITIVE 1
 
 #if NONADDITIVE == 0
     #define DIST(r1, r2) (sqrt(4 * (r1) * (r2)))
@@ -60,8 +61,8 @@
 //Values if no load file
 int N = 500;
 double phi = 0.38;
-double sizeratio = 0.7;
-double fractionSmallN = 0.;
+double sizeratio = 1;
+double fractionSmallN = 0;
 double aspectRatio = 1.0;
 int controlLenght = 0;
 
@@ -74,8 +75,8 @@ double Lx, Ly, Lz;
 double lastScreen = 0;
 double lastCollNum = 0;
 
-double phig = 0.1;
-double phil = 0.5;
+double phig = 0.6;
+double phil = 0.2;
 double dphi = 0.2;
 double Llx, Lly, Lgx, Lgy;
 int Nlx, Ngx, Nly, Ngy, Ng, Nl;
@@ -108,6 +109,7 @@ unsigned long int ncross = 0;
 char fileName[350];
 char thermoName[350];
 char interfaceName[350];
+char osmosisName[350];
 char buffer[255];
 char strucName[350];
 char clusterName[350];
@@ -123,6 +125,9 @@ int S1 = 0;
 int Hex = 0;
 int coexistenceOld = 0;
 int coexistence = 0;
+
+int osmosisThermo = 0;
+double sigma = 2;
 
 int interfaceThermo = 0;
 int interfaceThermoTemp = 0;
@@ -140,7 +145,8 @@ double wantedSizeUmbrella = 100;
 double kUmbrella = 0.05;
 
 int strucThermo = 0;
-double qmax = 0.2;
+int doFQT = 0;
+double qmax = 1;
 
 int areaThermo = 0;
 
@@ -154,12 +160,12 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 200000;  
-double dtime = 10;
+double tmax = 100000;  
+double dtime = 0.1;
 int logSpacing = 0;
 double base = 1.01;
-double firstScreen = 1;
-double dtimeThermo = 10;
+double firstScreen = 0.001;
+double dtimeThermo = 0.5;
 double firstThermo = 0.01;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -191,7 +197,7 @@ bool addShearWall = 0;
 const int liquidliquid = 0;
 #else
 const int addWell = 0;
-const int addField = 0;
+const int addField = 1;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
@@ -254,16 +260,16 @@ double ao = 1.5;
 
 //values for square potential model
 double sig = 1.375;
-double U = -2;
+double U = -0.5;
 
 //Value of the energy input at collision
 
 const double randomInjection = 0;
 const int simplifyInjection = 0;
-double deltaE = 0;
+double deltaE = 50;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.05;
+double additionalEnergy = 0.01;
 
 
 //value for the field, must be < 0
@@ -273,23 +279,26 @@ double field = -0.1;
 double Einit = 1;
 
 //coeff of restitution of the wall
-double resW = 1;
+double resW = 1.;
+double resT = 1.;
 
 //coeff of restitution of particles
 double res = 1;
-double resBeta = 0;
+double resBeta = 0.;
+
+double deltaOmega = 100;
 
 //parameter if noise or damping
-double gamm = 0.001;
+double gamm = 2;
 //double gamm = 0.15;
-double T = 0.1;
+double T = 1;
 double expE = 1;
 //time between kicks
-double dtnoise = 1;
+double dtnoise = 0.01;
 double T2 = 0.5;
 
 
-double strainRate = 0.01;
+double strainRate = 2;
 
 double a = 2;
 double b = 5;
@@ -306,10 +315,7 @@ const int addEnergyCenterOfMassThermo = 0;
 double updateTime = 100;
 double updateTimeMax = 2000;
 double vr;
-
-
-double sizeRat;
-
+int version = 1;
 
 double paulTime = 0;
 int actualPaulList = 0;
@@ -322,6 +328,7 @@ FILE *thermo;
 FILE *interface;
 FILE *strucFile;
 FILE *clusterFile;
+FILE *osmosisFile;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -377,10 +384,11 @@ int main(int argc, char *argv[]){
 			
 			
 			
+			
 			/*double dtEventM = nextEvent->t - t;
 			printf("%lf %lf %d %d %d | \n", t, dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
 			if (dtEventM < -0.001){
-				exit(3);
+				//exit(3);
 			}*/
 			
 			t = nextEvent->t;
@@ -466,6 +474,9 @@ int main(int argc, char *argv[]){
 		}
 		if (dumpCluster && clusterThermo){
 			fclose(clusterFile);
+		}
+		if (osmosisThermo){
+			fclose(osmosisFile);
 		}
 	}
 	#else
@@ -559,13 +570,14 @@ void constantInit(int argc, char *argv[]){
 		{"dtimeThermo", required_argument, NULL, 'o'},
 		{"phil", required_argument, NULL, 'P'},
 		{"phig", required_argument, NULL, 'G'},
+		{"version", required_argument, NULL, 'v'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -603,7 +615,6 @@ void constantInit(int argc, char *argv[]){
 				if (addDelta != 1)
 					printf("WARNING:\033[0;31m Changing Delta while Delta model is not enabled!\033[0m\n");
 				sscanf(optarg, "%lf", &delta);
-				init_genrand(delta*100);
 				break;
 			case 'g':
 				if ((damping != 1) || (noise != 1))
@@ -665,6 +676,10 @@ void constantInit(int argc, char *argv[]){
 			case 'G':
 				sscanf(optarg, "%lf", &phig);
 				break;
+			case 'v':
+				sscanf(optarg, "%d", &version);
+				init_genrand(version);
+				break;
 		}
 	}
 
@@ -725,6 +740,15 @@ void constantInit(int argc, char *argv[]){
 		Lx = 2/sqrt(3)*Nx/Ny*Ly;
 		Nbig = N;
 		Nsmall = 0;
+	}
+	else if (addMidWall){
+		double val = (phig/phil)*2/(sizeratio*sizeratio);
+		fractionSmallN = val/(1 + val);
+		Lx = sqrt(M_PI*N*(1-fractionSmallN)/(0.5*aspectRatio*phil));
+		Ly = Lx*aspectRatio;
+		Nsmall = N*fractionSmallN;
+		Nbig = N - Nsmall;
+		phi = (Nbig + Nsmall*(sizeratio*sizeratio))/(Lx*Ly)*M_PI;
 	}
 	else if (coexistenceOld){
 		double effectiveAspectRatio = aspectRatio;
@@ -852,10 +876,12 @@ void constantInit(int argc, char *argv[]){
 		}
 		
 	}
+
+
+
 	if ((critical > 0) && (fracCritical < 0)){
 		fracCritical = 2*aspectRatio;
 	}
-	
 
 	if (nextScreen == -1)
 		nextScreen = dtime;
@@ -888,7 +914,7 @@ void initThermo(){
 			fprintf(thermo, "pwall ");
 		}
 		if (addMidWall){
-			fprintf(thermo, "pmid dp ");
+			fprintf(thermo, "pmid dp packLeft packRight tempSolventLeft tempSolventRight tempSolute ");
 		}
 		if (addWell){
 			fprintf(thermo, "U ");
@@ -940,12 +966,13 @@ void initThermo(){
 			#endif
 		}
 	}
+	if (osmosisThermo){
+		osmosisFile = fopen(osmosisName, "w");
+		init_osmosis(Lx, Ly, sigma, osmosisFile);
+	}
 	if (strucThermo){
 		strucFile = fopen(strucName, "w");
-		if (strucThermo == 1)
-			initStructureFactor(qmax, Lx, Ly, N, strucFile, 0);
-		else
-			initStructureFactor(qmax, Lx, Ly, N, strucFile, dtime);
+		initStructureFactor(qmax, Lx, Ly, N, strucFile, doFQT);
 	}
 	if (dumpCluster && clusterThermo){
 		clusterFile = fopen(clusterName, "w");
@@ -1322,9 +1349,11 @@ void particlesInit(){
 						p->x = drand(Lx / 2 + 2.5, Lx - 2.5);
 					}
 				}
+				else if (addMidWall && i < Nbig){
+					p->x = drand(2.5, Lx / 2 - 2.5);
+				}
 				else{
 					p->x = drand(2.5, Lx - 2.5); 
-
 				}
 				p->y = drand(2.5, Ly - 2.5);
 				#if THREE_D
@@ -1558,8 +1587,13 @@ void eventListInit(){
 		crossingEvent = &crossingEventNormal;
 	}
 	addEventScreenshot(firstScreen);
-	if (noise)
-		addEventNoise(dtnoise);
+	if (noise){
+		double timeNoise = dtnoise;
+		if (noise == 10)
+			timeNoise += 1/vr;
+
+		addEventNoise(timeNoise);
+	}
 	if (updating)
 		addEventUpdate(updateTime);
 	if (umbrellaSampling)
@@ -1966,7 +2000,8 @@ void crossingEventNormal(int i){
 	if (addField){
 		double vy = p.vy;
 		double dy = PBCinsideCellY(p.y - (1 + p.cell[1])*cellySize);
-		if (vy > sqrt(2*field*dy)){
+
+		if ((dy < 0) && (vy > sqrt(2*field*dy))){
 			travelTimeY = (-vy + sqrt(vy*vy - 2*field*dy))/field;
 			yy = 4;
 			
@@ -2892,6 +2927,7 @@ void doTheWallNormal(){
 		}
 		else{
 			pi->vx = -resW*pi->vx;
+			pi->vy = resT*pi->vy;
 		}
 	}
 	else if (xy == 1){
@@ -2902,6 +2938,7 @@ void doTheWallNormal(){
 		
 		else{
 			pi->vy = -resW*pi->vy;
+			pi->vx = resT*pi->vx;
 		}
 		if (addShearWall){
 			if (pi->y + 2*pi->rad > Ly){
@@ -3189,14 +3226,14 @@ void doTheCollisionNormal(){
 			double dxrTemp = dxr;
 			dxr = dyr;  
 			dyr = -dxrTemp;
-			pi->vx +=  - 2*pj->m*invMass*delta*dxr;
+			pi->vx += - 2*pj->m*invMass*delta*dxr;
 			pi->vy += - 2*pj->m*invMass*delta*dyr;
-			pj->vx -=  - 2*pi->m*invMass*delta*dxr;
-			pj->vy -=- 2*pi->m*invMass*delta*dyr;
+			pj->vx -= - 2*pi->m*invMass*delta*dxr;
+			pj->vy -= - 2*pi->m*invMass*delta*dyr;
 		}
 
-		pi->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) - 0.5;
-		pj->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) - 0.5;
+		pi->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) + deltaOmega;
+		pj->omega += (1 - resBeta)/(1 + q)*1/(dist)*(gty*dxr - gtx*dyr) + deltaOmega;
 		#endif
 	#if !TANGENTIAL
 	}
@@ -3746,6 +3783,27 @@ void addNoise(){
 			collisionEvent(j);
 		}
 	}
+	// Self propelled particles
+	
+	else if (noise == 10){
+		double v0 = sqrt(2*T);
+		for (int i = 0; i < N; i++){
+			particle* p = particles + i;
+			p->coll++;
+
+			freeFly(p);
+			p->vr += drand(-1, 1)*sqrt(dtnoise);
+			p->vx += (-gamm*p->vx - gamm*v0*cos(p->vr))*dtnoise;
+			p->vy += (-gamm*p->vy - gamm*v0*sin(p->vr))*dtnoise;
+		}
+		for (int j = 0; j < N; j++){
+			removeEventFromQueue(eventList[j]);
+			crossingEvent(j);
+
+			removeEventFromQueue(eventList[N + j]);
+			collisionEvent(j);
+		}
+	}
 	else{
 		for (int i = 0; i < N; i++){
 
@@ -3876,9 +3934,9 @@ void saveTXT(){
 			fprintf(fichier, "%d %.2lf %.2lf %.2lf %.6lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz);
 		}
 		#else
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id type radius xu yu x y vx vy\n", t, N, Lx, Ly, Lz);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id x y\n", t, N, Lx, Ly, Lz);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %d %.2lf %.2lf %.2lf %.2lf %.2lf %.6lf %.6lf\n", i, particles[i].type, particles[i].rad, particles[i].x + Lx*particles[i].crossX, particles[i].y + Ly*particles[i].crossY, particles[i].x, particles[i].y, particles[i].vx, particles[i].vy);
+			fprintf(fichier, "%d %.2lf %.2lf\n", i, particles[i].x, particles[i].y);
 		}
 		#endif
 	}
@@ -4068,7 +4126,27 @@ void saveThermo(){
 			dp = 0;
 		}
 		if (addMidWall){
-			fprintf(thermo, "%lf %lf ", dpMid/(deltaTime*Ly),(dpRight - dpLeft)/(deltaTime*Ly)) ;
+			int Nleft = 0;
+			int Nright = 0;
+			int Nsolute = 0;
+			double Tsolute = 0;
+			double TsolventL = 0;
+			double TsolventR = 0;
+			for (int i = 0; i < N; i++){
+				if (particles[i].type == 0){
+					Nleft += (particles[i].x < halfLx) ? 1 : 0;
+					Nright += (particles[i].x > halfLx) ? 1 : 0;
+					double temp = 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+					TsolventL += (particles[i].x < halfLx) ? temp : 0;
+					TsolventR += (particles[i].x > halfLx) ? temp : 0;
+				}
+				else{
+					Nsolute++;
+					Tsolute += 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+				}
+			}
+			double ratio = M_PI/(halfLx*Ly);
+			fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf ", dpMid/(deltaTime*Ly), -(dpRight - dpLeft)/(deltaTime*Ly), ratio*Nleft*sizeratio*sizeratio, ratio*Nright*sizeratio*sizeratio, TsolventL/Nleft, TsolventR/Nright, Tsolute/(Nsolute));
 			dpMid = 0;
 			dpRight = 0;
 			dpLeft = 0;
@@ -4143,7 +4221,7 @@ void saveThermo(){
 		}
 		if (strucThermo){
 			//double start_time = omp_get_wtime();
-			saveStructureFactor(particles);
+			saveStructureFactor(particles, strucThermo);
 			//double end_time = omp_get_wtime();
 			//double time_spent = end_time - start_time;
 			//printf("\n Time struc: %f seconds\n", time_spent);
@@ -4162,6 +4240,9 @@ void saveThermo(){
 		}
 		if (pcfg6Thermo){
 			save_pcf_g6(pcfg6Name, particles, N, 2, fmin(Lx, Ly)/2, Lx, Ly);
+		}
+		if (osmosisThermo){
+			save_osmosis(particles, N);
 		}
 	}
 
@@ -4282,6 +4363,8 @@ void randomGaussian(particle* p, double T){
 			double std = sqrt(T*(1 - c*c)/p->m);
 			p->vx = std*a*cos(b) + (p->vx)*c;
 			p->vy = std*a*sin(b) + (p->vy)*c;
+			//p->vx = p->vx - gamm*p->vx*dtnoise/p->m - gamm*pow(p->vx, 3)*dtnoise/p->m;
+			//p->vy = p->vy - gamm*p->vy*dtnoise/p->m - gamm*pow(p->vy, 3)*dtnoise/p->m;
 		}
 	}
 	else{
@@ -4463,49 +4546,61 @@ void customName(){
     mkdir("dump/", 0777);
 	#endif
 
-	int v = 1;
+	sprintf(fileName, "dump/N_%dres_%.3lfphi_%.6lfq_%.3lfrat_%.3lfLx_%.3lfLy_%.3lf", N, res, phi, (double)Nsmall/N, sizeratio, Lx, Ly);
 	#if THREE_D
-		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfdeltaE_%.3lfdelta_%.3lfaddEnergy_%lfLx_%.3lfLy_%.3lfLz_%.3lfq_%.3lfv_",
-						        N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, additionalEnergy, Lx, Ly, Lz, (double)Nsmall/N);
-	#else
-		sprintf(fileName, "dump/N_%ddtnoise_%.3lfres_%.3lfgamma_%.3lfT_%.3lfphi_%.6lfrat_%.3lfvo_%.3lfdeltaE_%.3lfdelta_%.3lfaddEnergy_%lfLx_%.3lfLy_%.3lfq_%.3lfv_",
-								 N, dtnoise, res, gamm, T, phi, sizeratio, ts, deltaE, delta, additionalEnergy, Lx, Ly, (double)Nsmall/N);
-	#endif
+		sprintf(fileName + strlen(fileName), "Lz_%.3lf", Lz);
+	#endif	
+	if (damping || noise){
+		sprintf(fileName + strlen(fileName), "gamma_%.3lfT_%.3lfdt_%.3lf", gamm, T, dtnoise);
+	};
+	if (addDelta){
+		sprintf(fileName + strlen(fileName), "delta_%.3lf", delta);
+	}
+	if (addEnergy){
+		sprintf(fileName + strlen(fileName), "deltaE_%.3lfDeltaE_%.3lfts_%.3lfbeta_%.3lf", additionalEnergy, deltaE, taur, beta);
+	}
+	if (addMidWall){
+		sprintf(fileName + strlen(fileName), "phiS_%.6lfphis_%.6lf", phil, phig);
+	}
 
+	sprintf(fileName + strlen(fileName), "v_");
 	char baseFileName[256];
 	strcpy(baseFileName, fileName);
 
 	while (1) {
-		sprintf(fileName, "%s%d.dump", baseFileName, v);
+		sprintf(fileName, "%s%d.dump", baseFileName, version);
 		if (access(fileName, F_OK) != 0) {
 			break;
 		}
-		v += 1;
+		version += 1;
 	}
 
-	snprintf(thermoName, sizeof(thermoName), "%s%d.thermo", baseFileName, v);
+	snprintf(thermoName, sizeof(thermoName), "%s%d.thermo", baseFileName, version);
 
 	if (interfaceThermo) {
-		snprintf(interfaceName, sizeof(interfaceName), "%s%d.interface", baseFileName, v);
+		snprintf(interfaceName, sizeof(interfaceName), "%s%d.interface", baseFileName, version);
+	}
+	if (osmosisThermo) {
+		snprintf(osmosisName, sizeof(osmosisName), "%s%d.osmosis", baseFileName, version);
 	}
 
 	if (strucThermo) {
-		snprintf(strucName, sizeof(strucName), "%s%d.struc", baseFileName, v);
+		snprintf(strucName, sizeof(strucName), "%s%d.struc", baseFileName, version);
 	}
 
 	if (dumpCluster && clusterThermo) {
-		snprintf(clusterName, sizeof(clusterName), "%s%d.cluster", baseFileName, v);
+		snprintf(clusterName, sizeof(clusterName), "%s%d.cluster", baseFileName, version);
 	}
 
 	if (pcfBondOrderThermo) {
-		snprintf(pcfBondOrderName, sizeof(pcfBondOrderName), "%s%d.pcfBO", baseFileName, v);
-		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, v);
+		snprintf(pcfBondOrderName, sizeof(pcfBondOrderName), "%s%d.pcfBO", baseFileName, version);
+		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, version);
 	}
 	else if (pcfThermo){
-		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, v);
+		snprintf(pcfName, sizeof(pcfName), "%s%d.pcf", baseFileName, version);
 	}
 	if (pcfg6Thermo){
-		snprintf(pcfg6Name, sizeof(pcfg6Name), "%s%d.pcfg6", baseFileName, v);
+		snprintf(pcfg6Name, sizeof(pcfg6Name), "%s%d.pcfg6", baseFileName, version);
 	}
 }
 

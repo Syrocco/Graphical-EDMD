@@ -4,6 +4,7 @@
         "variant": "c",
         "chrono": "c",
         "ranges": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "ratio": "c"
     }
 }

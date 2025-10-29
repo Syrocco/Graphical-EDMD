@@ -22,6 +22,7 @@ Image image;
 Texture2D texture;
 
 Texture2D circleTexture;
+Texture2D arrowTexture;
 
 #define MAX_BATCH_ELEMENTS 8192*4
 
@@ -280,6 +281,38 @@ void drawParticlesAndBox(double factor, state* screenState, float zoom){
 
 		// Draw the circle using the texture
 		DrawTexturePro(circleTexture, sourceRect, destRect, (Vector2){0, 0}, 0.0f, screenState->particleColor);
+		
+		// Draw velocity arrow if enabled
+		if (screenState->arrow) {
+			double vx = particles[i].vx;
+			double vy = particles[i].vy;
+			double speed_squared = vx*vx + vy*vy;
+			
+			if (speed_squared > 1e-20) { // Only draw if particle has significant velocity (avoid sqrt)
+				// Calculate arrow size based on particle radius
+				double arrow_length = particles[i].rad * factor;
+				
+				// Calculate rotation angle (arrow texture points up, so we need to rotate to velocity direction)
+				double angle = atan2(vx, vy) * 180.0 / M_PI; // Convert to degrees for DrawTexturePro
+				
+				// Source rectangle (entire arrow texture) - define once outside loop if possible
+				Rectangle sourceRect = {0.0f, 0.0f, (float)arrowTexture.width, (float)arrowTexture.height};
+				
+				// Destination rectangle (centered on particle, sized to arrow_length)
+				Rectangle destRect = {
+					(float)(particles[i].x * factor), 
+					(float)((Ly - particles[i].y) * factor), 
+					(float)arrow_length, 
+					(float)arrow_length
+				};
+				
+				// Origin point for rotation (center of the destination rectangle)
+				Vector2 origin = {(float)(arrow_length * 0.5), (float)(arrow_length * 0.5)};
+				
+				// Use WHITE instead of BLACK for better performance (no color multiplication)
+				DrawTexturePro(arrowTexture, sourceRect, destRect, origin, angle, BLACK);
+			}
+		}
 
 		//DrawCircleV((Vector2){particles[i].x*factor, (Ly - particles[i].y)*factor}, particles[i].rad*factor, screenState->particleColor);
 
@@ -388,6 +421,8 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		reset(argc, argv, &screenWindow->factor, screenState);
 		
 	}
+
+	GuiCheckBox((Rectangle){start + 200*xGUI, 715*yGUI, 40*xGUI, 40*yGUI}, "Arrow", &screenState->arrow);
 
 	if (screenState->leftClicked == 0)
 		GuiUnlock();
@@ -1066,8 +1101,12 @@ window graphicalInit(){
 	// Load circle texture from embedded data
 	Image circleImage = LoadImageFromMemory(".png", src_tex_png, src_tex_png_len);
 	circleTexture = LoadTextureFromImage(circleImage);
-	UnloadImage(circleImage);  // Free the image data after creating texture
-	
+	UnloadImage(circleImage);  
+
+	Image arrowImage = LoadImage("src/arrow.png");
+	arrowTexture = LoadTextureFromImage(arrowImage);
+	UnloadImage(arrowImage);  
+
     return (window){
         .screenWidth = 1800,
         .screenHeight = 900,
@@ -1090,6 +1129,7 @@ state GUIinit(){
 		.colorParam = 0,
 		.colorEditing2 = false,
 		.colorParam2 = 0,
+		.arrow = false,
 		.colorArray = Plasma,
 		.colorFunction = colorCollision,
 		.colorFunctionArray = NULL,

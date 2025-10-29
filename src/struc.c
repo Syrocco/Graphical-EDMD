@@ -15,7 +15,8 @@ double *structFactor;
 double complex *structFactorComplex;
 FILE *fileout;
 
-void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file, double doFQT){
+
+void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,  double doFQT){
     double xx = 2*M_PI/Lx;
     double yy = 2*M_PI/Ly;
     nqx = 2*qmax/xx + 1;
@@ -33,6 +34,7 @@ void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
 
 
     fileout = file;
+    
     fprintf(file, "-%lf \n", doFQT);
     for (int i = 0; i < nqx; ++i)
         fprintf(fileout, "%g ", qx[i]);
@@ -70,8 +72,32 @@ void computeStructureFactor(particle* particles){
     }
 }
 
-void saveStructureFactor(particle* particles){
-    computeStructureFactor(particles);
+void computeVelocityStructureFactor(particle* particles){
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < nqx; i++){
+        for (int j = 0; j < nqy; j++){
+            double im = 0;
+            double re = 0;
+
+            for (int n = 0; n < N; n++){
+                particle* p = particles + n;
+                double qr = qx[i]*p->x + qy[j]*p->y;
+
+                re += p->vx*cos(qr) + p->vy*sin(qr);
+                im += p->vx*sin(qr) - p->vy*cos(qr);
+            }
+            if (structFactorComplex != NULL)    
+                structFactorComplex[i*nqy + j] = re + I*im;
+            else
+                structFactor[i*nqy + j] = (re*re + im*im)/N;
+        }
+    }
+}
+void saveStructureFactor(particle* particles, int mode){
+    if (mode == 0)
+        computeVelocityStructureFactor(particles);
+    else
+        computeStructureFactor(particles);
 
     for (int i = 0; i < nqx; ++i){
         for (int j = 0; j < nqy; ++j){

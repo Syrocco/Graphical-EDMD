@@ -48,8 +48,7 @@
 #include <pthread.h>
 #endif
 
-
-
+#define STRESS 1
 
 #define CGREEN printf("\033[1;32m")
 #define CWHITE printf("\033[0;37m")
@@ -97,6 +96,21 @@ double t = 0;
 
 double collTermX = 0;
 double collTermY = 0;
+double collTermXY = 0;
+double collTermYX = 0;
+#if STRESS
+double sumKineticX = 0;
+double sumKineticY = 0;
+double sumKineticXY = 0;
+double sumKineticYX = 0;
+
+double runningKineticX = 0;
+double runningKineticY = 0;
+double runningKineticXY = 0;
+double runningKineticYX = 0;
+
+double lastCollTime = 0;
+#endif
 double dp = 0;
 double dpLeft = 0;
 double dpRight = 0;
@@ -160,13 +174,13 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 100000;  
-double dtime = 0.1;
-int logSpacing = 0;
+double tmax = 10000000;  
+double dtime = 10000000;
+int    logSpacing = 0;
 double base = 1.01;
-double firstScreen = 0.001;
-double dtimeThermo = 0.5;
-double firstThermo = 0.01;
+double firstScreen = 100000;
+double dtimeThermo = 0.005;
+double firstThermo = 100;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -184,7 +198,7 @@ int addMidWall = 0;
 int addCircularWall = 0;
 bool damping = false;
 bool addDelta = false;
-bool addDeltaTangent = false;
+bool addDeltaTangent = true;
 bool addDoubleDelta = false;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -197,7 +211,7 @@ bool addShearWall = 0;
 const int liquidliquid = 0;
 #else
 const int addWell = 0;
-const int addField = 1;
+const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
@@ -243,7 +257,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.03;
+double delta = 1;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -273,7 +287,7 @@ double additionalEnergy = 0.01;
 
 
 //value for the field, must be < 0
-double field = -0.1; 
+double field = -0.2; 
 
 //Initial temperature
 double Einit = 1;
@@ -291,14 +305,14 @@ double deltaOmega = 100;
 //parameter if noise or damping
 double gamm = 2;
 //double gamm = 0.15;
-double T = 1;
+double T = 0.03;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.01;
+double dtnoise = 0.05;
 double T2 = 0.5;
 
 
-double strainRate = 2;
+double strainRate = -0.1;
 
 double a = 2;
 double b = 5;
@@ -358,8 +372,6 @@ int main(int argc, char *argv[]){
 	runningCheck();
 	particlesInit();
 	customName();
-	fichier = fopen(fileName, "w");
-	initThermo();
 	cellListInit();
 	if (addWell){
 		pairsInit();
@@ -368,7 +380,8 @@ int main(int argc, char *argv[]){
 	physicalQ();
 	format();
 	#if G != 1
-
+	fichier = fopen(fileName, "w");
+	initThermo();
 	while (t <= tmax){
 	#else
 	screenWindow.factor = GetScreenHeight()/Ly;
@@ -907,7 +920,7 @@ void initThermo(){
 		}
 		#else
 		if (addPressureThermo){
-			fprintf(thermo, "p px py ");
+			fprintf(thermo, "p px py pxy pyx ");
 		}
 		#endif
 		if (addCircularWall || addWallx || addWally){
@@ -977,6 +990,7 @@ void initThermo(){
 	if (dumpCluster && clusterThermo){
 		clusterFile = fopen(clusterName, "w");
 	}
+	
 }
 
 
@@ -1029,7 +1043,7 @@ void particlesInit(){
 
 		get_doubleatomprop("x", x, N, dump);
 		get_doubleatomprop("y", y, N, dump);
-		if (reduce != 0){
+		if (reduce == 0){
 			get_doubleatomprop("vx", vx, N, dump);
 			get_doubleatomprop("vy", vy, N, dump);
 			get_doubleatomprop("radius", rad, N, dump);
@@ -1424,9 +1438,7 @@ void particlesInit(){
 			free(indices);
 		}
 	}
-	
 
-	
 
 	if (load){
 		if (addCircularWall)
@@ -3054,7 +3066,6 @@ void doTheCollisionGrow(){
 }
 
 void doTheCollisionNormal(){
-
 	int i = nextEvent->i;
 	int j = nextEvent->j;
 
@@ -3063,6 +3074,8 @@ void doTheCollisionNormal(){
 
 
 	freeFly(pi); 
+
+
 	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
         collisionEvent(i);
         return;
@@ -3073,6 +3086,19 @@ void doTheCollisionNormal(){
 
 	pi->coll++;
 	pj->coll++;
+
+	#if STRESS
+	double dtLastColl = t - lastCollTime;
+	lastCollTime = t;
+	runningKineticX += sumKineticX*dtLastColl;
+	runningKineticY += sumKineticY*dtLastColl;
+	runningKineticXY += sumKineticXY*dtLastColl;
+	runningKineticYX += sumKineticYX*dtLastColl;
+	double oldvix = pi->vx;
+	double oldviy = pi->vy;
+	double oldvjx = pj->vx;
+	double oldvjy = pj->vy;
+	#endif
 
 	double dx = pj->x - pi->x;
 	double dy = pj->y - pi->y;
@@ -3126,17 +3152,12 @@ void doTheCollisionNormal(){
 		dxr = dx/dist;
 		dyr = dy/dist;
 		
-		double collTerm = pi->m*pj->m*funkyFactor*dist*dist - 2*pi->m*pj->m*invMass*delta*dist;
-		collTermX += collTerm*dxr*dxr;
-		collTermY += collTerm*dyr*dyr;
-		#if THREE_D
-		collTermZ += collTerm*dzr*dzr;
-		#endif
 
 		//perp
 		if (addDeltaTangent){
 			double dxrTemp = dxr;
-			dxr = dyr;  
+
+			dxr = dyr;
 			dyr = -dxrTemp;
 		}
 		
@@ -3144,7 +3165,12 @@ void doTheCollisionNormal(){
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
 		pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
 		pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
-		
+
+		collTermX += pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dx;
+		collTermY += pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dy;
+		collTermXY += pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dy;
+		collTermYX += pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dx;
+
 	}
 	else if (addEnergy){
 		#if THREE_D
@@ -3170,6 +3196,8 @@ void doTheCollisionNormal(){
 		double collTerm = pi->m*pj->m*funkyFactor2;
 		collTermX += collTerm*dx*dx;
 		collTermY += collTerm*dy*dy;
+		collTermXY += collTerm*dx*dy;
+		collTermYX += collTerm*dy*dx;
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		#endif
@@ -3192,6 +3220,8 @@ void doTheCollisionNormal(){
 
 		collTermX += collTerm*dx*dx;
 		collTermY += collTerm*dy*dy;
+		collTermXY += collTerm*dx*dy;
+		collTermYX += collTerm*dy*dx;
 		
 
 		pi->vx += funkyFactor*pj->m*dx;
@@ -3250,6 +3280,13 @@ void doTheCollisionNormal(){
 	removeEventFromQueue(eventList[N + j]);
 	collisionEvent(i);
 	collisionEvent(j);
+
+	#if STRESS
+	sumKineticX += pi->m*(pi->vx*pi->vx - oldvix*oldvix) + pj->m*(pj->vx*pj->vx - oldvjx*oldvjx);
+	sumKineticY += pi->m*(pi->vy*pi->vy - oldviy*oldviy) + pj->m*(pj->vy*pj->vy - oldvjy*oldvjy);
+	sumKineticXY += pi->m*(pi->vx*pi->vy - oldvix*oldviy) + pj->m*(pj->vx*pj->vy - oldvjx*oldvjy);
+	sumKineticYX += pi->m*(pi->vy*pi->vx - oldviy*oldvix) + pj->m*(pj->vy*pj->vx - oldvjy*oldvjx);
+	#endif
 }
 
 void doIn(){
@@ -3338,6 +3375,8 @@ void doIn(){
 		double collTerm = -pj->m*(vjf - vj)*dr;
 		collTermX += collTerm*dxr*dxr;
 		collTermY += collTerm*dyr*dyr;
+		collTermXY += collTerm*dxr*dyr;
+		collTermYX += collTerm*dyr*dxr;
 		#if THREE_D
 		collTermZ += collTerm*dzr*dzr;
 		#endif
@@ -3455,6 +3494,8 @@ void doOut(){
 		double collTerm = -pj->m*(vjf - vj)*dr;
 		collTermX += collTerm*dxr*dxr;
 		collTermY += collTerm*dyr*dyr;
+		collTermXY += collTerm*dxr*dyr;
+		collTermYX += collTerm*dyr*dxr;
 		#if THREE_D
 		collTermZ += collTerm*dzr*dzr;
 		#endif
@@ -3721,6 +3762,14 @@ void stopGrow(){
 		removeEventFromQueue(eventList[p->num]);
 		crossingEvent(p->num);
 	}
+	#if STRESS
+	for (int i = 0; i < N; i++){
+		sumKineticX += particles[i].m*particles[i].vx*particles[i].vx;
+		sumKineticY += particles[i].m*particles[i].vy*particles[i].vy;
+		sumKineticXY += particles[i].m*particles[i].vx*particles[i].vy;
+		sumKineticYX += particles[i].m*particles[i].vy*particles[i].vx;
+	}
+	#endif
 }
 
 void addEventGrow(double time){
@@ -4056,6 +4105,8 @@ void saveTXT(){
 void saveThermo(){
 	double pressureX = 0;
 	double pressureY = 0;
+	double pressureXY = 0;
+	double pressureYX = 0;
 	#if THREE_D
 	double pressureZ = 0;
 	double vol = Lx*Ly*Lz;
@@ -4076,12 +4127,49 @@ void saveThermo(){
 	pressure = (-1/(deltaTime))*(collTermX + collTermY + collTermZ)/(3*vol) + (2./3.)*E/vol;
 	collTermZ = 0;
 	#else
-	pressureX = -1*collTermX/(area*deltaTime);
-	pressureY = -1*collTermY/(area*deltaTime);
+	double energyX = 0, energyY = 0, energyXY = 0, energyYX = 0;
+	#if STRESS
+	double dtLastColl = t - lastCollTime;
+	lastCollTime = t;
+	runningKineticX += sumKineticX*dtLastColl;
+	runningKineticY += sumKineticY*dtLastColl;
+	runningKineticXY += sumKineticXY*dtLastColl;
+	runningKineticYX += sumKineticYX*dtLastColl;
+	lastCollTime = t;
+	energyX = runningKineticX/deltaTime;
+	energyY = runningKineticY/deltaTime;
+	energyXY = runningKineticXY/deltaTime;
+	energyYX = runningKineticYX/deltaTime;
+	runningKineticX = 0;
+	runningKineticY = 0;
+	runningKineticXY = 0;
+	runningKineticYX = 0;
+	#else
+	double vx_total = 0;
+	double vy_total = 0;
+	for (int i = 0; i < N; i++){
+		vx_total += particles[i].vx;
+		vy_total += particles[i].vy;
+	}
+	double vx_cm = vx_total/N;
+	double vy_cm = vy_total/N;
+	for (int i = 0; i < N; i++){
+		energyX += particles[i].m*(particles[i].vx - vx_cm)*(particles[i].vx - vx_cm);
+		energyY += particles[i].m*(particles[i].vy - vy_cm)*(particles[i].vy - vy_cm);
+		energyXY += particles[i].m*(particles[i].vx - vx_cm)*(particles[i].vy - vy_cm);
+		energyYX += particles[i].m*(particles[i].vy - vy_cm)*(particles[i].vx - vx_cm);
+	}
+	#endif
+	pressureX = -1*collTermX/(area*deltaTime) + energyX/area;
+	pressureY = -1*collTermY/(area*deltaTime) + energyY/area;
+	pressureXY = -1*collTermXY/(area*deltaTime) + energyXY/area;
+	pressureYX = -1*collTermYX/(area*deltaTime) + energyYX/area;
 	pressure = (-1/(deltaTime))*(collTermX + collTermY)/(2*area) + E/area;
 	#endif
 	collTermX = 0;
 	collTermY = 0;
+	collTermXY = 0;
+	collTermYX = 0;
 
 	if (t != 0){
 		fprintf(thermo, "%lf ", t);
@@ -4097,7 +4185,7 @@ void saveThermo(){
 		}
 		#else
 		if (addPressureThermo){
-			fprintf(thermo, "%lf %lf %lf ", pressure, pressureX, pressureY);
+			fprintf(thermo, "%lf %lf %lf %lf %lf ", pressure, pressureX, pressureY, pressureXY, pressureYX);
 		}
 		#endif
 		if (addCircularWall || addWallx || addWally){
@@ -4553,7 +4641,7 @@ void customName(){
 	if (damping || noise){
 		sprintf(fileName + strlen(fileName), "gamma_%.3lfT_%.3lfdt_%.3lf", gamm, T, dtnoise);
 	};
-	if (addDelta){
+	if (addDelta || addDeltaTangent){
 		sprintf(fileName + strlen(fileName), "delta_%.3lf", delta);
 	}
 	if (addEnergy){

@@ -596,13 +596,13 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Tangent Delta", &addDeltaTangent);
 	if (addDelta || addDeltaTangent){
 		sprintf(name, "%.3f", delta);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 0.1);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 1);
 	}
 
 	if (addField){
 		double fieldTemp = field;
 		sprintf(name, "%.3f", field);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 40*yGUI}, "g", name, &field, -0.03, -0.0001);
+		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 380*yGUI, 505*xGUI, 20*yGUI}, "g", name, &field, -0.03, -0.0001);
 		if (fieldTemp != field){
 			for (int i = 0; i < N; i++){
 				particle* p = particles + i;

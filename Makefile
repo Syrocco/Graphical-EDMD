@@ -17,8 +17,6 @@ else
 endif
 
 
-# Check if OpenMP is supported by the compiler
-# For clang on macOS, might need libomp installed via: brew install libomp
 OPENMP_SUPPORT := $(shell echo 'int main(){return 0;}' | $(CC) -fopenmp -x c - -o /tmp/openmp_test 2>/dev/null && echo "yes" || echo "no"; rm -f /tmp/openmp_test 2>/dev/null)
 ifeq ($(OPENMP_SUPPORT),no)
 	ifneq ($(findstring clang,$(CC)),)
@@ -28,12 +26,11 @@ ifeq ($(OPENMP_SUPPORT),no)
 endif
 
 
-# Source files in src directory
+
 SRC_DIR = src
 SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c
 GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c
 
-# Include directory for headers
 INCLUDE_FLAGS = -I$(SRC_DIR)
 
 ifeq ($(OPENMP_SUPPORT),yes)
@@ -62,11 +59,11 @@ endif
 EDMD: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0
 
-# Graphics target - optimized build with graphics libraries
+
 graphics: $(GRAPHICS_SOURCES)
 	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) -DG=1
 
-# Debug target - no optimization, with debug symbols
+
 debug: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
 
@@ -74,5 +71,5 @@ debug: $(SOURCES)
 clean:
 	rm -f EDMD EDMD_debug graphics_build *.o
 
-# Make EDMD the default target
+
 .DEFAULT_GOAL := EDMD

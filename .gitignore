@@ -4,8 +4,6 @@
 # But don't ignore these
 !docs/
 !docs/**
-!.vscode/
-!.vscode/**
 !.gitignore
 !Makefile
 !README.md

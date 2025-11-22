@@ -84,7 +84,7 @@ int coordToCell(double a, int x);
 int PBCcellX(double a);
 int PBCcellY(double a);
 int PBCcellZ(double a);
-void shearCorrection(double* x, double* vx, int sign);
+void shearCorrection(double* x, double* vx, int sign, particle* p);
 void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx);
 
 void addEventToQueue(node* toAdd);

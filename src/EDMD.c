@@ -162,6 +162,8 @@ int strucThermo = 0;
 int doFQT = 0;
 double qmax = 1;
 
+int bubbleStop = 0;
+
 int areaThermo = 0;
 
 int boopThermo = 0;
@@ -174,13 +176,13 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 10000000;  
-double dtime = 10000000;
+double tmax = 2000000;  
+double dtime = 100000;
 int    logSpacing = 0;
 double base = 1.01;
-double firstScreen = 100000;
-double dtimeThermo = 0.005;
-double firstThermo = 100;
+double firstScreen = 1000;
+double dtimeThermo = 40;
+double firstThermo = 10;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -219,7 +221,7 @@ const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
-const int addDeltaTangent = 0;
+const int addDeltaTangent = 1;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
@@ -227,7 +229,7 @@ const int addExpo = 0;
 const int polydispersity = 0;
 const int thermoWall = 0;
 const int charged = 0;
-const int addShear = 0;
+const int addShear = 1;
 const int addShearWall = 0;
 const int liquidliquid = 0;
 #endif
@@ -297,7 +299,7 @@ double resW = 1.;
 double resT = 1.;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.3;
 double resBeta = 0.;
 
 double deltaOmega = 100;
@@ -312,7 +314,7 @@ double dtnoise = 0.05;
 double T2 = 0.5;
 
 
-double strainRate = -0.1;
+double strainRate = -0.0001;
 
 double a = 2;
 double b = 5;
@@ -584,13 +586,14 @@ void constantInit(int argc, char *argv[]){
 		{"phil", required_argument, NULL, 'P'},
 		{"phig", required_argument, NULL, 'G'},
 		{"version", required_argument, NULL, 'v'},
+		{"strainRate", required_argument, NULL, 'S'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:S:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -692,6 +695,9 @@ void constantInit(int argc, char *argv[]){
 			case 'v':
 				sscanf(optarg, "%d", &version);
 				init_genrand(version);
+				break;
+			case 'S':
+				sscanf(optarg, "%lf", &strainRate);
 				break;
 		}
 	}
@@ -2113,7 +2119,7 @@ void doTheCrossing(){
 				p->cell[1] = Nycells - 1;
 				p->crossY -= 1;
 				if ((addShear && t >= 1/vr) || (addShear && load)){
-					shearCorrection(&(p->x), &(p->vx), -1);
+					shearCorrection(&(p->x), &(p->vx), -1, p);
 					p->cell[0] = coordToCell(p->x, 1); 
 				}
 			}
@@ -2126,7 +2132,7 @@ void doTheCrossing(){
 				p->cell[1] = 0;
 				p->crossY += 1;
 				if ((addShear && t >= 1/vr) || (addShear && load)){
-					shearCorrection(&(p->x), &(p->vx), 1);
+					shearCorrection(&(p->x), &(p->vx), 1, p);
 					p->cell[0] = coordToCell(p->x, 1); 
 				}
 			}
@@ -4185,7 +4191,7 @@ void saveThermo(){
 		}
 		#else
 		if (addPressureThermo){
-			fprintf(thermo, "%lf %lf %lf %lf %lf ", pressure, pressureX, pressureY, pressureXY, pressureYX);
+			fprintf(thermo, "%lf %lf %lf %.10lf %.10lf ", pressure, pressureX, pressureY, pressureXY, pressureYX);
 		}
 		#endif
 		if (addCircularWall || addWallx || addWally){
@@ -4333,6 +4339,35 @@ void saveThermo(){
 			save_osmosis(particles, N);
 		}
 	}
+	if (bubbleStop){
+		double Z = (1 + phi*phi/8)/pow(1 - phi, 2);
+		double dZdphi = 2*Z/(1 - phi) + (phi/4)/pow(1 - phi, 2);
+		double compressibility = 1/(Z + phi*dZdphi);
+		static int count = 0;
+		double re = 0, im = 0;
+		double qx = 4*M_PI/Lx;
+		double qy = 4*M_PI/Ly;
+		for (int n = 0; n < N; n++){
+                particle* p = particles + n;
+                double qr = qx*p->x + qy*p->y;
+
+                re += cos(qr);
+                im += sin(qr);
+            }
+		
+		double structFactor = (re*re + im*im)/N;
+	    if (structFactor > 10*compressibility){
+			count++;
+		}
+		else{
+			count = 0;
+		}
+		if (count >= 5){
+			printf("\nBubble detected! Stopping simulation...\n");
+			fprintf(thermo, "-1\n");
+			exit(4);
+		}
+	}
 
 }
 
@@ -4462,9 +4497,19 @@ void randomGaussian(particle* p, double T){
 	}
 }
 
-void shearCorrection(double* x, double* vx, int sign){
+void shearCorrection(double* x, double* vx, int sign, particle* p){
+	#if STRESS
+	double oldvix = p->vx;
+	double oldviy = p->vy;
+	#endif
 	*x += sign*(fmod(strainRate*(t - 1/vr)*Ly, Lx));
 	*vx += sign*strainRate*Ly;
+	#if STRESS
+	sumKineticX += p->m*(p->vx*p->vx - oldvix*oldvix);
+	sumKineticY += p->m*(p->vy*p->vy - oldviy*oldviy);
+	sumKineticXY += p->m*(p->vx*p->vy - oldvix*oldviy);
+	sumKineticYX += p->m*(p->vy*p->vx - oldviy*oldvix);
+	#endif
 	PBCpostX(x);
 }
 
@@ -4472,14 +4517,14 @@ void correctDistances(particle* p1, particle* p2, double lat2, double* dx, doubl
 	if (p1->cell[1] == 0 && p2->cell[1] == Nycells - 1){
 		double x = p2->x + lat2*p2->vx;
 		double vx = p2->vx;
-		shearCorrection(&x, &vx, 1);
+		shearCorrection(&x, &vx, 1, p2);
 		*dx = x - p1->x;
 		*dvx = vx - p1->vx;
 		}
 	if (p1->cell[1] == Nycells - 1 && p2->cell[1] == 0){
 		double x = p2->x + lat2*p2->vx;
 		double vx = p2->vx;
-		shearCorrection(&x, &vx, -1);
+		shearCorrection(&x, &vx, -1, p2);
 		*dx = x - p1->x;
 		*dvx = vx - p1->vx;
 	}
@@ -4649,6 +4694,9 @@ void customName(){
 	}
 	if (addMidWall){
 		sprintf(fileName + strlen(fileName), "phiS_%.6lfphis_%.6lf", phil, phig);
+	}
+	if (addShear){
+		sprintf(fileName + strlen(fileName), "shear_%.6lf", strainRate);
 	}
 
 	sprintf(fileName + strlen(fileName), "v_");

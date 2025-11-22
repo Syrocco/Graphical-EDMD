@@ -11,9 +11,8 @@ At full speed, and for ~2000 particles the algorithm can perform around $10^6$ c
 
 ## Compiling
 
-For now, the project can only be compiled on linux but it should be pretty straighforward to modify it to compile on Windows. The graphical part probably only works with x11 but it's a matter of finding the good makefile :).
 
-Use ```make graphics``` for the algorithm with the graphical interface and ```make``` for the algorithm without a graphical interface. If you want to use the graphical interface, make sure that ```#define THREE_D``` is set to 0 as the graphical interface does not work in 3D yet (and a lot of options are not yet supported in 3D).
+Use ```make graphics``` for the algorithm with the graphical interface (does not work on Windows) and ```make``` for the algorithm without a graphical interface. If you want to use the graphical interface.
 
 ##### Dependencies:
   For the graphical part: [raylib](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)
@@ -32,7 +31,7 @@ Everything is pure C no library.
 - Events (particles crossing cell-lists boundaries, particles colliding, thermostating, displaying, taking user inputs) are stored in a Binary Search Tree which receive events from [a partially sorted buffer/priority queue](https://arxiv.org/abs/physics/0606226).
 
 ### Graphical part
-This program was first designed without a graphical interface in mind and uses a lot of global variable. The graphical interface **must not** interfere in any way to the structure of the initial program. Which might partially explains some poor design choice.
+This program was first designed without a graphical interface in mind and uses a lot of global variables. The graphical interface **must not** interfere in any way to the structure of the initial program. Which might partially explains some poor design choice.
 If it has to be redone, I would change a lot of things and encapsulate more the code. I'm still reworking the graphical part to alleviate the use of global variables.
 
 ## Sources

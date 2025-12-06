@@ -61,7 +61,7 @@
 int N = 500;
 double phi = 0.38;
 double sizeratio = 1;
-double fractionSmallN = 0;
+double fractionSmallN = 0.5;
 double aspectRatio = 1.0;
 int controlLenght = 0;
 
@@ -136,14 +136,14 @@ FILE* file;
 
 int load = 0;
 int S1 = 0;
-int Hex = 0;
+int Hex = 1;
 int coexistenceOld = 0;
 int coexistence = 0;
 
 int osmosisThermo = 0;
 double sigma = 2;
 
-int interfaceThermo = 0;
+int interfaceThermo = 1;
 int interfaceThermoTemp = 0;
 
 int clusterThermo = 0;
@@ -177,7 +177,7 @@ int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 2000000;  
-double dtime = 100000;
+double dtime = 1000;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 1000;
@@ -212,26 +212,26 @@ bool addShear = 0;
 bool addShearWall = 0;
 const int liquidliquid = 0;
 #else
-const int addWell = 0;
+const int addWell = 1;
 const int addField = 0;
 const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
-const int addDeltaTangent = 1;
-const int addEnergy = 0;
+const int addDeltaTangent = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int polydispersity = 0;
 const int thermoWall = 0;
 const int charged = 0;
-const int addShear = 1;
+const int addShear = 0;
 const int addShearWall = 0;
-const int liquidliquid = 0;
+const int liquidliquid = 1;
 #endif
 
 //update the thermostat temperature to reach a wanted temperature for the system
@@ -275,17 +275,17 @@ double vo = 3.5;
 double ao = 1.5;
 
 //values for square potential model
-double sig = 1.375;
-double U = -0.5;
+double sig = 1.6;
+double U = -0.8;
 
 //Value of the energy input at collision
 
 const double randomInjection = 0;
 const int simplifyInjection = 0;
-double deltaE = 50;
+double deltaE = 0;
 double beta = 10;
 double taur = 3;
-double additionalEnergy = 0.01;
+double additionalEnergy = 0.043;
 
 
 //value for the field, must be < 0
@@ -299,13 +299,13 @@ double resW = 1.;
 double resT = 1.;
 
 //coeff of restitution of particles
-double res = 0.3;
+double res = 1;
 double resBeta = 0.;
 
 double deltaOmega = 100;
 
 //parameter if noise or damping
-double gamm = 2;
+double gamm = 0.1;
 //double gamm = 0.15;
 double T = 0.03;
 double expE = 1;

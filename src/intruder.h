@@ -2,6 +2,9 @@
 #define INTRUDER_H
 #include "EDMD.h"
 
+
+#define INTRUDER_TOL 1e-10
+
 extern double t;
 typedef struct polygon polygon;
 struct polygon{
@@ -10,6 +13,7 @@ struct polygon{
     double normals[20][2];
     double tangents[20][2];
     int n_vertices;
+    double max_extent;
 };
 
 typedef struct intruder intruder;
@@ -24,7 +28,9 @@ struct intruder{
 
 enum intruderShape{
     SQUARE,
-    TRIANGLE
+    TRIANGLE,
+    WHEEL,
+    CHIRAL_WHEEL
 };
 
 typedef struct collisionInfo collisionInfo;

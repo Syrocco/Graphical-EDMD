@@ -195,8 +195,8 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 100000000;  
-double dtime = 10;
+double tmax = 10000;  
+double dtime = 100;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
@@ -238,7 +238,7 @@ const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 0;
+const int addDelta = 1;
 const int addDeltaTangent = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
@@ -277,7 +277,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 1;
+double delta = 0.1;
 
 //values for double delta model
 double deltaM = 0.03;
@@ -317,7 +317,7 @@ double resW = 1.;
 double resT = 1.;
 
 //coeff of restitution of particles
-double res = 1;
+double res = 0.9;
 double resBeta = 0.;
 
 double deltaOmega = 100;
@@ -344,13 +344,19 @@ double proportionNeutralyCharged = 0.1;
 #if INTRUDER
 
 intruder intru;
-double Im = 100000;
-double M = 1000;
-double sizeIntruder = 14;
+double res_intruder = 0.5;
+double delta_intruder = 0.0;
+
+
+double Im = 100;
+double M = 500000000;
 double angle = M_PI/4;
 double omega = 0.0;
 double VX = 0.0;
 double VY = 0.0;
+
+enum intruderShape shape = CHIRAL_WHEEL;
+double paramIntruder[3] = {20, 10, 8};
 
 double displayRad = 0.1;
 #endif
@@ -972,8 +978,7 @@ void constantInit(int argc, char *argv[]){
 	}
 
 	#if INTRUDER
-	double size[2] = {sizeIntruder, sizeIntruder};
-	intruderInit(&intru, Lx/2, Ly/2, VX, VY, angle, omega, M, Im, TRIANGLE, size);
+	intruderInit(&intru, Lx/2, Ly/2, VX, VY, angle, omega, M, Im, shape, paramIntruder);
 	if (Hex){
 		for (int i = 0; i < Nx; i++){
 			for (int j = 0; j < Ny; j++){
@@ -1755,7 +1760,8 @@ void eventListInit(){
 		collisionEvent(i);
 	}
 	#if INTRUDER
-	collisionEventIntruder();
+	if (load == 1 || Hex == 1)
+		collisionEventIntruder();
 	#endif
 	
 
@@ -2541,7 +2547,7 @@ void collisionEventIntruder(){
 		particle* p1 = particles + i;
 		freeFlyNormal(p1);
 		double time = collisionTimeIntruder(&intru, p1);
-		if ((time < dt) && (time > 0.00000001)){
+		if ((time < dt) && (time > INTRUDER_TOL)){
 			dt = time;
 			index = i;
 		}
@@ -2802,11 +2808,10 @@ void collisionEventNormal(int i){
 		}
 	}
 	#if INTRUDER
-	    freeFlyNormal(p1);
     	freeFlyIntruder(&intru);
 		double time = collisionTimeIntruder(&intru, p1);
 		//printf("%lf\n", time);
-		if ((time < dt) && (time > 0.00000001)){
+		if ((time < dt) && (time > INTRUDER_TOL)){
 			addCollisionIntruderEvent(i, -1, t + time);
 			return;
 		}
@@ -3619,23 +3624,52 @@ void doTheCollisionIntruder(){
 
 	double rvx = p->vx - vcx;
 	double rvy = p->vy - vcy;
-	double vn = rvx*nx + rvy*ny;
+	double vn = rvx*nx + rvy*ny; // g_n
+
+	// Tangent at contact: t = z x n
+	double tx = -ny;
+	double ty =  nx;
+	double vt = rvx*tx + rvy*ty; // g_t (currently unused by the chosen tangential rule)
+	(void)vt;
 
 	if (vn < 0.0){
-		double rCrossN = rx*ny - ry*nx;
+		// Collision rule with dissipation (res_intruder) and chirality (delta_intruder)
+		// a = 1/m + 1/M, kappa_n = (r x n)_z, kappa_t = (r x t)_z, I = moment of inertia
+
 		double invPMass = 1.0/p->m;
 		double invMassIntruder = 1.0/P->M;
-		double invInertiaIntruder = 1.0/P->Im;
-		double denom = invPMass + invMassIntruder + (rCrossN*rCrossN)*invInertiaIntruder;
-		if (denom > 0.0){
-			double J = -2.0*vn/denom;
+		double Im = P->Im;
 
-			p->vx += J*invPMass*nx;
-			p->vy += J*invPMass*ny;
+		double invInertiaIntruder = 1.0/Im;
 
-			P->vx -= J*invMassIntruder*nx;
-			P->vy -= J*invMassIntruder*ny;
-			P->omega -= J*rCrossN*invInertiaIntruder;
+		double aeff = invPMass + invMassIntruder;
+		double kappa_n = rx*ny - ry*nx;      // (r x n)_z
+		double kappa_t = rx*ty - ry*tx;      // (r x t)_z = r . n in 2D
+
+		double lambda_n = aeff + (kappa_n*kappa_n)*invInertiaIntruder;
+		double lambda_t = aeff + (kappa_t*kappa_t)*invInertiaIntruder;
+
+		if (lambda_n > 0.0 && lambda_t > 0.0){
+			// Tangential impulse (chosen model): J_t = 2*Delta / lambda_t
+			double Jt = (2.0*delta_intruder)/lambda_t;
+
+			// Normal impulse with coupling:
+			// J_n = (1+alpha)/lambda_n * g_n - (kappa_n*kappa_t)/(I*lambda_n) * J_t
+			double Jn = ((1.0 + res_intruder)/lambda_n)*vn
+					- (kappa_n*kappa_t)*invInertiaIntruder*Jt/lambda_n;
+
+			// Full impulse vector J = J_n n + J_t t
+			double Jx = Jn*nx + Jt*tx;
+			double Jy = Jn*ny + Jt*ty;
+
+			// Update velocities using:
+			// v' = v - J/m, V' = V + J/M, Omega' = Omega + (r x J)_z / I
+			p->vx -= Jx*invPMass;
+			p->vy -= Jy*invPMass;
+
+			P->vx += Jx*invMassIntruder;
+			P->vy += Jy*invMassIntruder;
+			P->omega += (rx*Jy - ry*Jx)*invInertiaIntruder;
 		}
 	}
 
@@ -4132,6 +4166,9 @@ void stopGrow(){
 		removeEventFromQueue(eventList[p->num]);
 		crossingEvent(p->num);
 	}
+	#if INTRUDER
+	collisionEventIntruder();
+	#endif
 	#if STRESS
 	for (int i = 0; i < N; i++){
 		sumKineticX += particles[i].m*particles[i].vx*particles[i].vx;

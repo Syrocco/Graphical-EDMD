@@ -238,6 +238,9 @@ void getInput(window* screenWindow, state* screenState){
 	if (IsKeyReleased(KEY_SPACE)){
 		screenState->spacePressed = false;
 	}
+	if (IsKeyReleased(KEY_S)){
+		saveSnapshotGraphics();
+	}
 }
 
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue){
@@ -818,11 +821,20 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
             (Rectangle){ 400 + start*xGUI, 450*yGUI, SIZE*xGUI, SIZE*yGUI},
             (Vector2){ 0, 0 }, 0.0f, (Color){255, 255, 255, 255});
 	}
+
+
 	DrawFPS(GetScreenWidth() - 100, 10);
 	
 	EndDrawing();
 }
 
+void saveSnapshotGraphics(){
+
+	customName();
+	fichier = fopen(fileName, "w");
+	saveTXT();
+	fclose(fichier);
+}
 
 double colorVelocity(particle* p){
 	return sqrt(p->vx*p->vx + p->vy*p->vy); 
@@ -973,6 +985,7 @@ void reset(int argc, char *argv[], double* factor, state* screenState){
 	actualPaulList = 0;
 	screenState->selected = 0;
 	screenState->leftClicked = 0;
+	version = 1;
 
 	
 	constantInit(argc, argv);
@@ -1044,15 +1057,14 @@ window graphicalInit(){
 	load = 0;
 	dtnoise = 1;
 	dtime = 1;
-	N = 2000;
+	N = 10000;
 	phi = 0.5;
 	field = -0.001;
-	res = 1;
-	delta = 0.01;
-	damping = 0.02;
+	res = 0.6;
+	delta = 1;
+	gamm = 0.025;
 	sig = 1.5;
 	U = 0.15;
-	gamm = 0.1;
 	T = 0.01;
 	Einit = 0.01;
 

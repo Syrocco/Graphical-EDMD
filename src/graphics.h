@@ -74,6 +74,10 @@ extern int pcfBondOrderThermo;
 extern int pcfg6Thermo;
 extern int critical;
 extern int snapshotCritical;
+extern int version;
+
+extern char fileName[350];
+extern FILE* fichier;
 
 typedef struct window window;
 struct window{
@@ -147,3 +151,4 @@ int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 window graphicalInit();
 state GUIinit();
 void graphicsFree(state* screenState);
+void saveSnapshotGraphics();

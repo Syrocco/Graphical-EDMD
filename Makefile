@@ -28,7 +28,7 @@ endif
 
 
 SRC_DIR = src
-SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c
+SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c $(SRC_DIR)/intruder.c
 GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c
 
 INCLUDE_FLAGS = -I$(SRC_DIR)

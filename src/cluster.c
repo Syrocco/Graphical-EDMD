@@ -13,6 +13,9 @@ typedef struct cluster {
 int numClusters;
 cluster* clusters;
 
+extern int clusterMode;
+extern int clusterNeighborThreshold;
+
 bool areParticlesClose(particle* p1, particle* p2, double r_c);
 void addParticleToCluster(cluster* cl, particle* p);
 void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, int Nycells);
@@ -109,8 +112,9 @@ void findClustersOld(particle* particles, int N, double r_c, particle** cellList
 }
 
 void findClusters(particle* particles, int N, double r_c, particle** cellList, int Nxcells, __attribute__((unused)) int Nycells) {
+    const int neighborThreshold = clusterNeighborThreshold;
     bool* visited = calloc((unsigned int)N, sizeof(bool));
-    bool* liquidlike = calloc((unsigned int)N, sizeof(bool));
+    bool* targetLike = calloc((unsigned int)N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;
     int mul = floor(r_c/2) + 1;
@@ -143,14 +147,20 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
                 #endif
             }
         }
-        if (neighborCount >= 3) {
-            liquidlike[i] = true;
+        if (clusterMode == 0) {
+            if (neighborCount >= neighborThreshold) {
+                targetLike[i] = true;
+            }
+        } else {
+            if (neighborCount <= neighborThreshold) {
+                targetLike[i] = true;
+            }
         }
     }
 
     // Second pass: find clusters among liquidlike particles
     for (int i = 0; i < N; i++) {
-        if (liquidlike[i] && !visited[i]) {
+        if (targetLike[i] && !visited[i]) {
             cluster cl;
             cl.size = 0;
             cl.capacity = 10;
@@ -174,7 +184,7 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
                             particle* p2 = cellList[PBCcellY(Y + m) * Nxcells + PBCcellX(X + k)];
                         #endif
                         while (p2 != NULL) {
-                            if (liquidlike[p2->num] && !visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
+                            if (targetLike[p2->num] && !visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
                                 addParticleToCluster(&cl, p2);
                                 visited[p2->num] = true;
                             }
@@ -192,7 +202,7 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
         }
     }
     for (int i = 0; i < N; i++) {
-        if (!liquidlike[i]) {
+        if (!targetLike[i]) {
             cluster cl;
             cl.size = 1;
             cl.capacity = 1;
@@ -205,7 +215,7 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
     }
     sortClustersBySize();
     free(visited);
-    free(liquidlike);
+    free(targetLike);
 }
 
 void freeClusters() {

@@ -4,12 +4,17 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+
+#define never 100000000000000000000000000.0
+
 #define THREE_D 0
 #ifndef THREE_D
 #    define THREE_D 0
 #endif
 
 #define TANGENTIAL 0
+
+#define INTRUDER 1
 
 enum event{
 	CELLCROSS,
@@ -22,6 +27,9 @@ enum event{
 	OUT, IN,
 	GROWSTOP,
 	UMBRELLA,
+	#if INTRUDER
+	INTRUDER_COLLISION,
+	#endif
 };
 
 typedef struct arguments arguments;
@@ -48,6 +56,9 @@ struct particle{
     double omega;     // Angular velocity
     double J;         // Moment of inertia
     #endif
+	#if INTRUDER
+	double normalAtCollision[2];
+	#endif
 
 };
 
@@ -108,6 +119,9 @@ void collisionEventNormal(int i);
 void addCollisionEvent(int i, int j, double tColl);
 void doTheCollisionNormal();
 void doTheCollisionGrow();
+void doTheCollisionIntruder();
+
+void addCollisionIntruderEvent(int i, int j, double tColl);
 
 void addEventScreenshot(double tscreen);
 void takeAScreenshot();
@@ -170,6 +184,7 @@ void addParticleInWellList(particle* p1, int num);
 void removeParticleInWellList(particle* p1, int num);
 int isParticleInWellList(particle* p1, int num);
 
+void collisionEventIntruder();
 #endif
 
 

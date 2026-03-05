@@ -195,13 +195,13 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 10000;  
+double tmax = 15000;  
 double dtime = 100;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
 double dtimeThermo = 100;
-double firstThermo = 10;
+double firstThermo = 1000;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -323,12 +323,11 @@ double resBeta = 0.;
 double deltaOmega = 100;
 
 //parameter if noise or damping
-double gamm = 0.025;
-//double gamm = 0.15;
-double T = 0.03;
+double gamm = 0.2;
+double T = 1;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.05;
+double dtnoise = 0.25;
 double T2 = 0.5;
 
 double strainRate = -0.0001;
@@ -344,21 +343,35 @@ double proportionNeutralyCharged = 0.1;
 #if INTRUDER
 
 intruder intru;
-double res_intruder = 0.5;
+double res_intruder = 0.4;
 double delta_intruder = 0.0;
+double intruderImpulseBodyX = 0.0;
+double intruderImpulseBodyY = 0.0;
+
+double bathRad = 1;
 
 
 double Im = 100;
-double M = 500000000;
-double angle = M_PI/4;
+double M = 100;
+double angle = 0;
 double omega = 0.0;
 double VX = 0.0;
 double VY = 0.0;
 
-enum intruderShape shape = CHIRAL_WHEEL;
-double paramIntruder[3] = {20, 10, 8};
+#if 1
+enum intruderShape shape = TRIANGLE;
+double paramIntruder[4] = {10, 30};
+#else
+enum intruderShape shape = GEN_WHEEL;
+double paramIntruder[4] = {10, 20, 5, M_PI/10};
+#endif
 
-double displayRad = 0.1;
+double displayRad = 0.2;
+
+static IntruderKM km = {0};
+static char intruderKMName[350];
+int km_enabled = 1;
+
 #endif
 
 
@@ -524,6 +537,9 @@ int main(int argc, char *argv[]){
 	#if G != 1
 	exiting:
 	#endif
+	#if INTRUDER
+	km_finalize_and_dump(km, intruderKMName, intru);
+	#endif
 	printInfo();
 	printClose();
 	#if G != 1
@@ -641,13 +657,17 @@ void constantInit(int argc, char *argv[]){
 		{"strainRate", required_argument, NULL, 'S'},
 		{"cluster-mode", required_argument, NULL, 'C'},
 		{"cluster-neighbor-threshold", required_argument, NULL, 'H'},
+		{"intruderMass", required_argument, NULL, 'M'},
+		{"intruderDelta", required_argument, NULL, 'z'},
+		{"intruderRes", required_argument, NULL, 'Y'},
+		{"intruderKMBurn", required_argument, NULL, 'B'},
 		{NULL, 0, NULL, 0}
 	};
 	
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:S:C:H:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:S:C:H:M:B:z:Y:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -740,6 +760,12 @@ void constantInit(int argc, char *argv[]){
 			case 'o':
 				sscanf(optarg, "%lf", &dtimeThermo);
 				break;
+			case 'z':
+				sscanf(optarg, "%lf", &delta_intruder);
+				break;
+			case 'Y':
+				sscanf(optarg, "%lf", &res_intruder);
+				break;
 			case 'P':
 				sscanf(optarg, "%lf", &phil);
 				break;
@@ -767,6 +793,14 @@ void constantInit(int argc, char *argv[]){
 					clusterNeighborThreshold = 0;
 				}
 				break;
+			#if INTRUDER
+			case 'M':
+				sscanf(optarg, "%lf", &M);
+				break;
+			case 'B':
+				km.burn_time = atof(optarg);
+				break;
+			#endif
 		}
 	}
 
@@ -978,7 +1012,10 @@ void constantInit(int argc, char *argv[]){
 	}
 
 	#if INTRUDER
-	intruderInit(&intru, Lx/2, Ly/2, VX, VY, angle, omega, M, Im, shape, paramIntruder);
+	intruderInit(&intru, Lx/2, Ly/2, VX, VY, angle, omega, M, Im, shape, paramIntruder, km_enabled, &km);
+
+	
+
 	if (Hex){
 		for (int i = 0; i < Nx; i++){
 			for (int j = 0; j < Ny; j++){
@@ -1058,6 +1095,9 @@ void initThermo(){
 		if (boopThermo){
 			fprintf(thermo, "q6 ");
 		}
+		#if INTRUDER
+			fprintf(thermo, "intruderX intruderY intruderVX intruderVY intruderAngle intruderOmega intruderFx intruderFy ");
+		#endif
 		fprintf(thermo, "\n");
 	}
 	if (interfaceThermo){
@@ -1570,6 +1610,9 @@ void particlesInit(){
 			else{
 				p->charge = -1;
 			}
+			#if INTRUDER
+				p->vr = vr*bathRad;
+			#endif
 			
 		}
 		if (polydispersity){
@@ -1703,7 +1746,6 @@ void eventListInit(){
 	root->lft = NULL;
 	root->top = NULL;
 
-	
 	
 	#if G != 1
 	
@@ -2996,7 +3038,7 @@ void addCollisionIntruderEvent(int i, int j, double tColl) {
 	node* toAdd;
 	
 	if (i == -1){
-		toAdd = eventList[2*N + 6];
+		toAdd = eventList[2*N + 8];
 		toAdd->collActual = particles[j].coll;
 	}
 	else{
@@ -3513,8 +3555,11 @@ void doTheCollisionNormal(){
 	#endif
 }
 
+
 #if INTRUDER
+
 void doTheCollisionIntruder(){
+
 
 	int i = nextEvent->i;
 	int j = nextEvent->j;
@@ -3543,6 +3588,7 @@ void doTheCollisionIntruder(){
 
 	P->coll++;
 	p->coll++;
+	ncol++;
 
 	double px = p->x;
 	double py = p->y;
@@ -3594,8 +3640,8 @@ void doTheCollisionIntruder(){
 	}
 
 	if (bestEdge >= 0 && bestDist2 <= 1e-24){
-		nx = -poly->normals[bestEdge][0];
-		ny = -poly->normals[bestEdge][1];
+		nx = poly->normals[bestEdge][0];
+		ny = poly->normals[bestEdge][1];
 		double n2 = nx*nx + ny*ny;
 		if (n2 > 0.0){
 			double invn = 1.0/sqrt(n2);
@@ -3632,9 +3678,7 @@ void doTheCollisionIntruder(){
 	double vt = rvx*tx + rvy*ty; // g_t (currently unused by the chosen tangential rule)
 	(void)vt;
 
-	if (vn < 0.0){
-		// Collision rule with dissipation (res_intruder) and chirality (delta_intruder)
-		// a = 1/m + 1/M, kappa_n = (r x n)_z, kappa_t = (r x t)_z, I = moment of inertia
+	if (vn < vn_tol){
 
 		double invPMass = 1.0/p->m;
 		double invMassIntruder = 1.0/P->M;
@@ -3662,6 +3706,68 @@ void doTheCollisionIntruder(){
 			double Jx = Jn*nx + Jt*tx;
 			double Jy = Jn*ny + Jt*ty;
 
+			double cphi = cos(P->angle);
+			double sphi = sin(P->angle);
+			double Jbx = Jx*cphi + Jy*sphi;
+			double Jby = -Jx*sphi + Jy*cphi;
+			intruderImpulseBodyX += Jbx;
+			intruderImpulseBodyY += Jby;
+
+			
+			// --- Online KM estimator update (collision-to-collision, lag=1) ---
+			if (km.enabled && km.has_prev){
+			    double dtFlight = t - km.last_t;
+			    // Only use intervals that start after the burn time (stationary sampling)
+			    if (dtFlight > 1e-12 && km.last_t >= km.burn_time){
+			        double int_vbx = 0.0, int_vby = 0.0;
+			        km_integrate_vbody(km.vx0, km.vy0, km.phi0, km.om0, dtFlight, &int_vbx, &int_vby);
+			
+			        // Design vector uses integrals directly: x = [dt, ∫Vb_x dt, ∫Vb_y dt, ∫Ω dt]
+			        double xvec[4];
+			        xvec[0] = dtFlight;
+			        xvec[1] = int_vbx;
+			        xvec[2] = int_vby;
+			        xvec[3] = km.om0 * dtFlight;
+			
+			        // Response is the inertial body increment at the collision: y = [ΔVb_x, ΔVb_y, ΔΩ]
+			        double yvec[3];
+			        yvec[0] = Jbx * invMassIntruder;                 // J_body/M
+			        yvec[1] = Jby * invMassIntruder;
+			        yvec[2] = (rx*Jy - ry*Jx) * invInertiaIntruder;  // (r×J)/I
+			
+			        km.nsamples++;
+			        km.sum_dt += dtFlight;
+				    double Etrans = 0.5 * P->M * (km.vx0*km.vx0 + km.vy0*km.vy0);
+				    km.sum_Etrans_dt += Etrans * dtFlight;
+			        km.sum_dU[0] += yvec[0];
+			        km.sum_dU[1] += yvec[1];
+			        km.sum_dU[2] += yvec[2];
+			
+			        km.sum_intVb[0] += int_vbx;
+			        km.sum_intVb[1] += int_vby;
+			        km.sum_intOm_dt += km.om0 * dtFlight;
+			        km.sum_intOmVb[0] += km.om0 * int_vbx;
+			        km.sum_intOmVb[1] += km.om0 * int_vby;
+			
+			        double w = 1.0/dtFlight; // weights = 1/dt
+			        for (int ii = 0; ii < 4; ++ii){
+			            for (int jj = 0; jj < 4; ++jj){
+			                km.XtWX[ii][jj] += w * xvec[ii] * xvec[jj];
+			                km.XTX[ii][jj]  +=     xvec[ii] * xvec[jj];
+			            }
+			            for (int kk = 0; kk < 3; ++kk){
+			                km.XtWY[ii][kk] += w * xvec[ii] * yvec[kk];
+			                km.XTY[ii][kk]  +=     xvec[ii] * yvec[kk];
+			            }
+			        }
+			        for (int kk = 0; kk < 3; ++kk){
+			            for (int ll = 0; ll < 3; ++ll){
+			                km.YTY[kk][ll] += yvec[kk] * yvec[ll];
+			            }
+			        }
+			    }
+			}
+			
 			// Update velocities using:
 			// v' = v - J/m, V' = V + J/M, Omega' = Omega + (r x J)_z / I
 			p->vx -= Jx*invPMass;
@@ -3670,9 +3776,22 @@ void doTheCollisionIntruder(){
 			P->vx += Jx*invMassIntruder;
 			P->vy += Jy*invMassIntruder;
 			P->omega += (rx*Jy - ry*Jx)*invInertiaIntruder;
+
+			// Update KM baseline state at the collision time (start of next free flight)
+			// MUST be inside the collision block: non-collision events (vn >= vn_tol)
+			// must NOT reset the baseline, otherwise flight intervals get fragmented
+			// and sum_intVb / sum_dt (= Ubar) becomes biased.
+			if (km.enabled){
+			    km.last_t = t;
+			    km.phi0 = P->angle;
+			    km.vx0 = P->vx;
+			    km.vy0 = P->vy;
+			    km.om0 = P->omega;
+			    km.has_prev = 1;
+			}
 		}
 	}
-
+	
 	p->lastColl = t;
 
 
@@ -3680,7 +3799,7 @@ void doTheCollisionIntruder(){
 	crossingEvent(p->num);
 
 	if (j == -1){
-		removeEventFromQueue(eventList[2*N + 6]);
+		removeEventFromQueue(eventList[2*N + 8]);
 	}
 	else{
 		removeEventFromQueue(eventList[N + j]);
@@ -3688,6 +3807,9 @@ void doTheCollisionIntruder(){
 	collisionEventNormal(p->num);
 	collisionEventIntruder();
 }
+
+
+
 #endif
 
 void doIn(){
@@ -4140,6 +4262,7 @@ void stopGrow(){
 		#if THREE_D
 		p->crossZ = 0;
 		#endif
+		//#p->rad = 0.001;
 	}
 	collisionEvent = &collisionEventNormal;
 	doTheCollision = &doTheCollisionNormal;
@@ -4229,26 +4352,12 @@ void addNoise(){
 			particles[i].vy -= py/(N*particles[i].m);
 			particles[i].coll++;
 		}
-		for (int j = 0; j < N; j++){
-			removeEventFromQueue(eventList[j]);
-			crossingEvent(j);
-
-			removeEventFromQueue(eventList[N + j]);
-			collisionEvent(j);
-		}
 	}
 	else if (noise == 3){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
 			particles[i].vx += (particles[i].y - halfLy)/(particles[i].m)*dtnoise*strainRate*0.1;
 			particles[i].coll++;
-		}
-		for (int j = 0; j < N; j++){
-			removeEventFromQueue(eventList[j]);
-			crossingEvent(j);
-
-			removeEventFromQueue(eventList[N + j]);
-			collisionEvent(j);
 		}
 	}
 	// Self propelled particles
@@ -4264,19 +4373,11 @@ void addNoise(){
 			p->vx += (-gamm*p->vx - gamm*v0*cos(p->vr))*dtnoise;
 			p->vy += (-gamm*p->vy - gamm*v0*sin(p->vr))*dtnoise;
 		}
-		for (int j = 0; j < N; j++){
-			removeEventFromQueue(eventList[j]);
-			crossingEvent(j);
-
-			removeEventFromQueue(eventList[N + j]);
-			collisionEvent(j);
-		}
 	}
 	else{
 		for (int i = 0; i < N; i++){
 
 			particle* p = particles + i; //(int)(genrand_int32()%N)
-			int j = p->num;
 			p->coll++;
 			//updates position
 			freeFly(p);
@@ -4300,16 +4401,20 @@ void addNoise(){
 			//p->vy += 0.3*sin(k*p->y - 0.1*t)*dtnoise;
 
 			//Calculate the new collisions and the new cell crossings.
-			removeEventFromQueue(eventList[j]);
-			crossingEvent(j);
-
-			removeEventFromQueue(eventList[N + j]);
-			collisionEvent(j);
 		}
 	}
+	for (int j = 0; j < N; j++){
+		removeEventFromQueue(eventList[j]);
+		crossingEvent(j);
+
+		removeEventFromQueue(eventList[N + j]);
+		collisionEvent(j);
+	}
 	#if INTRUDER
-	removeEventFromQueue(eventList[2*N + 6]);
-	collisionEventIntruder();
+	if (freeFly == &freeFlyNormal){
+		removeEventFromQueue(eventList[2*N + 8]);
+		collisionEventIntruder();
+	}
 	#endif
 	addEventNoise(t + dtnoise);
 }
@@ -4547,6 +4652,11 @@ void saveThermo(){
 	double pressureY = 0;
 	double pressureXY = 0;
 	double pressureYX = 0;
+	#if INTRUDER
+	freeFlyIntruder(&intru);
+	double intruderFxBody = 0;
+	double intruderFyBody = 0;
+	#endif
 	#if HEAT && !THREE_D
 	double Jx = 0;
 	double Jy = 0;
@@ -4562,6 +4672,12 @@ void saveThermo(){
 	#endif
 	double deltaTime = t - lastScreen;
 	lastScreen = t;
+	#if INTRUDER
+	if (deltaTime > 0.0){
+		intruderFxBody = intruderImpulseBodyX/deltaTime;
+		intruderFyBody = intruderImpulseBodyY/deltaTime;
+	}
+	#endif
 	
 	
 	#if THREE_D
@@ -4764,6 +4880,11 @@ void saveThermo(){
 			fprintf(thermo, "%lf ", q6/N);
 			free(boop);
 		}
+		#if INTRUDER
+		double vx_body = intru.vx*cos(intru.angle) + intru.vy*sin(intru.angle);
+		double vy_body = -intru.vx*sin(intru.angle) + intru.vy*cos(intru.angle);
+		fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf ", intru.x, intru.y, vx_body, vy_body, intru.angle, intru.omega, intruderFxBody, intruderFyBody);
+		#endif
 		fprintf(thermo, "\n");
 		fflush(thermo);
 		if (liquidliquid && interfaceThermo){
@@ -4806,6 +4927,10 @@ void saveThermo(){
 			fflush(velocityFile);
 		}
 	}
+	#if INTRUDER
+	intruderImpulseBodyX = 0;
+	intruderImpulseBodyY = 0;
+	#endif
 	if (bubbleStop){
 		static int count = 0;
 		if (0){
@@ -4948,6 +5073,11 @@ void optimizeGrowConstant(){
 	if (coexistence || clusterThermo || phi > 0.7){
 		vr /= 8;
 	}
+	#if INTRUDER
+	if (bathRad < 0.8){
+		vr = 0.1;
+	}
+	#endif
 }
 
 
@@ -5186,6 +5316,12 @@ void customName(){
 	if (addShear){
 		sprintf(fileName + strlen(fileName), "shear_%.6lf", fabs(strainRate));
 	}
+	#if INTRUDER
+		sprintf(fileName + strlen(fileName), "Im_%lfM_%.5lfresI_%.3lfdeltaI_%.3lf", intru.Im, intru.M, res_intruder, delta_intruder);
+		if (shape == GEN_WHEEL){
+			sprintf(fileName + strlen(fileName), "Rinside_%lfRoutside_%lfNspikes_%dChi_%lf", paramIntruder[0], paramIntruder[1], (int)paramIntruder[2], paramIntruder[3]);
+		}
+	#endif
 
 	sprintf(fileName + strlen(fileName), "v_");
 	char baseFileName[256];
@@ -5200,6 +5336,12 @@ void customName(){
 	}
 
 	snprintf(thermoName, sizeof(thermoName), "%s%d.thermo", baseFileName, version);
+
+
+	#if INTRUDER
+		snprintf(intruderKMName, sizeof(intruderKMName), "%s%d.intruderKM", baseFileName, version);
+	#endif
+
 
 	if (interfaceThermo) {
 		snprintf(interfaceName, sizeof(interfaceName), "%s%d.interface", baseFileName, version);
@@ -5229,6 +5371,7 @@ void customName(){
 	if (velocityDistributionThermo){
 		snprintf(velocityDistributionName, sizeof(velocityDistributionName), "%s%d.vdist", baseFileName, version);
 	}
+
 }
 
 int mygetline(char* str, FILE* f){

@@ -67,6 +67,10 @@ graphics: $(GRAPHICS_SOURCES)
 debug: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
 
+# Profiling build (good symbols and call stacks for time profiling)
+profile: $(SOURCES)
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0 -o EDMD_profile
+
 # Clean target
 clean:
 	rm -f EDMD EDMD_debug graphics_build *.o

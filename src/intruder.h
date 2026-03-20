@@ -31,7 +31,10 @@ enum intruderShape{
     TRIANGLE,
     WHEEL,
     CHIRAL_WHEEL,
-    GEN_WHEEL
+    GEN_WHEEL,
+    COMPLEX_WHEEL,
+    CROSS,
+    CIRCLE
 };
 
 typedef struct collisionInfo collisionInfo;
@@ -51,6 +54,7 @@ typedef struct {
     // time accumulators (measurement window)
     double sum_dt;                // total physical time used
     double sum_Etrans_dt;         // ∫ (0.5*M*(Vx^2+Vy^2)) dt
+    double sum_Erot_dt;           //  (0.5*Im*Omega^2) dt
     double sum_dU[3];             // sum of body inertial increments: [ΔVb_x, ΔVb_y, ΔΩ]
 
     // exact free-flight integrals for time averages
@@ -71,6 +75,7 @@ typedef struct {
 void intruderInit(intruder* intr, double x, double y, double vx, double vy, double angle, double omega, double M, double Im, int shape, double* info, int km_enabled, IntruderKM* km);
 polygon square(double side_length);
 polygon triangle(double base_length, double height);
+polygon stress_polygon_wheel(double radius_base, double spike_amp, double tri_amp, double phase);
 void rotateTranslatePolygon(intruder* intr, double angle, double X, double Y);
 void printIntruderShapeFromSmallParticles(FILE* fichier, intruder* intr, double rad, int N);
 int countFakeParticlesForIntruder(intruder* intr, double rad);
@@ -95,4 +100,5 @@ void km_integrate_vbody(double vx, double vy, double phi0, double om, double dt,
 int solve3x3(const double A_in[3][3], const double b_in[3], double x_out[3]);
 int solve4x4_3rhs(const double A_in[4][4], const double B_in[4][3], double X_out[4][3]);
 
+void rethermalize_bath_particle_at_intruder_contact(particle* p, intruder* P,double contactX, double contactY,double rx, double ry,double nx, double ny, double tx, double ty, double T);
 #endif

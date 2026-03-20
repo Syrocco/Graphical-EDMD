@@ -123,6 +123,49 @@ polygon generalized_wheel(double radius_intern,
     return p;
 }
 
+polygon circle(double radius, int n_vertices){
+    polygon p;
+    p.n_vertices = n_vertices;
+    for(int i = 0; i < n_vertices; i++){
+        double angle = (2.0 * M_PI * i) / (double)n_vertices;
+        p.vertices[i][0] = radius * cos(angle);
+        p.vertices[i][1] = radius * sin(angle);
+    }
+    computeConstPol(&p);
+    return p;
+}
+polygon cross(double extension, double width){
+    polygon p;
+    p.n_vertices = 20;
+
+    double w2 = width / 2.0;
+
+
+    p.vertices[0][0] = w2; p.vertices[0][1] = w2;
+    p.vertices[1][0] = w2 + extension; p.vertices[1][1] = w2;
+    p.vertices[2][0] = w2 + extension; p.vertices[2][1] = w2 + extension;
+    p.vertices[3][0] = w2 + extension + width; p.vertices[3][1] = w2 + extension;
+    p.vertices[4][0] = w2 + extension + width; p.vertices[4][1] = -w2;
+    p.vertices[5][0] = w2 ; p.vertices[5][1] = -w2;
+    p.vertices[6][0] = w2 ; p.vertices[6][1] = -w2 - extension;
+    p.vertices[7][0] = w2 + extension; p.vertices[7][1] = -w2 - extension;
+    p.vertices[8][0] = w2 + extension; p.vertices[8][1] = -w2 - extension - width;
+    p.vertices[9][0] = - w2; p.vertices[9][1] = -w2 - extension - width;
+    p.vertices[10][0] = - w2; p.vertices[10][1] = -w2;
+    p.vertices[11][0] = - w2 - extension; p.vertices[11][1] = -w2;
+    p.vertices[12][0] = - w2 - extension; p.vertices[12][1] = -w2 - extension;
+    p.vertices[13][0] = - w2 - extension - width; p.vertices[13][1] = -w2 - extension;
+    p.vertices[14][0] = - w2 - extension - width; p.vertices[14][1] = w2;
+    p.vertices[15][0] = - w2; p.vertices[15][1] = w2;
+    p.vertices[16][0] = - w2; p.vertices[16][1] = w2 + extension;
+    p.vertices[17][0] = - w2 - extension; p.vertices[17][1] = w2 + extension;
+    p.vertices[18][0] = - w2 - extension; p.vertices[18][1] = w2 + extension + width;
+    p.vertices[19][0] = w2; p.vertices[19][1] = w2 + extension + width;
+
+    computeConstPol(&p);
+    return p;
+}
+
 polygon wheel(double radius_intern, double radius_extern, int n_pikes){
     polygon p;
     p.n_vertices = 2*n_pikes;
@@ -146,6 +189,31 @@ polygon chiral_weel(double radius_intern, double radius_extern, int n_pikes){
         p.vertices[2*i + 1][0] = radius_intern * cos(angle + M_PI/(2*n_pikes));
         p.vertices[2*i + 1][1] = radius_intern * sin(angle + M_PI/(2*n_pikes));
     }
+    computeConstPol(&p);
+    return p;
+}
+
+polygon stress_polygon_wheel(double radius_base, double spike_amp, double tri_amp, double phase){
+    polygon p;
+    const int n_vertices = 20;
+    const double r_floor = 0.25 * radius_base;
+    p.n_vertices = n_vertices;
+
+    for (int i = 0; i < n_vertices; i++){
+        double th = (2.0 * M_PI * i) / (double)n_vertices;
+
+        // Hybrid radius profile: wheel-like spikes + triangular anisotropy + rough ripples.
+        double wheel = spike_amp * pow(fabs(sin(6.0 * th + phase)), 1.6);
+        double tri = tri_amp * cos(3.0 * th - 0.5 * phase);
+        double ripple = 0.25 * spike_amp * sin(11.0 * th + 0.7 * phase);
+
+        double r = radius_base + wheel + tri + ripple;
+        if (r < r_floor) r = r_floor;
+
+        p.vertices[i][0] = r * cos(th);
+        p.vertices[i][1] = r * sin(th);
+    }
+
     computeConstPol(&p);
     return p;
 }
@@ -226,31 +294,39 @@ void intruderInit(intruder* intr, double x, double y, double vx, double vy, doub
     switch(shape){
         case SQUARE:
             intr->body_frame_shape = square(info[0]);
-            intr->Im = Im;
             break;
         case TRIANGLE:
             double a = info[0];
             double h = info[1];
             intr->body_frame_shape = triangle(a, h);
-            intr->Im = M*(3*a*a + 4*h*h)/72.0;
-            intr->Im = Im;
             break;
         case WHEEL:
             intr->body_frame_shape = wheel(info[0], info[1], (int)info[2]);
-            intr->Im = Im;
             break;
         case CHIRAL_WHEEL:
             intr->body_frame_shape = chiral_weel(info[0], info[1], (int)info[2]);
-            intr->Im = Im;
             break;
         case GEN_WHEEL:
             intr->body_frame_shape = generalized_wheel(info[0], info[1], (int)info[2], info[3]);
-            intr->Im = polygon_I_com(&intr->body_frame_shape, intr->M);
-            intr->Im = Im;
+            break;
+        case COMPLEX_WHEEL:
+            intr->body_frame_shape = stress_polygon_wheel(info[0], info[1], info[2], info[3]);
+            break;
+        case CROSS:
+            intr->body_frame_shape = cross(info[0], info[1]);
+            break;
+        case CIRCLE:
+            intr->body_frame_shape = circle(info[0], (int)info[1]);
             break;
         default:
             printf("Unknown intruder shape\n");
             break;
+    }
+    if (Im <= 0.0){
+        intr->Im = polygon_I_com(&intr->body_frame_shape, M);
+    }
+    else{
+        intr->Im = Im;
     }
     intr->real_shape = intr->body_frame_shape;
     rotateTranslatePolygon(intr, angle, x, y);
@@ -265,6 +341,7 @@ void intruderInit(intruder* intr, double x, double y, double vx, double vy, doub
 	km->nsamples = 0ULL;
 	km->sum_dt = 0.0;
     km->sum_Etrans_dt = 0.0;
+    km->sum_Erot_dt = 0.0;
 	km->sum_dU[0] = km->sum_dU[1] = km->sum_dU[2] = 0.0;
 	km->sum_intVb[0] = km->sum_intVb[1] = 0.0;
 	km->sum_intOm_dt = 0.0;
@@ -925,7 +1002,8 @@ void km_finalize_and_dump(IntruderKM km, const char* intruderKMName, intruder in
     fprintf(f, "# burn_time = %.10g\n", km.burn_time);
     fprintf(f, "# nsamples  = %llu\n", (unsigned long long)km.nsamples);
     fprintf(f, "# sum_dt    = %.17g\n", km.sum_dt);
-    fprintf(f, "# <E_trans> = %.17g\n", km.sum_Etrans_dt * invT);
+    fprintf(f, "# <T_trans> = %.17g\n", km.sum_Etrans_dt * invT);
+    fprintf(f, "# <T_rot>   = %.17g\n", 2*km.sum_Erot_dt * invT);
 
     fprintf(f, "\n# L (1/time)\n");
     for (int i=0;i<3;++i){
@@ -965,4 +1043,30 @@ void km_finalize_and_dump(IntruderKM km, const char* intruderKMName, intruder in
 
     fclose(f);
 
+}
+
+void rethermalize_bath_particle_at_intruder_contact(particle* p, intruder* P,
+                                                                  double contactX, double contactY,
+                                                                  double rx, double ry,
+                                                                  double nx, double ny,
+                                                                  double tx, double ty,
+                                                                  double T) {
+    const double rethermalize_eps = 1e-6;
+    double U1 = drand(0, 1);
+    double U2 = drand(0, 1);
+    double g1 = sqrt(-2.0 * log(U1)) * cos(2.0 * M_PI * U2);
+    double g2 = sqrt(-2.0 * log(U1)) * sin(2.0 * M_PI * U2);                                                                
+    const double sigma = sqrt(T / p->m);
+    const double gn_out = fabs(3*sigma * g1);
+    const double gt_out = sigma * g2;
+
+    const double vcx = P->vx - P->omega * ry;
+    const double vcy = P->vy + P->omega * rx;
+
+    p->vx = vcx + gn_out * nx + gt_out * tx;
+    p->vy = vcy + gn_out * ny + gt_out * ty;
+
+    p->x = contactX + (p->rad + rethermalize_eps) * nx;
+    p->y = contactY + (p->rad + rethermalize_eps) * ny;
+    PBC(&(p->x), &(p->y));
 }

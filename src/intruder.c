@@ -123,7 +123,7 @@ polygon generalized_wheel(double radius_intern,
     return p;
 }
 
-polygon circle(double radius, int n_vertices){
+polygon poly(double radius, int n_vertices){
     polygon p;
     p.n_vertices = n_vertices;
     for(int i = 0; i < n_vertices; i++){
@@ -134,6 +134,8 @@ polygon circle(double radius, int n_vertices){
     computeConstPol(&p);
     return p;
 }
+
+
 polygon cross(double extension, double width){
     polygon p;
     p.n_vertices = 20;
@@ -296,9 +298,7 @@ void intruderInit(intruder* intr, double x, double y, double vx, double vy, doub
             intr->body_frame_shape = square(info[0]);
             break;
         case TRIANGLE:
-            double a = info[0];
-            double h = info[1];
-            intr->body_frame_shape = triangle(a, h);
+            intr->body_frame_shape = triangle(info[0], info[1]);
             break;
         case WHEEL:
             intr->body_frame_shape = wheel(info[0], info[1], (int)info[2]);
@@ -315,8 +315,9 @@ void intruderInit(intruder* intr, double x, double y, double vx, double vy, doub
         case CROSS:
             intr->body_frame_shape = cross(info[0], info[1]);
             break;
-        case CIRCLE:
-            intr->body_frame_shape = circle(info[0], (int)info[1]);
+        case POLYGON:
+            intr->body_frame_shape = poly(info[0], (int)info[1]);
+            intr->angle = M_PI/((int)info[1]);
             break;
         default:
             printf("Unknown intruder shape\n");
@@ -364,6 +365,7 @@ void intruderInit(intruder* intr, double x, double y, double vx, double vy, doub
 }
 
 int countFakeParticlesForIntruder(intruder* intr, double rad){
+    if (rad == 0.0) return 0;
     double dr = rad;
     int count = 0;
     polygon* p = &intr->real_shape;
@@ -378,6 +380,7 @@ int countFakeParticlesForIntruder(intruder* intr, double rad){
 }
 
 void printIntruderShapeFromSmallParticles(FILE* fichier, intruder* intr, double rad, int N){
+    if (rad == 0.0) return;
     double dr = rad;
     int N_count = N;
     polygon* p = &intr->real_shape;

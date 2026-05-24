@@ -22,6 +22,7 @@
 #include<time.h>
 #include "voronoi_edmd.h"
 #include "osmosis.h"
+#include "field.h"
 
 #include "intruder.h"
 
@@ -50,8 +51,8 @@
 #include <pthread.h>
 #endif
 
-#define STRESS 1
-#define HEAT 1
+#define STRESS 0
+#define HEAT 0
 
 #define CGREEN printf("\033[1;32m")
 #define CWHITE printf("\033[0;37m")
@@ -135,6 +136,7 @@ unsigned long int ncol = 0;
 unsigned long int ncross = 0;
 char fileName[350];
 char thermoName[350];
+char pressureFieldName[350];
 char interfaceName[350];
 char osmosisName[350];
 char buffer[255];
@@ -195,13 +197,15 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 20000;  
-double dtime = 1000 ;
+double tmax = 4000000;  
+double dtime = 10000;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
-double dtimeThermo = 100;
-double firstThermo = 10;
+double dtimeThermo = 1000;
+int Nthermo = 1;
+double firstThermo = 1;
+double dr_pressure = 1.0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
 double nextScreen = -1;
@@ -228,6 +232,7 @@ bool thermoWall = 0;
 bool charged = 0;
 bool addShear = 0;
 bool addShearWall = 0;
+const int addActiveDelta = 0;
 const int liquidliquid = 0;
 #else
 const int addWell = 0;
@@ -237,11 +242,12 @@ const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 0;
+const int damping = 1;
 const int addDelta = 0;
-const int addDeltaTangent = 1;
+const int addDeltaTangent = 0;
+const int addActiveDelta = 0;
 const int addEnergy = 0;
-const int addDoubleDelta = 0;
+const int addDoubleDelta = 1;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int polydispersity = 0;
@@ -277,12 +283,12 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 1;
+double delta = 0.005;
 
 //values for double delta model
-double deltaM = 0.03;
+double deltaM = 0.05;
 double deltam = 0;
-double ts = 6;
+double ts = 10;
 
 //value for evolving delta model
 double tau = 5;
@@ -317,20 +323,20 @@ double resW = 1.;
 double resT = 1.;
 
 //coeff of restitution of particles
-double res = 0.9;
+double res = 0.95;
 double resBeta = 0.;
 
 double deltaOmega = 100;
 
 //parameter if noise or damping
-double gamm = 0.2;
+double gamm = 0.001;
 double T = 1;
 double expE = 1;
 //time between kicks
-double dtnoise = 10;
+double dtnoise = 100;
 double T2 = 0.5;
 
-double strainRate = -0.0001;
+double strainRate = -0.01;
 
 double a = 2;
 double b = 5;
@@ -349,8 +355,8 @@ double delta_intruder = 0.0;
 double bathRad = 1;
 
 
-double Im = 100000000000;
-double M = 1000000000000;
+double Im = 1000000000000000;
+double M = 10000000000000000;
 double angle = 0;
 double omega = 0.0;
 double VX = 0.0;
@@ -358,16 +364,17 @@ double VY = 0.0;
 
 #if 0
 enum intruderShape shape = TRIANGLE;
-double paramIntruder[4] = {80, 80};
+double paramIntruder[4] = {30, 30};
 #elif 0
 enum intruderShape shape = SQUARE;
 double paramIntruder[4] = {40};
 #elif 1
-enum intruderShape shape = CIRCLE;
-double paramIntruder[4] = {20, 20};
+#define sqrt2 1.41421356237
+enum intruderShape shape = POLYGON;
+double paramIntruder[4] = {10*sqrt2, 4};
 #elif 0
 enum intruderShape shape = GEN_WHEEL;
-double paramIntruder[4] = {20, 10, 5, M_PI/5};
+double paramIntruder[4] = {20, 40, 5, 0};
 //enum intruderShape shape = COMPLEX_WHEEL;
 //double paramIntruder[4] = {12.0, 6.5, 2.0, 0.35};
 #else
@@ -378,7 +385,7 @@ double paramIntruder[2] = {20, 4};
 const int rethermalize_after_intruder_collision = 0;
 
 
-double displayRad = 1;
+double displayRad = 0.;
 
 static IntruderKM km = {0};
 static char intruderKMName[350];
@@ -392,6 +399,7 @@ static double intruderTorqueZ = 0.0;
 
 const int addEnergyThermo = 1;
 const int addPressureThermo = 1;
+const int thermoPressureField = 0;
 const int addCollisionNumberThermo = 1;
 const int addEnergyCenterOfMassThermo = 0;
 const int thermoKurt = 1;
@@ -430,6 +438,7 @@ node* nextEvent;
 double* umbrellaPos;
 double* umbrellaVel;
 double* umbrellaDtimeCol;
+
 
 
 int main(int argc, char *argv[]){
@@ -471,12 +480,13 @@ int main(int argc, char *argv[]){
 			
 			
 			
-			
-			/*double dtEventM = nextEvent->t - t;
+			/*
+			double dtEventM = nextEvent->t - t;
 			printf("%lf %lf %d %d %d | \n", t, dtEventM, nextEvent->type, nextEvent->i, nextEvent->j);
 			if (dtEventM < -0.001){
 				//exit(3);
-			}*/
+			}
+			*/
 			
 			t = nextEvent->t;
 			removeEventFromQueue(nextEvent);
@@ -561,6 +571,7 @@ int main(int argc, char *argv[]){
 	fclose(fichier);
 	if (ther){
 		fclose(thermo);
+		pressure_field_close_file();
 		if (interfaceThermo){
 			fclose(interface);
 		}
@@ -614,6 +625,7 @@ void boxConstantHelper(){
 		#endif
 	}
 	else{
+		
 		Nycells = (int)(halfLy);
 		Nxcells = (int)(halfLx);
 		#if THREE_D
@@ -666,6 +678,7 @@ void constantInit(int argc, char *argv[]){
 		{"deltaE", required_argument, NULL, 'e'},
 		{"additionalEnergy", required_argument, NULL, 'A'},
 		{"dtimeThermo", required_argument, NULL, 'o'},
+		{"dr_pressure", required_argument, NULL, 1001},
 		{"phil", required_argument, NULL, 'P'},
 		{"phig", required_argument, NULL, 'G'},
 		{"version", required_argument, NULL, 'v'},
@@ -682,7 +695,7 @@ void constantInit(int argc, char *argv[]){
 	
 	int c;
 
-	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:S:C:H:M:B:z:Y:", longopt, NULL)) != -1){
+	while ((c = getopt_long(argc, argv, "l:N:p:r:d:g:t:D:E:U:R:f:s:x:q:T:a:L:X:e:A:o:P:G:v:S:C:H:M:B:z:Y:n:", longopt, NULL)) != -1){
 		switch(c){
 			case 'l':
 				strcpy(filename, optarg);
@@ -775,6 +788,13 @@ void constantInit(int argc, char *argv[]){
 			case 'o':
 				sscanf(optarg, "%lf", &dtimeThermo);
 				break;
+			case 1001:
+				sscanf(optarg, "%lf", &dr_pressure);
+				if (dr_pressure <= 0){
+					printf("WARNING:\033[0;31m dr_pressure must be > 0. Forcing dr_pressure = 1.0\033[0m\n");
+					dr_pressure = 1.0;
+				}
+				break;
 			case 'P':
 				sscanf(optarg, "%lf", &phil);
 				break;
@@ -815,6 +835,8 @@ void constantInit(int argc, char *argv[]){
 			case 'Y':
 				sscanf(optarg, "%lf", &res_intruder);
 				break;
+			case 'n':
+				sscanf(optarg, "%lf", &paramIntruder[1]);
 			#endif
 		}
 	}
@@ -1063,6 +1085,11 @@ void constantInit(int argc, char *argv[]){
 void initThermo(){
 	if ((ther)){
 		thermo = fopen(thermoName, "w");
+		if (thermoPressureField){
+			if (!pressure_field_init(Lx, Ly, dr_pressure, pressureFieldName)){
+				printf("WARNING:\033[0;31m Failed to initialize pressure field output.\033[0m\n");
+			}
+		}
 		fprintf(thermo, "t ");
 		if (addCollisionNumberThermo){
 			fprintf(thermo, "Ncol ");
@@ -1114,7 +1141,7 @@ void initThermo(){
 			fprintf(thermo, "intruderX intruderY intruderVX intruderVY intruderAngle intruderOmega intruderFx intruderFy intruderTorque ");
 		#endif
 		if (thermoKurt){
-			fprintf(thermo, "ratioKurt ");
+			fprintf(thermo, "K1 K3 ratioKurt ");
 		}
 		fprintf(thermo, "\n");
 	}
@@ -1846,6 +1873,7 @@ void freeArrays(){
 	if (interfaceThermo){
 		freeInterface();
 	}
+	pressure_field_free();
 
 }
 /* --------------------------/
@@ -3425,10 +3453,48 @@ void doTheCollisionNormal(){
 
 		//perp
 		if (addDeltaTangent){
+
 			double dxrTemp = dxr;
 
 			dxr = dyr;
 			dyr = -dxrTemp;
+
+			/*
+			static int lastI = -1;
+			static int lastJ = -1;
+			double sign = 1;
+			if ((lastI == pi->num) || (lastJ == pj->num) || (lastI == pj->num) || (lastJ == pi->num)){
+				sign = 0;
+				//printf("Warning: delta tangent sign set to 0 because of repeated collision between particles %d and %d\n", pi->num, pj->num);
+				dyr = dxr;
+				dxr = dxrTemp;
+				
+			}
+			else if ((pi->type == 0) && (pj->type == 0)){
+				sign = -1;
+				dxr = sign*dxr;
+				dyr = sign*dyr;
+			}
+			else if (pi->type != pj->type){
+				sign = 0;
+				dxr = sign*dxr;
+				dyr = sign*dyr;
+			}
+			
+			
+			
+			lastI = pi->num;
+			lastJ = pj->num;
+			*/
+			/*
+			if (pi->y < Ly/2){
+				dxr = -dxr;
+				dyr = -dyr;
+	
+			}*/
+			
+			
+			
 		}
 		
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
@@ -3436,10 +3502,17 @@ void doTheCollisionNormal(){
 		pj->vx -= funkyFactor*pi->m*dx - 2*pi->m*invMass*delta*dxr;
 		pj->vy -= funkyFactor*pi->m*dy - 2*pi->m*invMass*delta*dyr;
 
-		collTermX += pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dx;
-		collTermY += pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dy;
-		collTermXY += pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dy;
-		collTermYX += pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dx;
+		double collTermXLocal = pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dx;
+		double collTermYLocal = pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dy;
+		double collTermXYLocal = pi->m*(funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr)*dy;
+		double collTermYXLocal = pi->m*(funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr)*dx;
+		collTermX += collTermXLocal;
+		collTermY += collTermYLocal;
+		collTermXY += collTermXYLocal;
+		collTermYX += collTermYXLocal;
+		if (thermoPressureField){
+			pressure_field_add_collision(pi, dx, dy, collTermXLocal, collTermYLocal, collTermXYLocal, collTermYXLocal);
+		}
 
 	}
 	else if (addEnergy){
@@ -3464,10 +3537,17 @@ void doTheCollisionNormal(){
 		double funkyFactor2 = (b - sqrt(res*res*b*b + 2*distSquared*deltaETotal*(pi->m + pj->m)/(pi->m*pj->m)))/(2*distSquared);
 
 		double collTerm = pi->m*pj->m*funkyFactor2;
-		collTermX += collTerm*dx*dx;
-		collTermY += collTerm*dy*dy;
-		collTermXY += collTerm*dx*dy;
-		collTermYX += collTerm*dy*dx;
+		double collTermXLocal = collTerm*dx*dx;
+		double collTermYLocal = collTerm*dy*dy;
+		double collTermXYLocal = collTerm*dx*dy;
+		double collTermYXLocal = collTerm*dy*dx;
+		collTermX += collTermXLocal;
+		collTermY += collTermYLocal;
+		collTermXY += collTermXYLocal;
+		collTermYX += collTermYXLocal;
+		if (thermoPressureField){
+			pressure_field_add_collision(pi, dx, dy, collTermXLocal, collTermYLocal, collTermXYLocal, collTermYXLocal);
+		}
 		#if THREE_D
 		collTermZ += collTerm*dz*dz;
 		#endif
@@ -3484,14 +3564,64 @@ void doTheCollisionNormal(){
 	}
 	else if (addExpo)
 		res = resCoeff(sqrt(dvx*dvx + dvy*dvy));
-	else{
+	else if (addActiveDelta){
+		double rij2 = dx*dx + dy*dy;
+		#if THREE_D
+		rij2 += dz*dz;
+		#endif
+		double rij = sqrt(rij2);
+		double nx = dx/rij;
+		double ny = dy/rij;
+		double gdotn = dvx*nx + dvy*ny;
+		#if THREE_D
+		double nz = dz/rij;
+		gdotn += dvz*nz;
+		double dvt_z = dvz - gdotn*nz;
+		#endif
+		double dvt_x = dvx - gdotn*nx;
+		double dvt_y = dvy - gdotn*ny;
+
+		double dvi_x = funkyFactor*pj->m*dx + 2*delta*pj->m*invMass*dvt_x;
+		double dvi_y = funkyFactor*pj->m*dy + 2*delta*pj->m*invMass*dvt_y;
+		double dvj_x = -funkyFactor*pi->m*dx - 2*delta*pi->m*invMass*dvt_x;
+		double dvj_y = -funkyFactor*pi->m*dy - 2*delta*pi->m*invMass*dvt_y;
+		#if THREE_D
+		double dvi_z = funkyFactor*pj->m*dz + 2*delta*pj->m*invMass*dvt_z;
+		double dvj_z = -funkyFactor*pi->m*dz - 2*delta*pi->m*invMass*dvt_z;
+		#endif
+
+		pi->vx += dvi_x;
+		pi->vy += dvi_y;
+		pj->vx += dvj_x;
+		pj->vy += dvj_y;
+		#if THREE_D
+		pi->vz += dvi_z;
+		pj->vz += dvj_z;
+		#endif
+
+		collTermX += pi->m*dvi_x*dx;
+		collTermY += pi->m*dvi_y*dy;
+		collTermXY += pi->m*dvi_x*dy;
+		collTermYX += pi->m*dvi_y*dx;
+		#if THREE_D
+		collTermZ += pi->m*dvi_z*dz;
+		#endif
+	}
+	else {
 	#endif
 		double collTerm = pi->m*pj->m*funkyFactor;
+		double collTermXLocal = collTerm*dx*dx;
+		double collTermYLocal = collTerm*dy*dy;
+		double collTermXYLocal = collTerm*dx*dy;
+		double collTermYXLocal = collTerm*dy*dx;
 
-		collTermX += collTerm*dx*dx;
-		collTermY += collTerm*dy*dy;
-		collTermXY += collTerm*dx*dy;
-		collTermYX += collTerm*dy*dx;
+		collTermX += collTermXLocal;
+		collTermY += collTermYLocal;
+		collTermXY += collTermXYLocal;
+		collTermYX += collTermYXLocal;
+		if (thermoPressureField){
+			pressure_field_add_collision(pi, dx, dy, collTermXLocal, collTermYLocal, collTermXYLocal, collTermYXLocal);
+		}
 		
 
 		pi->vx += funkyFactor*pj->m*dx;
@@ -3538,6 +3668,11 @@ void doTheCollisionNormal(){
 	#if !TANGENTIAL
 	}
 	#endif
+
+	if (thermoPressureField){
+		pressure_field_add_kinetic(pi);
+		pressure_field_add_kinetic(pj);
+	}
 
     pi->lastColl = t;
     pj->lastColl = t;
@@ -3800,7 +3935,6 @@ void doTheCollisionIntruder(){
 			if (rethermalize_after_intruder_collision){
 				rethermalize_bath_particle_at_intruder_contact(p, P, contactX, contactY, rx, ry, nx, ny, tx, ty, T);
 			}
-
 			// Update KM baseline state at the collision time (start of next free flight)
 			// MUST be inside the collision block: non-collision events (vn >= vn_tol)
 			// must NOT reset the baseline, otherwise flight intervals get fragmented
@@ -4557,9 +4691,14 @@ void saveTXT(){
 			fprintf(fichier, "%d %.2lf %.2lf %.2lf %.6lf %.6lf %.6lf\n", i, particles[i].x, particles[i].y, particles[i].z, particles[i].vx, particles[i].vy, particles[i].vz);
 		}
 		#else
-		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id x y\n", t, num_particles, Lx, Ly, Lz);
+		fprintf(fichier, "ITEM: TIMESTEP\n%lf\nITEM: NUMBER OF ATOMS\n%d\nITEM: BOX BOUNDS pp pp pp\n0 %lf\n0 %lf\n0 %lf\nITEM: ATOMS id x y vx vy\n", t, num_particles, Lx, Ly, Lz);
 		for(int i = 0; i < N; i++){
-			fprintf(fichier, "%d %.2lf %.2lf\n", i, particles[i].x, particles[i].y);
+			double vx = particles[i].vx;
+			if (addShear){
+				vx += strainRate*(particles[i].y - halfLy);
+			}
+			
+			fprintf(fichier, "%d %.2lf %.2lf %.2lf %.2lf\n", i, particles[i].x, particles[i].y, vx, particles[i].vy);
 		}
 		#endif
 	}
@@ -4784,167 +4923,222 @@ void saveThermo(){
 	collTermXY = 0;
 	collTermYX = 0;
 
-	if (t != 0){
-		fprintf(thermo, "%lf ", t);
-		if (addCollisionNumberThermo){
-			fprintf(thermo, "%ld ", ncol);
+	if (thermoPressureField){
+		pressure_field_step(t, deltaTime);
+	}
+	static int count = 0;
+	static double e_av = 0;
+	e_av += E/N;
+	static double pressure_av = 0;
+	pressure_av += pressure;
+	static double pressureX_av = 0;
+	pressureX_av += pressureX;
+	static double pressureY_av = 0;
+	pressureY_av += pressureY;
+	static double pressureXY_av = 0;
+	pressureXY_av += pressureXY;
+	static double pressureYX_av = 0;
+	pressureYX_av += pressureYX;
+	#if THREE_D
+	static double pressureZ_av = 0;
+	pressureZ_av += pressureZ;
+	#endif
+	#if HEAT
+	static double Jx_av = 0;
+	static double Jy_av = 0;
+	Jx_av += Jx;
+	Jy_av += Jy;
+	#endif
+
+	count++;
+	if (count % Nthermo == 0){
+		if (t != 0){
+			fprintf(thermo, "%lf ", t);
+			if (addCollisionNumberThermo){
+				fprintf(thermo, "%ld ", ncol);
+			}
+			if (addEnergyThermo){
+				fprintf(thermo, "%lf ", e_av/count);
+			}
+			#if THREE_D
+			if (addPressureThermo){
+				fprintf(thermo, "%lf %lf %lf %lf ", pressure_av/count, pressureX_av/count, pressureY_av/count, pressureZ_av/count);
+			}
+			#else
+			if (addPressureThermo){
+				fprintf(thermo, "%lf %lf %lf %.10lf %.10lf ", pressure_av/count, pressureX_av/count, pressureY_av/count, pressureXY_av/count, pressureYX_av/count);
+			}
+			#if HEAT
+			fprintf(thermo, "%.10lf %.10lf ", Jx_av/count, Jy_av/count);
+			#endif
+			#endif
+			if (addCircularWall || addWallx || addWally){
+				#if THREE_D
+				double wallArea = 0;
+				if (addWallx){
+					wallArea += 2*Ly*Ly;
+				}
+				if (addWally){
+					wallArea += 2*Lx*Lx;
+				}
+				fprintf(thermo, "%lf ", dp/(deltaTime*wallArea));
+				#else
+				double perimeter = 0;
+				if (addCircularWall){
+					perimeter = M_PI*Lx;
+				}
+				if (addWallx){
+					perimeter += 2*Ly;
+				}
+				if (addWally){
+					perimeter += 2*Lx;
+				}
+				fprintf(thermo, "%lf ", dp/(deltaTime*perimeter));
+				#endif
+				dp = 0;
+			}
+			if (addMidWall){
+				int Nleft = 0;
+				int Nright = 0;
+				int Nsolute = 0;
+				double Tsolute = 0;
+				double TsolventL = 0;
+				double TsolventR = 0;
+				for (int i = 0; i < N; i++){
+					if (particles[i].type == 0){
+						Nleft += (particles[i].x < halfLx) ? 1 : 0;
+						Nright += (particles[i].x > halfLx) ? 1 : 0;
+						double temp = 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+						TsolventL += (particles[i].x < halfLx) ? temp : 0;
+						TsolventR += (particles[i].x > halfLx) ? temp : 0;
+					}
+					else{
+						Nsolute++;
+						Tsolute += 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
+					}
+				}
+				double ratio = M_PI/(halfLx*Ly);
+				fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf ", dpMid/(deltaTime*Ly), -(dpRight - dpLeft)/(deltaTime*Ly), ratio*Nleft*sizeratio*sizeratio, ratio*Nright*sizeratio*sizeratio, TsolventL/Nleft, TsolventR/Nright, Tsolute/(Nsolute));
+				dpMid = 0;
+				dpRight = 0;
+				dpLeft = 0;
+			}
+			if (addWell){
+				Ep = 0;
+				for (int i = 0; i < N; i ++){
+					Ep -= U*particles[i].numberOfParticlesInWell/2;
+				}
+				fprintf(thermo, "%lf ", Ep/N);
+			}
+			if (msd){
+				fprintf(thermo, "%lf ", MSD/N);
+			}
+			if (addEnergyCenterOfMassThermo){
+				double ex = 0;
+				double ey = 0;
+				for (int i = 0; i < N; i++){
+					ex += particles[i].m*particles[i].vx;
+					ey += particles[i].m*particles[i].vy;
+				}
+				fprintf(thermo, "%lf ", 0.5*(ex*ex + ey*ey)/N);
+			}
+			if (critical){
+				int count[8];
+				double energyCount[8];
+				double dfrac = Lx*fracCritical/8.;
+				countConditions(particles, N, Lx, Ly, count, energyCount, dfrac);
+				#if THREE_D
+				fprintf(thermo, "%d %d %d %d %d %d %d %d %lf %lf %lf %lf %lf %lf %lf %lf ", count[0], count[1], count[2], count[3], count[4], count[5], count[6], count[7], energyCount[0], energyCount[1], energyCount[2], energyCount[3], energyCount[4], energyCount[5], energyCount[6], energyCount[7]);
+				#else
+				fprintf(thermo, "%d %d %d %d %lf %lf %lf %lf ", count[0], count[1], count[2], count[3], energyCount[0], energyCount[1], energyCount[2], energyCount[3]);
+				#endif
+			}
+			if (clusterThermo){
+				findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
+				int n = clusters[0].size;
+				fprintf(thermo, "%d ", n);
+				if (dumpCluster == 0){
+					freeClusters();
+				}
+				if ((n > killCluster) && (killCluster > 0)){
+					printf("\nNucleation detected!\nExiting...");
+					exit(3);
+				}
+			}
+			if (boopThermo){
+				boop_data* boop = NULL;
+				if (boopThermo == 1){
+					boop = computeBOOPVoronoi(particles, N, Lx, Ly);
+				}
+				else if (boopThermo == 2){
+					boop = computeBOOPCutoff(particles, N, 2.5, cellList, Nxcells);
+				}
+				
+				double q6 = 0;
+				for (int i = 0; i < N; i++){
+					q6 += boop[i].q6;
+				}
+				fprintf(thermo, "%lf ", q6/N);
+				free(boop);
+			}
+			#if INTRUDER
+			double vx_body = intru.vx*cos(intru.angle) + intru.vy*sin(intru.angle);
+			double vy_body = -intru.vx*sin(intru.angle) + intru.vy*cos(intru.angle);
+			double invDeltaTime = (deltaTime > 0.0) ? (1.0 / deltaTime) : 0.0;
+			double meanFx = intruderImpulseX * invDeltaTime;
+			double meanFy = intruderImpulseY * invDeltaTime;
+			double meanTorque = intruderTorqueZ * invDeltaTime;
+			fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf %lf ", intru.x, intru.y, vx_body, vy_body, intru.angle, intru.omega, meanFx, meanFy, meanTorque);
+			intruderImpulseX = 0.0;
+			intruderImpulseY = 0.0;
+			intruderTorqueZ = 0.0;
+			#endif
+			if (thermoKurt){
+				double ax1 = 0.0;
+				double ax3 = 0.0;
+				double vx2 = 0.0;
+
+				for (int i = 0; i < N; i++){
+					double vx = particles[i].vx;   // better: subtract mean flow first if nonzero
+					ax1 += fabs(vx);
+					ax3 += fabs(vx)*fabs(vx)*fabs(vx);
+					vx2 += vx*vx;
+				}
+
+				ax1 /= N;
+				ax3 /= N;
+				vx2 /= N;
+
+				double v_th = (vx2 > 0.0) ? sqrt(vx2) : 0.0;   // one-component thermal speed
+
+				double K1 = (v_th > 0.0) ? ax1 / (2.0 * v_th) : 0.0;
+				double K3 = (v_th > 0.0) ? ax3 / (2.0 * v_th * v_th * v_th) : 0.0;
+
+				double ratio = (K1 > 0.0) ? K3 / (2.0 * K1) : 0.0;
+
+				fprintf(thermo, "%lf %lf %lf ", K1, K3, ratio);
+			}
+			fprintf(thermo, "\n");
+			fflush(thermo);
 		}
-		if (addEnergyThermo){
-			fprintf(thermo, "%lf ", E/N);
-		}
+		count = 0;
+		e_av = 0;
+		pressure_av = 0;
+		pressureX_av = 0;
+		pressureY_av = 0;
+		pressureXY_av = 0;
+		pressureYX_av = 0;
 		#if THREE_D
-		if (addPressureThermo){
-			fprintf(thermo, "%lf %lf %lf %lf ", pressure, pressureX, pressureY, pressureZ);
-		}
-		#else
-		if (addPressureThermo){
-			fprintf(thermo, "%lf %lf %lf %.10lf %.10lf ", pressure, pressureX, pressureY, pressureXY, pressureYX);
-		}
+		pressureZ_av = 0;
+		#endif
 		#if HEAT
-		fprintf(thermo, "%.10lf %.10lf ", Jx, Jy);
+		Jx_av = 0;
+		Jy_av = 0;
 		#endif
-		#endif
-		if (addCircularWall || addWallx || addWally){
-			#if THREE_D
-			double wallArea = 0;
-			if (addWallx){
-				wallArea += 2*Ly*Ly;
-			}
-			if (addWally){
-				wallArea += 2*Lx*Lx;
-			}
-			fprintf(thermo, "%lf ", dp/(deltaTime*wallArea));
-			#else
-			double perimeter = 0;
-			if (addCircularWall){
-				perimeter = M_PI*Lx;
-			}
-			if (addWallx){
-				perimeter += 2*Ly;
-			}
-			if (addWally){
-				perimeter += 2*Lx;
-			}
-			fprintf(thermo, "%lf ", dp/(deltaTime*perimeter));
-			#endif
-			dp = 0;
-		}
-		if (addMidWall){
-			int Nleft = 0;
-			int Nright = 0;
-			int Nsolute = 0;
-			double Tsolute = 0;
-			double TsolventL = 0;
-			double TsolventR = 0;
-			for (int i = 0; i < N; i++){
-				if (particles[i].type == 0){
-					Nleft += (particles[i].x < halfLx) ? 1 : 0;
-					Nright += (particles[i].x > halfLx) ? 1 : 0;
-					double temp = 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
-					TsolventL += (particles[i].x < halfLx) ? temp : 0;
-					TsolventR += (particles[i].x > halfLx) ? temp : 0;
-				}
-				else{
-					Nsolute++;
-					Tsolute += 0.5*particles[i].m*(particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy);
-				}
-			}
-			double ratio = M_PI/(halfLx*Ly);
-			fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf ", dpMid/(deltaTime*Ly), -(dpRight - dpLeft)/(deltaTime*Ly), ratio*Nleft*sizeratio*sizeratio, ratio*Nright*sizeratio*sizeratio, TsolventL/Nleft, TsolventR/Nright, Tsolute/(Nsolute));
-			dpMid = 0;
-			dpRight = 0;
-			dpLeft = 0;
-		}
-		if (addWell){
-			Ep = 0;
-			for (int i = 0; i < N; i ++){
-				Ep -= U*particles[i].numberOfParticlesInWell/2;
-			}
-			fprintf(thermo, "%lf ", Ep/N);
-		}
-		if (msd){
-			fprintf(thermo, "%lf ", MSD/N);
-		}
-		if (addEnergyCenterOfMassThermo){
-			double ex = 0;
-			double ey = 0;
-			for (int i = 0; i < N; i++){
-				ex += particles[i].m*particles[i].vx;
-				ey += particles[i].m*particles[i].vy;
-			}
-			fprintf(thermo, "%lf ", 0.5*(ex*ex + ey*ey)/N);
-		}
-		if (critical){
-			int count[8];
-			double energyCount[8];
-			double dfrac = Lx*fracCritical/8.;
-			countConditions(particles, N, Lx, Ly, count, energyCount, dfrac);
-			#if THREE_D
-			fprintf(thermo, "%d %d %d %d %d %d %d %d %lf %lf %lf %lf %lf %lf %lf %lf ", count[0], count[1], count[2], count[3], count[4], count[5], count[6], count[7], energyCount[0], energyCount[1], energyCount[2], energyCount[3], energyCount[4], energyCount[5], energyCount[6], energyCount[7]);
-			#else
-			fprintf(thermo, "%d %d %d %d %lf %lf %lf %lf ", count[0], count[1], count[2], count[3], energyCount[0], energyCount[1], energyCount[2], energyCount[3]);
-			#endif
-		}
-		if (clusterThermo){
-			findClusters(particles, N, clusterCutoff, cellList, Nxcells, Nycells);
-			int n = clusters[0].size;
-			fprintf(thermo, "%d ", n);
-			if (dumpCluster == 0){
-				freeClusters();
-			}
-			if ((n > killCluster) && (killCluster > 0)){
-				printf("\nNucleation detected!\nExiting...");
-				exit(3);
-			}
-		}
-		if (boopThermo){
-			boop_data* boop = NULL;
-			if (boopThermo == 1){
-				boop = computeBOOPVoronoi(particles, N, Lx, Ly);
-			}
-			else if (boopThermo == 2){
-				boop = computeBOOPCutoff(particles, N, 2.5, cellList, Nxcells);
-			}
-			
-			double q6 = 0;
-			for (int i = 0; i < N; i++){
-				q6 += boop[i].q6;
-			}
-			fprintf(thermo, "%lf ", q6/N);
-			free(boop);
-		}
-		#if INTRUDER
-		double vx_body = intru.vx*cos(intru.angle) + intru.vy*sin(intru.angle);
-		double vy_body = -intru.vx*sin(intru.angle) + intru.vy*cos(intru.angle);
-		double invDeltaTime = (deltaTime > 0.0) ? (1.0 / deltaTime) : 0.0;
-		double meanFx = intruderImpulseX * invDeltaTime;
-		double meanFy = intruderImpulseY * invDeltaTime;
-		double meanTorque = intruderTorqueZ * invDeltaTime;
-		fprintf(thermo, "%lf %lf %lf %lf %lf %lf %lf %lf %lf ", intru.x, intru.y, vx_body, vy_body, intru.angle, intru.omega, meanFx, meanFy, meanTorque);
-		intruderImpulseX = 0.0;
-		intruderImpulseY = 0.0;
-		intruderTorqueZ = 0.0;
-		#endif
-		if (thermoKurt){
-			double v_abs = 0;
-			double v_sq = 0;
-			double v_third = 0;
-			for (int i = 0; i < N; i++){
-				double vx = particles[i].vx;
-				double vy = particles[i].vy;
-				double v = sqrt(vx*vx + vy*vy);
-				v_abs += v;
-				v_sq += v*v;
-				v_third += v*v*v;
-			}
-			v_third /= N;
-			v_sq /= N;
-			v_abs /= N;
-			double kurt = (2/3.)*v_third/(v_sq*v_abs);
-			fprintf(thermo, "%lf ", kurt);
-		}
-		fprintf(thermo, "\n");
-		fflush(thermo);
+		
+	}
+
+	if (t != 0){	
 		if (liquidliquid && interfaceThermo){
 			computeInterfacesPos(particles, 0.1);
 			fflush(interface);
@@ -5317,7 +5511,11 @@ void physicalQ(){
 		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2) +  pow(particles[i].vz, 2)) ;
 		if (particles[i].vx*particles[i].vx + particles[i].vy*particles[i].vy + particles[i].vz*particles[i].vz > 1e-6){
 		#else
-		E += 0.5*particles[i].m*(pow(particles[i].vx, 2) + pow(particles[i].vy, 2));
+		double vx = particles[i].vx;
+		if (addShear) {
+			vx += strainRate * (particles[i].y - halfLy);
+		}
+		E += 0.5 * particles[i].m * (vx * vx + particles[i].vy * particles[i].vy);
 		#if TANGENTIAL
 		E += 0.5*particles[i].J*pow(particles[i].omega, 2);
 		#endif
@@ -5358,8 +5556,8 @@ void customName(){
 	if (damping || noise){
 		sprintf(fileName + strlen(fileName), "gamma_%.3lfT_%.3lfdt_%.3lf", gamm, T, dtnoise);
 	};
-	if (addDelta || addDeltaTangent){
-		sprintf(fileName + strlen(fileName), "delta_%.3lf", delta);
+	if (addDelta || addDeltaTangent || addActiveDelta){
+		sprintf(fileName + strlen(fileName), "delta_%.8lf", delta);
 	}
 	if (addEnergy){
 		sprintf(fileName + strlen(fileName), "deltaE_%.3lfDeltaE_%.3lfts_%.3lfbeta_%.3lf", additionalEnergy, deltaE, taur, beta);
@@ -5368,12 +5566,15 @@ void customName(){
 		sprintf(fileName + strlen(fileName), "phiS_%.6lfphis_%.6lf", phil, phig);
 	}
 	if (addShear){
-		sprintf(fileName + strlen(fileName), "shear_%.6lf", fabs(strainRate));
+		sprintf(fileName + strlen(fileName), "shear_%.6lf", strainRate);
 	}
 	#if INTRUDER
 		sprintf(fileName + strlen(fileName), "Im_%lfM_%.5lfresI_%.3lfdeltaI_%.3lf", intru.Im, intru.M, res_intruder, delta_intruder);
 		if (shape == GEN_WHEEL){
 			sprintf(fileName + strlen(fileName), "Rinside_%lfRoutside_%lfNspikes_%dChi_%lf", paramIntruder[0], paramIntruder[1], (int)paramIntruder[2], paramIntruder[3]);
+		}
+		if (shape == POLYGON){
+			sprintf(fileName + strlen(fileName), "Nside_%dR_%lf", (int)paramIntruder[1], paramIntruder[0]);
 		}
 	#endif
 
@@ -5390,6 +5591,9 @@ void customName(){
 	}
 
 	snprintf(thermoName, sizeof(thermoName), "%s%d.thermo", baseFileName, version);
+	if (thermoPressureField){
+		snprintf(pressureFieldName, sizeof(pressureFieldName), "%s%d.pressure_field", baseFileName, version);
+	}
 
 
 	#if INTRUDER

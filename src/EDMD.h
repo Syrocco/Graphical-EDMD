@@ -14,7 +14,7 @@
 
 #define TANGENTIAL 0
 
-#define INTRUDER 1
+#define INTRUDER 0
 
 enum event{
 	CELLCROSS,

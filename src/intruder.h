@@ -8,10 +8,10 @@
 extern double t;
 typedef struct polygon polygon;
 struct polygon{
-    double vertices[20][2];
-    double lengths[20];
-    double normals[20][2];
-    double tangents[20][2];
+    double vertices[64][2];
+    double lengths[64];
+    double normals[64][2];
+    double tangents[64][2];
     int n_vertices;
     double max_extent;
 };
@@ -34,7 +34,7 @@ enum intruderShape{
     GEN_WHEEL,
     COMPLEX_WHEEL,
     CROSS,
-    CIRCLE
+    POLYGON,
 };
 
 typedef struct collisionInfo collisionInfo;

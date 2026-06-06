@@ -165,6 +165,10 @@ int interfaceThermoTemp = 0;
 
 int velocityDistributionThermo = 0;
 
+int profileThermo = 1;
+char profileName[350];
+#define nProfileBins 100
+
 int clusterThermo = 0;
 int dumpCluster = 0 ;
 int killCluster = 0;
@@ -198,13 +202,13 @@ int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 4000000;  
-double dtime = 10000;
+double dtime = 1000;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
-double dtimeThermo = 1000;
-int Nthermo = 1;
-double firstThermo = 1;
+double dtimeThermo = 100;
+int Nthermo = 100;
+double firstThermo = 1000;
 double dr_pressure = 1.0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -237,23 +241,23 @@ const int liquidliquid = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 0;
+const int noise = 1;
 const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
-const int damping = 1;
-const int addDelta = 0;
+const int damping = 0;
+const int addDelta = 1;
 const int addDeltaTangent = 0;
 const int addActiveDelta = 0;
 const int addEnergy = 0;
-const int addDoubleDelta = 1;
+const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int polydispersity = 0;
 const int thermoWall = 0;
 const int charged = 0;
-const int addShear = 0;
+const int addShear = 1;
 const int addShearWall = 0;
 const int liquidliquid = 0;
 #endif
@@ -283,7 +287,7 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.005;
+double delta = 0.05;
 
 //values for double delta model
 double deltaM = 0.05;
@@ -330,10 +334,10 @@ double deltaOmega = 100;
 
 //parameter if noise or damping
 double gamm = 0.001;
-double T = 1;
+double T = 0;
 double expE = 1;
 //time between kicks
-double dtnoise = 100;
+double dtnoise = 0.1;
 double T2 = 0.5;
 
 double strainRate = -0.01;
@@ -425,6 +429,7 @@ FILE *strucFile;
 FILE *clusterFile;
 FILE *osmosisFile;
 FILE *velocityFile;
+FILE *profileFile;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -586,6 +591,9 @@ int main(int argc, char *argv[]){
 		}
 		if (velocityDistributionThermo){
 			fclose(velocityFile);
+		}
+		if (profileThermo){
+			fclose(profileFile);
 		}
 	}
 	#else
@@ -1185,6 +1193,13 @@ void initThermo(){
 	if (velocityDistributionThermo){
 		velocityFile = fopen(velocityDistributionName, "w");
 		fprintf(velocityFile, "vx vy\n");
+	}
+	if (profileThermo){
+		profileFile = fopen(profileName, "w");
+		for (int i = 0; i < nProfileBins; i++){
+			fprintf(profileFile, "%lf ", (i + 0.5)*Ly/nProfileBins);
+		}
+		fprintf(profileFile, "\n");
 	}
 }
 
@@ -4939,6 +4954,20 @@ void saveThermo(){
 	pressureXY_av += pressureXY;
 	static double pressureYX_av = 0;
 	pressureYX_av += pressureYX;
+	static double profile[nProfileBins] = {0};
+	static int countProfile[nProfileBins] = {0};
+	if (profileThermo){
+		for (int i = 0; i < N; i++){
+			int bin = (int)(particles[i].y/(Ly/nProfileBins));
+			if (bin == nProfileBins){
+				bin = nProfileBins - 1;
+			}
+			double vx = particles[i].vx;
+			profile[bin] += vx;
+			countProfile[bin]++;
+		}
+
+	}
 	#if THREE_D
 	static double pressureZ_av = 0;
 	pressureZ_av += pressureZ;
@@ -5120,6 +5149,13 @@ void saveThermo(){
 			}
 			fprintf(thermo, "\n");
 			fflush(thermo);
+			if (profileThermo){
+				for (int i = 0; i < nProfileBins; i++){
+					fprintf(profileFile, "%lf ", (countProfile[i] > 0) ? profile[i]/countProfile[i] : 0);
+				}
+				fprintf(profileFile, "\n");
+				fflush(profileFile);
+			}
 		}
 		count = 0;
 		e_av = 0;
@@ -5135,6 +5171,12 @@ void saveThermo(){
 		Jx_av = 0;
 		Jy_av = 0;
 		#endif
+		if (profileThermo){
+			for (int i = 0; i < nProfileBins; i++){
+				profile[i] = 0;
+				countProfile[i] = 0;
+			}
+		}
 		
 	}
 
@@ -5629,7 +5671,9 @@ void customName(){
 	if (velocityDistributionThermo){
 		snprintf(velocityDistributionName, sizeof(velocityDistributionName), "%s%d.vdist", baseFileName, version);
 	}
-
+	if (profileThermo){
+		snprintf(profileName, sizeof(profileName), "%s%d.profile", baseFileName, version);
+	}
 }
 
 int mygetline(char* str, FILE* f){

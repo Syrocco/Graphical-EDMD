@@ -27,6 +27,7 @@ enum event{
 	OUT, IN,
 	GROWSTOP,
 	UMBRELLA,
+	MULLER_PLATHE,
 	#if INTRUDER
 	INTRUDER_COLLISION,
 	#endif
@@ -127,6 +128,7 @@ void addEventScreenshot(double tscreen);
 void takeAScreenshot();
 
 void addEventThermo(double tscreen);
+void addEventMullerPlathe(double tswap);
 void takeAThermo();
 
 void addEventGrow(double time);
@@ -141,10 +143,14 @@ void updateT();
 void addEventUmbrella(double tscreen);
 void doUmbrella();
 
+void initMullerPlathe();
+void doMullerPlatheSwap();
+
 void freeFlyGrow(particle* p);
 void freeFlyNormal(particle* p);
 void saveTXT();
 void saveThermo();
+void saveTempProfile();
 double sign(double x);
 double logTime(double time);
 double drand(double min, double max);

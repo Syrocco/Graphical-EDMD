@@ -52,7 +52,7 @@
 #endif
 
 #define STRESS 0
-#define HEAT 0
+#define HEAT 1
 
 #define CGREEN printf("\033[1;32m")
 #define CWHITE printf("\033[0;37m")
@@ -130,7 +130,25 @@ double dpLeft = 0;
 double dpRight = 0;
 double dpMid = 0;
 
+// Parameters for Muller-Plathe heat-swapping method.
+// A swap exchanges the velocities of the coldest particle in the hot slab
+// with the hottest particle in the cold slab, creating a steady heat flux.
+int mullerPlathe = 0;
+int mpNSlabs = 40;
+double mpInterval = 500;
+int mpHotSlab = -1;
+int mpColdSlab = -1;
+double mpSlabWidth = 0;
 
+// Temperature/energy/heat-current profile along x.
+int tempProfileThermo = 1;
+#define TEMP_PROFILE_N_SLABS 40
+int tempProfileNSlabs = TEMP_PROFILE_N_SLABS;
+double tempSlabWidth = 0;
+double JxProfile[TEMP_PROFILE_N_SLABS];
+double JyProfile[TEMP_PROFILE_N_SLABS];
+double energyProfile[TEMP_PROFILE_N_SLABS];
+double countTempProfile[TEMP_PROFILE_N_SLABS];
 
 unsigned long int ncol = 0;
 unsigned long int ncross = 0;
@@ -146,6 +164,7 @@ char pcfName[350];
 char pcfBondOrderName[350];
 char pcfg6Name[350];
 char velocityDistributionName[350];
+char tempProfileName[350];
 FILE* file;
 
 
@@ -257,7 +276,7 @@ const int addExpo = 0;
 const int polydispersity = 0;
 const int thermoWall = 0;
 const int charged = 0;
-const int addShear = 1;
+const int addShear = 0;
 const int addShearWall = 0;
 const int liquidliquid = 0;
 #endif
@@ -430,6 +449,7 @@ FILE *clusterFile;
 FILE *osmosisFile;
 FILE *velocityFile;
 FILE *profileFile;
+FILE *tempProfileFile;
 node *root;
 Dump* dump;
 //array containing the particles
@@ -549,6 +569,9 @@ int main(int argc, char *argv[]){
 				case UMBRELLA:
 					doUmbrella();
 					break;
+				case MULLER_PLATHE:
+					doMullerPlatheSwap();
+					break;
 				#if INTRUDER
 				case INTRUDER_COLLISION:
 					doTheCollisionIntruder();
@@ -594,6 +617,9 @@ int main(int argc, char *argv[]){
 		}
 		if (profileThermo){
 			fclose(profileFile);
+		}
+		if (tempProfileThermo && tempProfileFile){
+			fclose(tempProfileFile);
 		}
 	}
 	#else
@@ -658,6 +684,33 @@ void boxConstantHelper(){
 }
 
 
+// Prepares the Muller-Plathe slabs and profile slab widths.
+void initMullerPlathe(){
+	if (mpNSlabs <= 0){
+		mpNSlabs = 40;
+	}
+	if (mpHotSlab < 0){
+		mpHotSlab = mpNSlabs/2;
+	}
+	if (mpColdSlab < 0){
+		mpColdSlab = 0;
+	}
+	if (mpHotSlab < 0){
+		mpHotSlab = 0;
+	}
+	if (mpColdSlab < 0){
+		mpColdSlab = 0;
+	}
+	if (mpHotSlab >= mpNSlabs){
+		mpHotSlab = mpNSlabs - 1;
+	}
+	if (mpColdSlab >= mpNSlabs){
+		mpColdSlab = mpNSlabs - 1;
+	}
+	mpSlabWidth = Lx/((double)mpNSlabs);
+}
+
+
 void constantInit(int argc, char *argv[]){
 
 	char filename[200];
@@ -693,6 +746,13 @@ void constantInit(int argc, char *argv[]){
 		{"strainRate", required_argument, NULL, 'S'},
 		{"cluster-mode", required_argument, NULL, 'C'},
 		{"cluster-neighbor-threshold", required_argument, NULL, 'H'},
+		{"muller-plathe", no_argument, NULL, 1002},
+		{"mp-interval", required_argument, NULL, 1003},
+		{"mp-slabs", required_argument, NULL, 1004},
+		{"mp-hot", required_argument, NULL, 1005},
+		{"mp-cold", required_argument, NULL, 1006},
+		{"temp-profile", no_argument, NULL, 1007},
+		{"temp-slabs", required_argument, NULL, 1008},
 		{"intruderMass", required_argument, NULL, 'M'},
 		{"intruderDelta", required_argument, NULL, 'z'},
 		{"intruderRes", required_argument, NULL, 'Y'},
@@ -828,6 +888,42 @@ void constantInit(int argc, char *argv[]){
 				if (clusterNeighborThreshold < 0){
 					printf("WARNING:\033[0;31m clusterNeighborThreshold must be >= 0. Forcing 0.\033[0m\n");
 					clusterNeighborThreshold = 0;
+				}
+				break;
+			case 1002:
+				mullerPlathe = 1;
+				break;
+			case 1003:
+				sscanf(optarg, "%lf", &mpInterval);
+				if (mpInterval <= 0){
+					printf("WARNING:\033[0;31m mpInterval must be > 0. Forcing mpInterval = 500.\033[0m\n");
+					mpInterval = 500;
+				}
+				break;
+			case 1004:
+				sscanf(optarg, "%d", &mpNSlabs);
+				if (mpNSlabs <= 0){
+					printf("WARNING:\033[0;31m mpNSlabs must be > 0. Forcing mpNSlabs = 40.\033[0m\n");
+					mpNSlabs = 40;
+				}
+				break;
+			case 1005:
+				sscanf(optarg, "%d", &mpHotSlab);
+				break;
+			case 1006:
+				sscanf(optarg, "%d", &mpColdSlab);
+				break;
+			case 1007:
+				tempProfileThermo = 1;
+				break;
+			case 1008:
+				sscanf(optarg, "%d", &tempProfileNSlabs);
+				if (tempProfileNSlabs < 1){
+					tempProfileNSlabs = 1;
+				}
+				if (tempProfileNSlabs > TEMP_PROFILE_N_SLABS){
+					printf("WARNING:\033[0;31m tempProfileNSlabs is capped at %d.\033[0m\n", TEMP_PROFILE_N_SLABS);
+					tempProfileNSlabs = TEMP_PROFILE_N_SLABS;
 				}
 				break;
 			#if INTRUDER
@@ -1088,6 +1184,7 @@ void constantInit(int argc, char *argv[]){
 		firstScreen = tmax - 1;
 	
 	boxConstantHelper();
+	initMullerPlathe();
 }
 
 void initThermo(){
@@ -1200,6 +1297,17 @@ void initThermo(){
 			fprintf(profileFile, "%lf ", (i + 0.5)*Ly/nProfileBins);
 		}
 		fprintf(profileFile, "\n");
+	}
+	if (tempProfileThermo){
+		tempProfileFile = fopen(tempProfileName, "w");
+		tempSlabWidth = Lx/((double)tempProfileNSlabs);
+		if (tempProfileFile){
+			fprintf(tempProfileFile, "# x-slab-centres\n");
+			for (int i = 0; i < tempProfileNSlabs; i++){
+				fprintf(tempProfileFile, "%lf ", (i + 0.5)*tempSlabWidth);
+			}
+			fprintf(tempProfileFile, "\n");
+		}
 	}
 }
 
@@ -1854,6 +1962,9 @@ void eventListInit(){
 		addEventUpdate(updateTime);
 	if (umbrellaSampling)
 		addEventUmbrella(firstUmbrellaSamping);
+	if (mullerPlathe){
+		addEventMullerPlathe(t + mpInterval);
+	}
 
 	for (int i = 0; i < N; i++){
 		eventList[i]->i = i;
@@ -3718,8 +3829,22 @@ void doTheCollisionNormal(){
 	double deltaPiy = pi->m*(pi->vy - oldviy);
 	double vmeanX = 0.5*(pi->vx + pj->vx);
 	double vmeanY = 0.5*(pi->vy + pj->vy);
-	collHeatX += (deltaPix*vmeanX + deltaPiy*vmeanY)*dx;
-	collHeatY += (deltaPix*vmeanX + deltaPiy*vmeanY)*dy;
+	double collImpulseDotVmean = deltaPix*vmeanX + deltaPiy*vmeanY;
+	collHeatX += collImpulseDotVmean*dx;
+	collHeatY += collImpulseDotVmean*dy;
+	if (tempProfileThermo && tempSlabWidth > 0){
+		double meanX = 0.5*(pi->x + pj->x);
+		PBCpostX(&meanX);
+		int indexSlab = (int)(meanX/tempSlabWidth);
+		if (indexSlab < 0){
+			indexSlab = 0;
+		}
+		else if (indexSlab >= tempProfileNSlabs){
+			indexSlab = tempProfileNSlabs - 1;
+		}
+		JxProfile[indexSlab] += dx*collImpulseDotVmean/dtimeThermo;
+		JyProfile[indexSlab] += dy*collImpulseDotVmean/dtimeThermo;
+	}
 	#endif
 }
 
@@ -4249,6 +4374,17 @@ void addEventThermo(double tscreen){
 	addEventToQueue(toAdd);
 }
 
+void addEventMullerPlathe(double tswap){
+	node* toAdd;
+
+	toAdd = eventList[2*N + 6];
+	toAdd->type = MULLER_PLATHE;
+	toAdd->t = tswap;
+	toAdd->j = 0;
+
+	addEventToQueue(toAdd);
+}
+
 void addEventUmbrella(double tscreen){
 	node* toAdd;
 
@@ -4337,6 +4473,89 @@ void doUmbrella(){
 	}
 	addEventUmbrella(t + dtimeUmbrella);
 }
+
+/* ---------------------------------------------
+	Muller-Plathe velocity swapping to impose
+	a steady heat flux.
+--------------------------------------------- */
+void doMullerPlatheSwap(){
+	if (!mullerPlathe){
+		return;
+	}
+
+	if (mpSlabWidth <= 0){
+		initMullerPlathe();
+	}
+
+	for (int i = 0; i < N; i++){
+		freeFly(particles + i);
+	}
+
+	int hotIdx = -1;
+	int coldIdx = -1;
+	double bestHot = 1e100;
+	double bestCold = -1e100;
+
+	for (int i = 0; i < N; i++){
+		particle* p = particles + i;
+		int slab = (int)(p->x/mpSlabWidth);
+		if (slab < 0){
+			slab = 0;
+		}
+		else if (slab >= mpNSlabs){
+			slab = mpNSlabs - 1;
+		}
+
+		double v2 = p->vx*p->vx + p->vy*p->vy;
+		#if THREE_D
+		v2 += p->vz*p->vz;
+		#endif
+
+		if ((slab == mpHotSlab) && (v2 < bestHot)){
+			bestHot = v2;
+			hotIdx = i;
+		}
+		if ((slab == mpColdSlab) && (v2 > bestCold)){
+			bestCold = v2;
+			coldIdx = i;
+		}
+	}
+
+	addEventMullerPlathe(t + mpInterval);
+
+	if ((hotIdx == -1) || (coldIdx == -1) || (hotIdx == coldIdx)){
+		return;
+	}
+
+	particle* hot = particles + hotIdx;
+	particle* cold = particles + coldIdx;
+
+	double tmpx = hot->vx;
+	double tmpy = hot->vy;
+	hot->vx = cold->vx;
+	hot->vy = cold->vy;
+	cold->vx = tmpx;
+	cold->vy = tmpy;
+	#if THREE_D
+	double tmpz = hot->vz;
+	hot->vz = cold->vz;
+	cold->vz = tmpz;
+	#endif
+
+	hot->coll++;
+	cold->coll++;
+
+	removeEventFromQueue(eventList[hotIdx]);
+	crossingEvent(hotIdx);
+	removeEventFromQueue(eventList[N + hotIdx]);
+	collisionEvent(hotIdx);
+
+	removeEventFromQueue(eventList[coldIdx]);
+	crossingEvent(coldIdx);
+	removeEventFromQueue(eventList[N + coldIdx]);
+	collisionEvent(coldIdx);
+}
+
 /* ---------------------------------------------
 	Updates the position of the particles
 	at actual time and take a screenshot of
@@ -4386,6 +4605,7 @@ void takeAThermo(){
 	}
 	physicalQ();
 	saveThermo();
+	saveTempProfile();
 
 	double nextTime = t + dtimeThermo;
 	if (logSpacing){
@@ -4837,6 +5057,81 @@ void saveTXT(){
 	fflush(fichier);
 }
 
+
+// Writes the x-resolved energy and heat-current profile into tempProfileFile.
+// Each block contains: mean kinetic energy per particle, Jx, Jy.
+void saveTempProfile(){
+	if (!tempProfileThermo){
+		return;
+	}
+	if (tempProfileFile == NULL){
+		return;
+	}
+	if (tempSlabWidth <= 0){
+		tempSlabWidth = Lx/((double)tempProfileNSlabs);
+	}
+
+	static int count = 0;
+	count++;
+
+	for (int i = 0; i < N; i++){
+		freeFly(particles + i);
+	}
+
+	for (int i = 0; i < N; i++){
+		particle* p = particles + i;
+		double x = p->x;
+		PBCpostX(&x);
+		int slab = (int)(x/tempSlabWidth);
+		if (slab < 0){
+			slab = 0;
+		}
+		else if (slab >= tempProfileNSlabs){
+			slab = tempProfileNSlabs - 1;
+		}
+
+		double vx = p->vx;
+		if (addShear){
+			vx += strainRate*(p->y - halfLy);
+		}
+		double ke = 0.5*p->m*(vx*vx + p->vy*p->vy);
+		#if THREE_D
+		ke += 0.5*p->m*(p->vz*p->vz);
+		#endif
+
+		energyProfile[slab] += ke;
+		countTempProfile[slab] += 1;
+		JxProfile[slab] += ke*vx;
+		JyProfile[slab] += ke*p->vy;
+	}
+
+	if (count >= Nthermo){
+		for (int i = 0; i < tempProfileNSlabs; i++){
+			double e = 0;
+			if (countTempProfile[i] > 0){
+				e = energyProfile[i]/countTempProfile[i];
+			}
+			fprintf(tempProfileFile, "%.4e ", e);
+			energyProfile[i] = 0;
+			countTempProfile[i] = 0;
+		}
+		fprintf(tempProfileFile, "\n");
+
+		for (int i = 0; i < tempProfileNSlabs; i++){
+			fprintf(tempProfileFile, "%.4e ", JxProfile[i]/(Ly*tempSlabWidth*count));
+			JxProfile[i] = 0;
+		}
+		fprintf(tempProfileFile, "\n");
+
+		for (int i = 0; i < tempProfileNSlabs; i++){
+			fprintf(tempProfileFile, "%.4e ", JyProfile[i]/(Ly*tempSlabWidth*count));
+			JyProfile[i] = 0;
+		}
+		fprintf(tempProfileFile, "\n");
+		fflush(tempProfileFile);
+		count = 0;
+	}
+}
 
 
 void saveThermo(){
@@ -5673,6 +5968,9 @@ void customName(){
 	}
 	if (profileThermo){
 		snprintf(profileName, sizeof(profileName), "%s%d.profile", baseFileName, version);
+	}
+	if (tempProfileThermo){
+		snprintf(tempProfileName, sizeof(tempProfileName), "%s%d.temp", baseFileName, version);
 	}
 }
 

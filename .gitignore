@@ -1,0 +1,13 @@
+# Ignore everything
+*
+
+# But don't ignore these
+!docs/
+!docs/**
+!.gitignore
+!Makefile
+!README.md
+!LICENSE
+!src/
+!src/**
+src/.DS_Store

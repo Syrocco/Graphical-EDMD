@@ -220,12 +220,12 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 4000000;  
-double dtime = 100;
+double tmax = 40000;  
+double dtime = 10000;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
-double dtimeThermo = 100;
+double dtimeThermo = 10000;
 int Nthermo = 100;
 double firstThermo = 1000;
 double dr_pressure = 1.0;
@@ -269,7 +269,7 @@ const int damping = 0;
 const int addDelta = 0;
 const int addDeltaTangent = 0;
 const int addActiveDelta = 0;
-const int addEnergy = 1;
+const int addEnergy = 0;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -346,7 +346,7 @@ double resW = 1.;
 double resT = 0.;
 
 //coeff of restitution of particles
-double res = 0.95;
+double res = 1;
 double resBeta = 0.;
 
 double deltaOmega = 100;

@@ -51,14 +51,31 @@
 #include <pthread.h>
 #endif
 
+#ifndef STRESS
 #define STRESS 0
-#define HEAT 1
+#endif
+#ifndef HEAT
+#define HEAT 0
+#endif
 
 #define CGREEN printf("\033[1;32m")
 #define CWHITE printf("\033[0;37m")
 #define CCYAN printf("\033[1;96m")
 
 #define ERROR 0
+
+
+#ifndef PAUL_DT_SCALE
+#define PAUL_DT_SCALE 5.0
+#endif
+
+#ifndef EDMD_VERIFY_QUEUE
+#define EDMD_VERIFY_QUEUE 0
+#endif
+
+#ifndef EDMD_VERIFY_OVERLAPS
+#define EDMD_VERIFY_OVERLAPS 0
+#endif
 
 //Values if no load file
 int N = 500;
@@ -159,6 +176,7 @@ char interfaceName[350];
 char osmosisName[350];
 char buffer[255];
 char strucName[350];
+char transverseCorrelationName[350];
 char clusterName[350];
 char pcfName[350];
 char pcfBondOrderName[350];
@@ -220,12 +238,12 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
-double tmax = 40000;  
+double tmax = 40000000;  
 double dtime = 10000;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
-double dtimeThermo = 10000;
+double dtimeThermo = 100;
 int Nthermo = 100;
 double firstThermo = 1000;
 double dr_pressure = 1.0;
@@ -451,6 +469,7 @@ FILE *velocityFile;
 FILE *profileFile;
 FILE *tempProfileFile;
 node *root;
+static node *treeMin;
 Dump* dump;
 //array containing the particles
 particle* particles;
@@ -477,6 +496,7 @@ int main(int argc, char *argv[]){
 
 
 	constantInit(argc, argv);
+	configureTransverseVelocityCorrelationSampling(&dtimeThermo, &logSpacing);
 	runningCheck();
 	particlesInit();
 	customName();
@@ -595,6 +615,7 @@ int main(int argc, char *argv[]){
 	#endif
 	printInfo();
 	printClose();
+	finalizeTransverseVelocityCorrelation();
 	#if G != 1
 	fclose(fichier);
 	if (ther){
@@ -678,7 +699,7 @@ void boxConstantHelper(){
 	halfzC = cellzSize/2;
 	cellzFac = 1/cellzSize;
 	#endif
-	dtPaul = 100/(double)N;
+	dtPaul = PAUL_DT_SCALE/(double)N;
 
     paulListN = N;
 }
@@ -1283,6 +1304,9 @@ void initThermo(){
 	if (strucThermo){
 		strucFile = fopen(strucName, "w");
 		initStructureFactor(qmax, Lx, Ly, N, strucFile, doFQT);
+	}
+	if (transverseVelocityCorrelationIsEnabled()){
+		initTransverseVelocityCorrelation(Lx, Ly, N, transverseCorrelationName);
 	}
 	if (dumpCluster && clusterThermo){
 		clusterFile = fopen(clusterName, "w");
@@ -1913,6 +1937,7 @@ void eventListInit(){
 	root->rgt = NULL;
 	root->lft = NULL;
 	root->top = NULL;
+	treeMin = NULL;
 
 	
 	#if G != 1
@@ -2069,7 +2094,7 @@ int coordToCell(double a, int x){
 }
 
 
-int PBCcellX(double a){
+int PBCcellX(int a){
 	if (a < 0)
 		return a + Nxcells;
 	else if (a >= Nxcells)
@@ -2077,7 +2102,7 @@ int PBCcellX(double a){
 	return a;
 }
 
-int PBCcellY(double a){
+int PBCcellY(int a){
 	if (a < 0)
 		return a + Nycells;
 	else if (a >= Nycells)
@@ -2085,7 +2110,7 @@ int PBCcellY(double a){
 	return a;
 }
 #if THREE_D
-int PBCcellZ(double a){
+int PBCcellZ(int a){
 	if (a < 0)
 		return a + Nzcells;
 	else if (a >= Nzcells)
@@ -2112,14 +2137,15 @@ void addEventToQueue(node* toAdd){
 		addEventToTree(toAdd);
 	}
 	else{
-		int paulListIndex = actualPaulList + dt/dtPaul; //could put long int
-		if (paulListIndex >= paulListN){
-			paulListIndex -= paulListN;
-			if (paulListIndex > actualPaulList - 1)
-				paulListIndex = paulListN;
-		}
-		else if (paulListIndex < 0)
+		int paulListIndex;
+		if (dt >= dtPaul*paulListN){
 			paulListIndex = paulListN;
+		}
+		else{
+			paulListIndex = actualPaulList + (int)(dt/dtPaul);
+			if (paulListIndex >= paulListN)
+				paulListIndex -= paulListN;
+		}
 
 		toAdd->q = paulListIndex;
 		toAdd->lft = NULL;
@@ -2159,6 +2185,8 @@ void addEventToTree(node* toAdd){
 	toAdd->lft = NULL;
 	toAdd->rgt = NULL;
 	toAdd->top = walker;
+	if ((treeMin == NULL) || (toAdd->t < treeMin->t))
+		treeMin = toAdd;
 }
 
 
@@ -2188,6 +2216,17 @@ void removeEventFromTree(node* toRemove){
 
     node* top = toRemove->top;
     node* n;
+
+	if (toRemove == treeMin){
+		if (toRemove->rgt != NULL){
+			treeMin = toRemove->rgt;
+			while (treeMin->lft != NULL)
+				treeMin = treeMin->lft;
+		}
+		else{
+			treeMin = (top == root) ? NULL : top;
+		}
+	}
 
 	if ((toRemove->lft == NULL) && (toRemove->rgt == NULL))
 		n = NULL;
@@ -2259,15 +2298,19 @@ void addNextPaulEvent(){
 	Finds the next event according to the BST
 --------------------------------------------- */
 node* findNextEvent(){
-	node* chosenONE = root->lft;
-	
-	while (chosenONE == NULL){
+	while (treeMin == NULL){
 		addNextPaulEvent();
-		chosenONE = root->lft;
 	}
-	while (chosenONE->lft != NULL)
-		chosenONE = chosenONE->lft;
-	return chosenONE;
+	#if EDMD_VERIFY_QUEUE
+		node* verifiedMin = root->lft;
+		while ((verifiedMin != NULL) && (verifiedMin->lft != NULL))
+			verifiedMin = verifiedMin->lft;
+		if (verifiedMin != treeMin){
+			fprintf(stderr, "Event-tree minimum invariant failed at t=%.17g\n", t);
+			exit(3);
+		}
+	#endif
+	return treeMin;
 }
 
 /* -------------------------------/
@@ -2286,7 +2329,7 @@ node* findNextEvent(){
 
 void crossingEventGrow(int i){
 
-	particle p = particles[i];
+	const particle* p = particles + i;
 	double travelTimeX = 10000000;
 	double travelTimeY = 10000000;
 	int xx;
@@ -2295,37 +2338,37 @@ void crossingEventGrow(int i){
 
 	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	//printf("p: %d %lf |||", p.num, p.vx);
-	if (p.vx < 0){
-		travelTimeX = PBCinsideCellX(p.cell[0]*cellxSize - p.x)/p.vx;
+	if (p->vx < 0){
+		travelTimeX = PBCinsideCellX(p->cell[0]*cellxSize - p->x)/p->vx;
 		xx = 1;
 		
 	}
 	else{
-		travelTimeX = PBCinsideCellX((1 + p.cell[0])*cellxSize - p.x)/p.vx;
+		travelTimeX = PBCinsideCellX((1 + p->cell[0])*cellxSize - p->x)/p->vx;
 		xx = 2;
 		
 	}
 
 		
 
-	if (p.vy < 0){
-		travelTimeY = PBCinsideCellY(p.cell[1]*cellySize - p.y)/p.vy;
+	if (p->vy < 0){
+		travelTimeY = PBCinsideCellY(p->cell[1]*cellySize - p->y)/p->vy;
 		yy = 3;
 	}
 	else{
-		travelTimeY = PBCinsideCellY((1 + p.cell[1])*cellySize - p.y)/p.vy;
+		travelTimeY = PBCinsideCellY((1 + p->cell[1])*cellySize - p->y)/p->vy;
 		yy = 4;
 	}
 	
 	#if THREE_D
 	double travelTimeZ = 10000000;
 	int zz;
-	if (p.vz < 0){
-		travelTimeZ = PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz;
+	if (p->vz < 0){
+		travelTimeZ = PBCinsideCellZ(p->cell[2]*cellzSize - p->z)/p->vz;
 		zz = 5;
 	}
 	else{
-		travelTimeZ = PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz;
+		travelTimeZ = PBCinsideCellZ((1 + p->cell[2])*cellzSize - p->z)/p->vz;
 		zz = 6;
 	}
 	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
@@ -2348,7 +2391,7 @@ void crossingEventGrow(int i){
 
 void crossingEventNormal(int i){
 
-	particle p = particles[i];
+	const particle* p = particles + i;
 	double travelTimeX = 10000000;
 	double travelTimeY = 10000000;
 
@@ -2357,21 +2400,21 @@ void crossingEventNormal(int i){
 
 	// xx and yy indicates the direction to the new cell for example xx = 1 means that we will go from cell Cell[X][Y] to Cell[X - 1][Y]
 	//printf("p: %d %lf |||", p.num, p.vx);
-	if (p.vx < 0){
-		travelTimeX = logTime(PBCinsideCellX(p.cell[0]*cellxSize - p.x)/p.vx);
+	if (p->vx < 0){
+		travelTimeX = logTime(PBCinsideCellX(p->cell[0]*cellxSize - p->x)/p->vx);
 		xx = 1;
 		
 	}
 	else{
-		travelTimeX = logTime(PBCinsideCellX((1 + p.cell[0])*cellxSize - p.x)/p.vx);
+		travelTimeX = logTime(PBCinsideCellX((1 + p->cell[0])*cellxSize - p->x)/p->vx);
 		xx = 2;
 		
 	}
 
 
 	if (addField){
-		double vy = p.vy;
-		double dy = PBCinsideCellY(p.y - (1 + p.cell[1])*cellySize);
+		double vy = p->vy;
+		double dy = PBCinsideCellY(p->y - (1 + p->cell[1])*cellySize);
 
 		if ((dy < 0) && (vy > sqrt(2*field*dy))){
 			travelTimeY = (-vy + sqrt(vy*vy - 2*field*dy))/field;
@@ -2379,18 +2422,18 @@ void crossingEventNormal(int i){
 			
 		}
 		else{
-			dy = PBCinsideCellY(p.y - p.cell[1]*cellySize);
+			dy = PBCinsideCellY(p->y - p->cell[1]*cellySize);
 			travelTimeY = (-vy - sqrt(vy*vy - 2*field*dy))/field;
 			yy = 3;
 		}	
 	}	
 	else{
-		if (p.vy < 0){
-			travelTimeY = logTime(PBCinsideCellY(p.cell[1]*cellySize - p.y)/p.vy);
+		if (p->vy < 0){
+			travelTimeY = logTime(PBCinsideCellY(p->cell[1]*cellySize - p->y)/p->vy);
 			yy = 3;
 		}
 		else{
-			travelTimeY = logTime(PBCinsideCellY((1 + p.cell[1])*cellySize - p.y)/p.vy);
+			travelTimeY = logTime(PBCinsideCellY((1 + p->cell[1])*cellySize - p->y)/p->vy);
 			yy = 4;
 		}
 	}
@@ -2398,12 +2441,12 @@ void crossingEventNormal(int i){
 	#if THREE_D
 	double travelTimeZ = 10000000;
 	int zz;
-	if (p.vz < 0){
-		travelTimeZ = logTime(PBCinsideCellZ(p.cell[2]*cellzSize - p.z)/p.vz);
+	if (p->vz < 0){
+		travelTimeZ = logTime(PBCinsideCellZ(p->cell[2]*cellzSize - p->z)/p->vz);
 		zz = 5;
 	}
 	else{
-		travelTimeZ = logTime(PBCinsideCellZ((1 + p.cell[2])*cellzSize - p.z)/p.vz);
+		travelTimeZ = logTime(PBCinsideCellZ((1 + p->cell[2])*cellzSize - p->z)/p->vz);
 		zz = 6;
 	}
 	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
@@ -2909,7 +2952,7 @@ void collisionEventNormal(int i){
 				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
 			#endif
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (p1->num != p2->num){
+					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
 								dtTemp = collisionTimeNormal(p1, p2);
@@ -2950,7 +2993,7 @@ void collisionEventNormal(int i){
 			for (int k = 0; k < Nxcells; k++){
 				particle* p2 = cellList[(Nycells - 1)*Nxcells + k];
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (p1->num != p2->num){
+					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
 								dtTemp = collisionTimeNormal(p1, p2);
@@ -2987,7 +3030,7 @@ void collisionEventNormal(int i){
 			for (int k = 0; k < Nxcells; k++){
 				particle* p2 = cellList[k];
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (p1->num != p2->num){
+					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
 								dtTemp = collisionTimeNormal(p1, p2);
@@ -3146,7 +3189,7 @@ void collisionEventGrow(int i){
 				particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
 			#endif
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (p1->num != p2->num){
+					if (p1 != p2){
 						dtTemp = collisionTimeGrow(p1, p2);
 						typeTemp = COLLISION;
 						
@@ -3495,7 +3538,7 @@ void doTheCollisionNormal(){
 
 
 	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
-        collisionEvent(i);
+		collisionEvent(i);
         return;
     }
 
@@ -4562,11 +4605,40 @@ void doMullerPlatheSwap(){
 	the system. Also schedules a new
 	screenshot event.
 --------------------------------------------- */
+#if EDMD_VERIFY_OVERLAPS
+static void verifyNoOverlaps(void){
+	for (int i = 0; i < N; i++){
+		for (int j = i + 1; j < N; j++){
+			double dx = particles[j].x - particles[i].x;
+			double dy = particles[j].y - particles[i].y;
+			#if THREE_D
+				double dz = particles[j].z - particles[i].z;
+				PBC(&dx, &dy, &dz);
+				double separation2 = dx*dx + dy*dy + dz*dz;
+			#else
+				PBC(&dx, &dy);
+				double separation2 = dx*dx + dy*dy;
+			#endif
+			double contact2 = DIST2(particles[i].rad, particles[j].rad);
+			if (separation2 < contact2 - 1e-8){
+				fprintf(stderr,
+					"Overlap invariant failed at t=%.17g for particles %d and %d: %.17g < %.17g\n",
+					t, i, j, separation2, contact2);
+				exit(3);
+			}
+		}
+	}
+}
+#endif
+
 void takeAScreenshot(){
 
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
 	}
+	#if EDMD_VERIFY_OVERLAPS
+		verifyNoOverlaps();
+	#endif
 	#if INTRUDER
 	freeFlyIntruder(&intru);
 	#endif
@@ -4583,7 +4655,7 @@ void takeAScreenshot(){
 
 void takeAThermo(){
 	static int count = 0;
-	if ((damping == 1) || (msd)){
+	if ((damping == 1) || (msd) || transverseVelocityCorrelationIsEnabled()){
 		for (int i = 0; i < N; i++){
 			freeFly(particles + i);
 		}
@@ -5136,6 +5208,9 @@ void saveTempProfile(){
 
 void saveThermo(){
 	physicalQ();
+	if (transverseVelocityCorrelationIsEnabled()){
+		updateTransverseVelocityCorrelation(particles, t);
+	}
 	double pressureX = 0;
 	double pressureY = 0;
 	double pressureXY = 0;
@@ -5948,6 +6023,10 @@ void customName(){
 	if (strucThermo) {
 		snprintf(strucName, sizeof(strucName), "%s%d.struc", baseFileName, version);
 	}
+	if (transverseVelocityCorrelationIsEnabled()) {
+		snprintf(transverseCorrelationName, sizeof(transverseCorrelationName),
+		         "%s%d.tvacf", baseFileName, version);
+	}
 
 	if (dumpCluster && clusterThermo) {
 		snprintf(clusterName, sizeof(clusterName), "%s%d.cluster", baseFileName, version);
@@ -6100,4 +6179,3 @@ void runningCheck(){
 	if ((ERROR) && (stop))
 		exit(3);
 }
-

@@ -93,9 +93,9 @@ void initThermo();
 void addToCell(int i);
 void removeFromCell(int i);
 int coordToCell(double a, int x);
-int PBCcellX(double a);
-int PBCcellY(double a);
-int PBCcellZ(double a);
+int PBCcellX(int a);
+int PBCcellY(int a);
+int PBCcellZ(int a);
 void shearCorrection(double* x, double* vx, int sign, particle* p);
 void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx);
 
@@ -192,7 +192,6 @@ int isParticleInWellList(particle* p1, int num);
 
 void collisionEventIntruder();
 #endif
-
 
 
 

@@ -141,7 +141,7 @@ int mpColdSlab = -1;
 double mpSlabWidth = 0;
 
 // Temperature/energy/heat-current profile along x.
-int tempProfileThermo = 1;
+int tempProfileThermo = 0;
 #define TEMP_PROFILE_N_SLABS 40
 int tempProfileNSlabs = TEMP_PROFILE_N_SLABS;
 double tempSlabWidth = 0;
@@ -184,7 +184,7 @@ int interfaceThermoTemp = 0;
 
 int velocityDistributionThermo = 0;
 
-int profileThermo = 1;
+int profileThermo = 0;
 char profileName[350];
 #define nProfileBins 100
 
@@ -221,7 +221,7 @@ int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
 double tmax = 4000000;  
-double dtime = 1000;
+double dtime = 100;
 int    logSpacing = 0;
 double base = 1.01;
 double firstScreen = 0;
@@ -260,16 +260,16 @@ const int liquidliquid = 0;
 #else
 const int addWell = 0;
 const int addField = 0;
-const int noise = 1;
+const int noise = 0;
 const int addWally = 0;
 const int addWallx = 0;
 const int addMidWall = 0;
 const int addCircularWall = 0;
 const int damping = 0;
-const int addDelta = 1;
+const int addDelta = 0;
 const int addDeltaTangent = 0;
 const int addActiveDelta = 0;
-const int addEnergy = 0;
+const int addEnergy = 1;
 const int addDoubleDelta = 0;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
@@ -336,14 +336,14 @@ double additionalEnergy = 0.01;
 
 
 //value for the field, must be < 0
-double field = -0.2; 
+double field = -0.02; 
 
 //Initial temperature
 double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1.;
-double resT = 1.;
+double resT = 0.;
 
 //coeff of restitution of particles
 double res = 0.95;

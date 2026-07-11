@@ -240,9 +240,9 @@ double fracCritical = -1./6.;
 
 
 
-double tmax = 40000000;  
+double tmax = 4000;  
 double firstScreen = 1;
-double dtime = 50;
+double dtime = 100;
 
 double dtimeThermo = 100;
 double firstThermo = 1000;

@@ -27,7 +27,7 @@ FILE *fileout;
  * all reciprocal-lattice vectors with the same physical |k| are averaged.
  */
 #ifndef TVACF_ENABLED
-#define TVACF_ENABLED 1
+#define TVACF_ENABLED 0
 #endif
 #ifndef TVACF_MODE_M
 #define TVACF_MODE_M 3

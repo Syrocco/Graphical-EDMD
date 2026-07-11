@@ -276,7 +276,7 @@ void saveDensityCoarse(particle *particles){
     if (tp == NULL){
         for (int i = 0; i < Nx; i++) {
             for (int j = 0; j < Ny; j++) {
-                fprintf(interface, "%.6lf ", d[i][j]);
+                fprintf(interface, "%.3lf ", d[i][j]);
             }
             fprintf(interface, "\n");
         }
@@ -320,7 +320,7 @@ void computeInterfacesPos(particle *particles, double tresh){
                     count = 0;
                 }
                 if (count == 2){
-                    fprintf(interface, "%lf ", (j - 1)*dy);
+                    fprintf(interface, "%lf ", (j - 1)*dx);
                     break;
                 }
                 if (j == Nx - 1){
@@ -347,7 +347,7 @@ void computeInterfacesPos(particle *particles, double tresh){
                     count = 0;
                 }
                 if (count == 2){
-                    fprintf(interface, "%lf ", (j + 2 + 0.5)*dy);
+                    fprintf(interface, "%lf ", (j + 2 + 0.5)*dx);
                     break;
                 }
                 if (j == (int)(3*Nx/4)){
@@ -370,7 +370,7 @@ void computeInterfacesPos(particle *particles, double tresh){
                 count = 0;
             }
             if (count == 2){
-                fprintf(interface, "%lf ", (j - 1)*dy);
+                fprintf(interface, "%lf ", (j - 1)*dx);
                 break;
             }
             if (j == Nx - 1){
@@ -393,7 +393,7 @@ void computeInterfacesPos(particle *particles, double tresh){
                 count = 0;
             }
             if (count == 2){
-                fprintf(interface, "%lf ", (j + 2 + 0.5)*dy);
+                fprintf(interface, "%lf ", (j + 2 + 0.5)*dx);
                 break;
             }
             if (j == (int)(3*Nx/4)){

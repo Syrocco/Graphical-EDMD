@@ -32,7 +32,7 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
-#define NONADDITIVE 1
+#define NONADDITIVE 0
 
 #if NONADDITIVE == 0
     #define DIST(r1, r2) (sqrt(4 * (r1) * (r2)))
@@ -80,8 +80,8 @@
 //Values if no load file
 int N = 500;
 double phi = 0.38;
-double sizeratio = 1;
-double fractionSmallN = 0;
+double sizeratio = 0.4;
+double fractionSmallN = 0.3;
 double aspectRatio = 1.0;
 int controlLenght = 0;
 
@@ -238,14 +238,21 @@ int critical = 0;
 int snapshotCritical = 0;
 double fracCritical = -1./6.;
 
+
+
 double tmax = 40000000;  
-double dtime = 10000;
+double firstScreen = 1;
+double dtime = 50;
+
+double dtimeThermo = 100;
+double firstThermo = 1000;
+int Nthermo = 1;
+
+
 int    logSpacing = 0;
 double base = 1.01;
-double firstScreen = 0;
-double dtimeThermo = 100;
-int Nthermo = 100;
-double firstThermo = 1000;
+
+
 double dr_pressure = 1.0;
 
 //if -1, screenshot will be taken at constant interval of dtimeThermo
@@ -265,6 +272,7 @@ bool damping = true;
 bool addDelta = false;
 bool addDeltaTangent = true;
 bool addDoubleDelta = false;
+bool addDoubleDeltaTangent = false;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
 const int addEnergy = 0;
@@ -286,6 +294,7 @@ const int addCircularWall = 0;
 const int damping = 0;
 const int addDelta = 0;
 const int addDeltaTangent = 0;
+const int addDoubleDeltaTangent = 0;
 const int addActiveDelta = 0;
 const int addEnergy = 0;
 const int addDoubleDelta = 0;
@@ -324,11 +333,11 @@ double* posxInitial = NULL;
 double* posyInitial = NULL;
 
 //value for delta model
-double delta = 0.05;
+double delta = 0.5;
 
 //values for double delta model
-double deltaM = 0.05;
-double deltam = 0;
+double deltaM = 2;
+double deltam = 0.1;
 double ts = 10;
 
 //value for evolving delta model
@@ -370,11 +379,11 @@ double resBeta = 0.;
 double deltaOmega = 100;
 
 //parameter if noise or damping
-double gamm = 0.001;
-double T = 0;
+double gamm = 0.02;
+double T = 0.05;
 double expE = 1;
 //time between kicks
-double dtnoise = 0.1;
+double dtnoise = 0.5;
 double T2 = 0.5;
 
 double strainRate = -0.01;
@@ -443,7 +452,8 @@ const int addPressureThermo = 1;
 const int thermoPressureField = 0;
 const int addCollisionNumberThermo = 1;
 const int addEnergyCenterOfMassThermo = 0;
-const int thermoKurt = 1;
+const int thermoKurt = 0;
+const int thermoSonine = 1;
 const int unwrap = 0;
 
 
@@ -1268,6 +1278,9 @@ void initThermo(){
 		#endif
 		if (thermoKurt){
 			fprintf(thermo, "K1 K3 ratioKurt ");
+		}
+		if (thermoSonine){
+			fprintf(thermo, "a2 ");
 		}
 		fprintf(thermo, "\n");
 	}
@@ -3592,10 +3605,18 @@ void doTheCollisionNormal(){
 	double funkyFactor = collKernel/distSquared;
 
 	#if !TANGENTIAL
-	if ((addDelta) ||(addDoubleDelta || (addEvolvingDelta) || (addDeltaTangent))){
+	if (addDelta || addDoubleDelta || addEvolvingDelta || addDeltaTangent || addDoubleDeltaTangent){
 		//double tau = -ts*log(1 - drand(0, 1));
 		if (addDoubleDelta){
 			if ((t - pi->lastColl > ts) && (t - pj->lastColl > ts)){
+				delta = deltam;
+			}
+			else{
+				delta = deltaM;
+			}
+		}
+		if (addDoubleDeltaTangent){
+			if ((t - pi->lastColl < ts) && (t - pj->lastColl < ts)){
 				delta = deltam;
 			}
 			else{
@@ -3621,7 +3642,7 @@ void doTheCollisionNormal(){
 		
 
 		//perp
-		if (addDeltaTangent){
+		if (addDeltaTangent || addDoubleDeltaTangent){
 
 			double dxrTemp = dxr;
 
@@ -3665,6 +3686,8 @@ void doTheCollisionNormal(){
 			
 			
 		}
+
+		
 		
 		pi->vx += funkyFactor*pj->m*dx - 2*pj->m*invMass*delta*dxr;
 		pi->vy += funkyFactor*pj->m*dy - 2*pj->m*invMass*delta*dyr;
@@ -5215,6 +5238,7 @@ void saveThermo(){
 	double pressureY = 0;
 	double pressureXY = 0;
 	double pressureYX = 0;
+
 	#if INTRUDER
 	freeFlyIntruder(&intru);
 	#endif
@@ -5348,6 +5372,36 @@ void saveThermo(){
 	Jx_av += Jx;
 	Jy_av += Jy;
 	#endif
+	static double a2_sonine = 0;
+
+	if (thermoSonine){
+		double vx_av = 0;
+		for (int i = 0; i < N; i++){
+			double vx = particles[i].vx;
+			if (addShear){
+				vx += strainRate*(particles[i].y - halfLy);
+			}
+			vx_av += vx;
+		}
+		vx_av /= N;
+
+		double v_2_av = 0;
+		double v_4_av = 0;
+		for (int i = 0; i < N; i++){
+			double vx = particles[i].vx;
+			if (addShear){
+				vx += strainRate*(particles[i].y - halfLy);
+			}
+			double dvx = vx - vx_av;
+			double dvx2 = dvx*dvx;
+			v_2_av += dvx2;
+			v_4_av += dvx2*dvx2;
+		}
+		v_2_av /= N;
+		v_4_av /= N;
+
+		a2_sonine += (v_2_av > 0.0) ? v_4_av/(3.0*v_2_av*v_2_av) - 1.0 : 0.0;
+	}
 
 	count++;
 	if (count % Nthermo == 0){
@@ -5517,6 +5571,9 @@ void saveThermo(){
 
 				fprintf(thermo, "%lf %lf %lf ", K1, K3, ratio);
 			}
+			if (thermoSonine){
+				fprintf(thermo, "%lf ", a2_sonine/count);
+			}
 			fprintf(thermo, "\n");
 			fflush(thermo);
 			if (profileThermo){
@@ -5541,6 +5598,7 @@ void saveThermo(){
 		Jx_av = 0;
 		Jy_av = 0;
 		#endif
+		a2_sonine = 0;
 		if (profileThermo){
 			for (int i = 0; i < nProfileBins; i++){
 				profile[i] = 0;
@@ -5966,11 +6024,15 @@ void customName(){
 		sprintf(fileName + strlen(fileName), "Lz_%.3lf", Lz);
 	#endif	
 	if (damping || noise){
-		sprintf(fileName + strlen(fileName), "gamma_%.3lfT_%.3lfdt_%.3lf", gamm, T, dtnoise);
+		sprintf(fileName + strlen(fileName), "gamma_%.8lfT_%.3lfdt_%.3lf", gamm, T, dtnoise);
 	};
 	if (addDelta || addDeltaTangent || addActiveDelta){
 		sprintf(fileName + strlen(fileName), "delta_%.8lf", delta);
 	}
+	if (addDoubleDeltaTangent){
+		sprintf(fileName + strlen(fileName), "deltam_%.4lfdeltaM_%.4lfts_%.4lf", deltam, delta, ts);
+	}
+
 	if (addEnergy){
 		sprintf(fileName + strlen(fileName), "deltaE_%.3lfDeltaE_%.3lfts_%.3lfbeta_%.3lf", additionalEnergy, deltaE, taur, beta);
 	}

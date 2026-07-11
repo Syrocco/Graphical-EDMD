@@ -10,4 +10,5 @@
 !LICENSE
 !src/
 !src/**
+src/EDMD_chiral.c
 src/.DS_Store

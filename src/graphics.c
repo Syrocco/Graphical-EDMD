@@ -223,9 +223,9 @@ void getInput(window* screenWindow, state* screenState){
 			for (int i = 0; i < N; i++){
 				particle* p = particles + i;
 				removeEventFromQueue(eventList[N + p->num]);
-				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
+				collisionEvent(p->num);
 			}
 		}
 	}
@@ -365,9 +365,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			particleUnderClick->coll++;
 
 			removeEventFromQueue(eventList[N + particleUnderClick->num]);
-			collisionEvent(particleUnderClick->num);
 			removeEventFromQueue(eventList[particleUnderClick->num]);
 			crossingEvent(particleUnderClick->num);
+			collisionEvent(particleUnderClick->num);
 		}
 	}
 
@@ -458,9 +458,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			particle* p = particles + i;
 			freeFly(p);
 			removeEventFromQueue(eventList[N + p->num]);
-			collisionEvent(p->num);
 			removeEventFromQueue(eventList[p->num]);
 			crossingEvent(p->num);
+			collisionEvent(p->num);
 		}
 	}
 
@@ -489,9 +489,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				particle* p = particles + i;
 				freeFly(p);
 				removeEventFromQueue(eventList[N + p->num]);
-				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
+				collisionEvent(p->num);
 			}
 		}
 		if (noise == 1){
@@ -522,9 +522,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		for (int i = 0; i < N; i++){
 			particle* p = particles + i;
 			removeEventFromQueue(eventList[N + p->num]);
-			collisionEvent(p->num);
 			removeEventFromQueue(eventList[p->num]);
 			crossingEvent(p->num);
+			collisionEvent(p->num);
 		}
 	}
 	
@@ -548,9 +548,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			for (int i = 0; i < N; i++){
 				particle* p = particles + i;
 				removeEventFromQueue(eventList[N + p->num]);
-				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
+				collisionEvent(p->num);
 				
 
 			}
@@ -589,9 +589,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			particle* p = particles + i;
 			freeFly(p);
 			removeEventFromQueue(eventList[N + p->num]);
-			collisionEvent(p->num);
 			removeEventFromQueue(eventList[p->num]);
 			crossingEvent(p->num);
+			collisionEvent(p->num);
 		}
 	}
 
@@ -611,9 +611,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				particle* p = particles + i;
 				freeFly(p);
 				removeEventFromQueue(eventList[N + p->num]);
-				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
+				collisionEvent(p->num);
 
 			}
 		}
@@ -682,9 +682,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				particle* p = particles + i;
 				p->coll++;
 				removeEventFromQueue(eventList[N + p->num]);
-				collisionEvent(p->num);
 				removeEventFromQueue(eventList[p->num]);
 				crossingEvent(p->num);
+				collisionEvent(p->num);
 			}
 		}
 		else{
@@ -752,9 +752,9 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 					freeFly(p);
 					p->coll++;
 					removeEventFromQueue(eventList[N + p->num]);
-					collisionEvent(p->num);
 					removeEventFromQueue(eventList[p->num]);
 					crossingEvent(p->num);
+					collisionEvent(p->num);
 				}
 			}
 		}

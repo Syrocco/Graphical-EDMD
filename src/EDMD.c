@@ -32,7 +32,7 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
-#define NONADDITIVE 0
+#define NONADDITIVE 1
 
 #if NONADDITIVE == 0
     #define DIST(r1, r2) (sqrt(4 * (r1) * (r2)))
@@ -80,8 +80,8 @@
 //Values if no load file
 int N = 500;
 double phi = 0.38;
-double sizeratio = 0.4;
-double fractionSmallN = 0.3;
+double sizeratio = 0.5;
+double fractionSmallN = 0;
 double aspectRatio = 1.0;
 int controlLenght = 0;
 
@@ -240,11 +240,11 @@ double fracCritical = -1./6.;
 
 
 
-double tmax = 4000;  
-double firstScreen = 1;
-double dtime = 100;
+double tmax = 40000000;
+double firstScreen = 100;
+double dtime = 100000;
 
-double dtimeThermo = 100;
+double dtimeThermo = 100000;
 double firstThermo = 1000;
 int Nthermo = 1;
 
@@ -480,6 +480,8 @@ FILE *profileFile;
 FILE *tempProfileFile;
 node *root;
 static node *treeMin;
+static node *eventStorage;
+#define EVENT_NODE(index) (eventStorage + (index))
 Dump* dump;
 //array containing the particles
 particle* particles;
@@ -1937,15 +1939,19 @@ void eventListInit(){
 	int totalSize = 2*N + suppSizeEvent;
 	eventList = calloc(totalSize, sizeof(node*));
 	eventPaul = calloc(paulListN + 1, sizeof(node*));
+	eventStorage = calloc(totalSize, sizeof(node));
 
-	for (int i = 0; i < totalSize; i++)
-		eventList[i] = calloc(1, sizeof(node));
+	if ((eventList == NULL) || (eventPaul == NULL) || (eventStorage == NULL)){
+		fprintf(stderr, "Event-list allocation failed\n");
+		exit(EXIT_FAILURE);
+	}
 
-	if (eventList == NULL)
-		printf("malloc failed");
+	for (int i = 0; i < totalSize; i++){
+		eventList[i] = eventStorage + i;
+		EVENT_NODE(i)->q = -1;
+	}
 
-
-	root = eventList[2*N];
+	root = EVENT_NODE(2*N);
 	root->t = never + 1; //arbitrary value, root->rgt will always be NULL.
 	root->rgt = NULL;
 	root->lft = NULL;
@@ -2005,8 +2011,8 @@ void eventListInit(){
 	}
 
 	for (int i = 0; i < N; i++){
-		eventList[i]->i = i;
-		eventList[N + i]->i = i;
+		EVENT_NODE(i)->i = i;
+		EVENT_NODE(N + i)->i = i;
 		crossingEvent(i);
 		collisionEvent(i);
 	}
@@ -2020,7 +2026,6 @@ void eventListInit(){
 
 
 void freeArrays(){
-	int totalSize = 2*N + suppSizeEvent;
 	if (addWell){
 		for (int i = 0; i < N; i++){
 			free(particles[i].particlesInWell);
@@ -2028,9 +2033,7 @@ void freeArrays(){
 	}
 	free(particles);
 	free(cellList);
-	for (int i = 0; i < totalSize; i++){
-		free(eventList[i]);
-	}
+	free(eventStorage);
 	free(eventList);
 	free(eventPaul);
 
@@ -2173,7 +2176,6 @@ void addEventToQueue(node* toAdd){
 	Adds an event to the BST
 -------------------------------- */
 void addEventToTree(node* toAdd){
-
 	node* walker = root;
 	while (1){
 		if (toAdd->t < walker->t){
@@ -2181,18 +2183,14 @@ void addEventToTree(node* toAdd){
 				walker->lft = toAdd;
 				break;
 			}
-			else{
-				walker = walker->lft;
-			}
+			walker = walker->lft;
 		}
 		else{
 			if (walker->rgt == NULL){
 				walker->rgt = toAdd;
 				break;
 			}
-			else{
-				walker = walker->rgt;
-			}
+			walker = walker->rgt;
 		}
 	}
 	toAdd->lft = NULL;
@@ -2207,6 +2205,8 @@ void addEventToTree(node* toAdd){
 	Removes an event from the event queue
 ----------------------------------------- */
 void removeEventFromQueue(node* toRemove){
+	if (toRemove->q < 0)
+		return;
 
 	if (toRemove->q != actualPaulList){
 		if (toRemove->rgt != NULL)
@@ -2218,6 +2218,8 @@ void removeEventFromQueue(node* toRemove){
 	}
 	else
 		removeEventFromTree(toRemove);
+
+	toRemove->q = -1;
 }
 
 
@@ -2226,9 +2228,8 @@ void removeEventFromQueue(node* toRemove){
 	Removes an event from the BST
 ------------------------------------ */
 void removeEventFromTree(node* toRemove){
-
-    node* top = toRemove->top;
-    node* n;
+	node* top = toRemove->top;
+	node* replacement;
 
 	if (toRemove == treeMin){
 		if (toRemove->rgt != NULL){
@@ -2236,47 +2237,41 @@ void removeEventFromTree(node* toRemove){
 			while (treeMin->lft != NULL)
 				treeMin = treeMin->lft;
 		}
-		else{
+		else
 			treeMin = (top == root) ? NULL : top;
-		}
 	}
 
 	if ((toRemove->lft == NULL) && (toRemove->rgt == NULL))
-		n = NULL;
-
+		replacement = NULL;
 	else if (toRemove->lft == NULL){
-		n = toRemove->rgt;
-		n->top = top;
+		replacement = toRemove->rgt;
+		replacement->top = top;
 	}
 	else if (toRemove->rgt == NULL){
-		n = toRemove->lft;
-		n->top = top;
+		replacement = toRemove->lft;
+		replacement->top = top;
 	}
-	//http://www.mathcs.emory.edu/~cheung/Courses/171/Syllabus/9-BinTree/BST-delete2.html
 	else{
-		n = toRemove->rgt;
+		replacement = toRemove->rgt;
+		while (replacement->lft != NULL)
+			replacement = replacement->lft;
 
-		//look for successor
-		while (n->lft != NULL)
-			n = n->lft;
-
-		if (n->top != toRemove) //if (...) then we move successor to toRemove and link what need to be linked
-		{
-			n->top->lft = n->rgt;
-			if (n->rgt)
-				n->rgt->top = n->top;
-			toRemove->rgt->top = n;
-			n->rgt = toRemove->rgt;
+		if (replacement->top != toRemove){
+			replacement->top->lft = replacement->rgt;
+			if (replacement->rgt != NULL)
+				replacement->rgt->top = replacement->top;
+			toRemove->rgt->top = replacement;
+			replacement->rgt = toRemove->rgt;
 		}
-		toRemove->lft->top = n;
-		n->lft = toRemove->lft;
-		n->top = top;
+		toRemove->lft->top = replacement;
+		replacement->lft = toRemove->lft;
+		replacement->top = top;
 	}
-	//link new node to tree
+
 	if (top->lft == toRemove)
-		top->lft = n;
+		top->lft = replacement;
 	else
-		top->rgt = n;
+		top->rgt = replacement;
 }
 
 
@@ -2487,7 +2482,7 @@ void crossingEventNormal(int i){
 void addCrossingEvent(int i, int info, double tCross){
 	node* toAdd;
 
-	toAdd = eventList[i];
+	toAdd = EVENT_NODE(i);
 	toAdd->j = info;
 	toAdd->type = CELLCROSS;
 	toAdd->t = tCross;
@@ -2501,7 +2496,11 @@ void addCrossingEvent(int i, int info, double tCross){
 void doTheCrossing(){
 	int i = nextEvent->i;
 	particle* p = particles + i;
-	freeFly(p);
+	const int normalPhase = (freeFly == &freeFlyNormal);
+	if (normalPhase)
+		freeFlyNormal(p);
+	else
+		freeFlyGrow(p);
 	//updates the cell in which the particle is in after the cellcrossing
 	removeFromCell(i);
 	int newCell;
@@ -2584,9 +2583,16 @@ void doTheCrossing(){
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
 
-	crossingEvent(i);
-	removeEventFromQueue(eventList[N + i]);
-	collisionEvent(i);
+	if (normalPhase){
+		crossingEventNormal(i);
+		removeEventFromQueue(EVENT_NODE(N + i));
+		collisionEventNormal(i);
+	}
+	else{
+		crossingEventGrow(i);
+		removeEventFromQueue(EVENT_NODE(N + i));
+		collisionEventGrow(i);
+	}
 }
 
 
@@ -2626,7 +2632,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 
 
-	double det = pow(b, 2) - (v2 - dvr*dvr)*(distOfSquare - dr*dr);
+	double det = b*b - (v2 - dvr*dvr)*(distOfSquare - dr*dr);
 
 
 
@@ -2647,7 +2653,7 @@ double collisionTimeGrow(particle* p1, particle* p2){
 		printf("%lf %lf\n", minus, plus);
 		return plus;
 	}
-	if (distOfSquare - dr*dr< -0.01){
+	if (distOfSquare - dr*dr < -0.01){
 		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
 		exit(3);
 	}
@@ -2701,9 +2707,6 @@ double collisionTimeNormal(particle* p1, particle* p2){
 	double v2 = dvx*dvx + dvy*dvy;
 	double distOfSquare = dx*dx + dy*dy  - DIST2(p1->rad, p2->rad);
 	#endif
-	double det = pow(b, 2) - v2*distOfSquare;
-
-
 	//to delete when confident with life decisions...
 	if (distOfSquare < -0.01){
 		if (bubbleStop){
@@ -2715,6 +2718,7 @@ double collisionTimeNormal(particle* p1, particle* p2){
 		saveTXT();
 		exit(3);
 	}
+	double det = b*b - v2*distOfSquare;
 
 	if (det < 0)
 		return never;
@@ -2954,8 +2958,6 @@ void collisionEventNormal(int i){
 			//}
 		}
 	}
-
-	
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
 			#if THREE_D
@@ -3192,7 +3194,6 @@ void collisionEventGrow(int i){
 			xy = 0;
 		}
 	}
-
 	for (int j = -1; j <= 1; j++){
 		for (int k = -1; k <= 1; k++){
 			#if THREE_D
@@ -3264,19 +3265,21 @@ int isParticleInWellList(particle* p1, int num){
 #if INTRUDER
 void addCollisionIntruderEvent(int i, int j, double tColl) {
 	node* toAdd;
+
+	if ((i >= 0) && (tColl > EVENT_NODE(i)->t))
+		return;
 	
 	if (i == -1){
-		toAdd = eventList[2*N + 8];
+		toAdd = EVENT_NODE(2*N + 8);
 		toAdd->collActual = particles[j].coll;
 	}
 	else{
-		toAdd = eventList[N + i];
+		toAdd = EVENT_NODE(N + i);
 		toAdd->collActual = intru.coll;
 	}
 	toAdd->j = j;
 	toAdd->type = INTRUDER_COLLISION;
 	toAdd->t = tColl;
-
 
 	addEventToQueue(toAdd);
 }
@@ -3286,12 +3289,14 @@ void addCollisionIntruderEvent(int i, int j, double tColl) {
 void addCollisionEvent(int i, int j, double tColl){
 	node* toAdd;
 
-	toAdd = eventList[N + i];
+	if (tColl > EVENT_NODE(i)->t)
+		return;
+
+	toAdd = EVENT_NODE(N + i);
 	toAdd->j = j;
 	toAdd->type = COLLISION;
 	toAdd->t = tColl;
 	toAdd->collActual = particles[j].coll;
-
 
 	addEventToQueue(toAdd);
 }
@@ -3299,7 +3304,10 @@ void addCollisionEvent(int i, int j, double tColl){
 void addInEvent(int i, int j, double tColl){
 	node* toAdd;
 
-	toAdd = eventList[N + i];
+	if (tColl > EVENT_NODE(i)->t)
+		return;
+
+	toAdd = EVENT_NODE(N + i);
 	toAdd->j = j;
 	toAdd->type = IN;
 	toAdd->t = tColl;
@@ -3310,7 +3318,10 @@ void addInEvent(int i, int j, double tColl){
 void addOutEvent(int i, int j, double tColl){
 	node* toAdd;
 
-	toAdd = eventList[N + i];
+	if (tColl > EVENT_NODE(i)->t)
+		return;
+
+	toAdd = EVENT_NODE(N + i);
 	toAdd->j = j;
 	toAdd->type = OUT;
 	toAdd->t = tColl;
@@ -3321,11 +3332,13 @@ void addOutEvent(int i, int j, double tColl){
 void addWallEvent(int i, int xy, double tColl){
 	node* toAdd;
 
-	toAdd = eventList[N + i];
+	if (tColl > EVENT_NODE(i)->t)
+		return;
+
+	toAdd = EVENT_NODE(N + i);
 	toAdd->type = WALL;
 	toAdd->t = tColl;
 	toAdd->j = xy;
-
 	addEventToQueue(toAdd);
 }
 
@@ -3335,7 +3348,7 @@ void doTheWallGrow(){
 	int xy = nextEvent->j;
 	ncol++;
 	particle* pi = particles + i;
-	freeFly(pi);
+	freeFlyGrow(pi);
 
 	double vrParticle = pi->vr;
 
@@ -3376,9 +3389,9 @@ void doTheWallGrow(){
 	}
 
 	pi->coll++;
-	removeEventFromQueue(eventList[i]);
-	crossingEvent(i);
-	collisionEvent(i);
+	removeEventFromQueue(EVENT_NODE(i));
+	crossingEventGrow(i);
+	collisionEventGrow(i);
 }
 
 void doTheWallNormal(){
@@ -3386,7 +3399,7 @@ void doTheWallNormal(){
 	int xy = nextEvent->j;
 	ncol++;
 	particle* pi = particles + i;
-	freeFly(pi);
+	freeFlyNormal(pi);
 
 	if (xy == 0){
 		dp += fabs((resW + 1)*pi->m*pi->vx);
@@ -3455,9 +3468,9 @@ void doTheWallNormal(){
 	}
 
 	pi->coll++;
-	removeEventFromQueue(eventList[i]);
-	crossingEvent(i);
-	collisionEvent(i);
+	removeEventFromQueue(EVENT_NODE(i));
+	crossingEventNormal(i);
+	collisionEventNormal(i);
 }
 /* -----------------------------------
 	Performs the collision event
@@ -3474,14 +3487,14 @@ void doTheCollisionGrow(){
 	particle* pj = particles + j;
 
 
-	freeFly(pi);
+	freeFlyGrow(pi);
 	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
-        collisionEvent(i);
+		collisionEventGrow(i);
         return;
     }
 
     ncol++;
-	freeFly(pj);
+	freeFlyGrow(pj);
 
 	pi->coll++;
 	pj->coll++;
@@ -3529,14 +3542,14 @@ void doTheCollisionGrow(){
     pj->lastColl = t;
 
 	//recomputes crossing and collision of pi and pj
-	removeEventFromQueue(eventList[i]);
-	removeEventFromQueue(eventList[j]);
-	crossingEvent(i);
-	crossingEvent(j);
+	removeEventFromQueue(EVENT_NODE(i));
+	removeEventFromQueue(EVENT_NODE(j));
+	crossingEventGrow(i);
+	crossingEventGrow(j);
 
-	removeEventFromQueue(eventList[N + j]);
-	collisionEvent(i);
-	collisionEvent(j);
+	removeEventFromQueue(EVENT_NODE(N + j));
+	collisionEventGrow(i);
+	collisionEventGrow(j);
 }
 
 void doTheCollisionNormal(){
@@ -3547,16 +3560,16 @@ void doTheCollisionNormal(){
 	particle* pj = particles + j;
 
 
-	freeFly(pi); 
+	freeFlyNormal(pi);
 
 
 	if (nextEvent->collActual != pj->coll){ //the collision trick of the article
-		collisionEvent(i);
+		collisionEventNormal(i);
         return;
     }
 
     ncol++;
-	freeFly(pj);
+	freeFlyNormal(pj);
 
 	pi->coll++;
 	pj->coll++;
@@ -3869,14 +3882,14 @@ void doTheCollisionNormal(){
     pi->lastColl = t;
     pj->lastColl = t;
 	//recomputes crossing and collision of pi and pj
-	removeEventFromQueue(eventList[i]);
-	removeEventFromQueue(eventList[j]);
-	crossingEvent(i);
-	crossingEvent(j);
+	removeEventFromQueue(EVENT_NODE(i));
+	removeEventFromQueue(EVENT_NODE(j));
+	crossingEventNormal(i);
+	crossingEventNormal(j);
 
-	removeEventFromQueue(eventList[N + j]);
-	collisionEvent(i);
-	collisionEvent(j);
+	removeEventFromQueue(EVENT_NODE(N + j));
+	collisionEventNormal(i);
+	collisionEventNormal(j);
 
 	#if STRESS
 	sumKineticX += pi->m*(pi->vx*pi->vx - oldvix*oldvix) + pj->m*(pj->vx*pj->vx - oldvjx*oldvjx);
@@ -4159,14 +4172,14 @@ void doTheCollisionIntruder(){
 	p->lastColl = t;
 
 
-	removeEventFromQueue(eventList[p->num]);
+	removeEventFromQueue(EVENT_NODE(p->num));
 	crossingEvent(p->num);
 
 	if (j == -1){
-		removeEventFromQueue(eventList[2*N + 8]);
+		removeEventFromQueue(EVENT_NODE(2*N + 8));
 	}
 	else{
-		removeEventFromQueue(eventList[N + j]);
+		removeEventFromQueue(EVENT_NODE(N + j));
 	}
 	collisionEventNormal(p->num);
 	collisionEventIntruder();
@@ -4287,12 +4300,12 @@ void doIn(){
 
 
 	//recomputes crossing and collision of pi and pj
-	removeEventFromQueue(eventList[i]);
-	removeEventFromQueue(eventList[j]);
+	removeEventFromQueue(EVENT_NODE(i));
+	removeEventFromQueue(EVENT_NODE(j));
 	crossingEvent(i);
 	crossingEvent(j);
 
-	removeEventFromQueue(eventList[N + j]);
+	removeEventFromQueue(EVENT_NODE(N + j));
 	collisionEvent(i);
 	collisionEvent(j);
 
@@ -4404,12 +4417,12 @@ void doOut(){
 		removeParticleInWellList(pj, i);
 	}
 	//recomputes crossing and collision of pi and pj
-	removeEventFromQueue(eventList[i]);
-	removeEventFromQueue(eventList[j]);
+	removeEventFromQueue(EVENT_NODE(i));
+	removeEventFromQueue(EVENT_NODE(j));
 	crossingEvent(i);
 	crossingEvent(j);
 
-	removeEventFromQueue(eventList[N + j]);
+	removeEventFromQueue(EVENT_NODE(N + j));
 	collisionEvent(i);
 	collisionEvent(j);
 }
@@ -4421,7 +4434,7 @@ void doOut(){
 void addEventScreenshot(double tscreen){
 	node* toAdd;
 
-	toAdd = eventList[2*N + 1];
+	toAdd = EVENT_NODE(2*N + 1);
 	toAdd->type = SCREENSHOT;
 	toAdd->t = tscreen;
 	toAdd->j = 0; //whatever.
@@ -4432,7 +4445,7 @@ void addEventScreenshot(double tscreen){
 void addEventThermo(double tscreen){
 	node* toAdd;
 
-	toAdd = eventList[2*N + 3];
+	toAdd = EVENT_NODE(2*N + 3);
 	toAdd->type = THERMO;
 	toAdd->t = tscreen;
 	toAdd->j = 0; //whatever.
@@ -4443,7 +4456,7 @@ void addEventThermo(double tscreen){
 void addEventMullerPlathe(double tswap){
 	node* toAdd;
 
-	toAdd = eventList[2*N + 6];
+	toAdd = EVENT_NODE(2*N + 6);
 	toAdd->type = MULLER_PLATHE;
 	toAdd->t = tswap;
 	toAdd->j = 0;
@@ -4454,7 +4467,7 @@ void addEventMullerPlathe(double tswap){
 void addEventUmbrella(double tscreen){
 	node* toAdd;
 
-	toAdd = eventList[2*N + 4];
+	toAdd = EVENT_NODE(2*N + 4);
 	toAdd->type = UMBRELLA;
 	toAdd->t = tscreen;
 	toAdd->j = 0; //whatever.
@@ -4528,10 +4541,10 @@ void doUmbrella(){
 				addToCell(i);
 			}
 			for (int j = 0; j < N; j++){
-				removeEventFromQueue(eventList[j]);
+				removeEventFromQueue(EVENT_NODE(j));
 				crossingEvent(j);
 
-				removeEventFromQueue(eventList[N + j]);
+				removeEventFromQueue(EVENT_NODE(N + j));
 				collisionEvent(j);
 			}
 		}
@@ -4611,14 +4624,14 @@ void doMullerPlatheSwap(){
 	hot->coll++;
 	cold->coll++;
 
-	removeEventFromQueue(eventList[hotIdx]);
+	removeEventFromQueue(EVENT_NODE(hotIdx));
 	crossingEvent(hotIdx);
-	removeEventFromQueue(eventList[N + hotIdx]);
+	removeEventFromQueue(EVENT_NODE(N + hotIdx));
 	collisionEvent(hotIdx);
 
-	removeEventFromQueue(eventList[coldIdx]);
+	removeEventFromQueue(EVENT_NODE(coldIdx));
 	crossingEvent(coldIdx);
-	removeEventFromQueue(eventList[N + coldIdx]);
+	removeEventFromQueue(EVENT_NODE(N + coldIdx));
 	collisionEvent(coldIdx);
 }
 
@@ -4772,10 +4785,10 @@ void stopGrow(){
 	for (int i = 0; i < N; i++){
 		p = particles + i;
 		p->coll++;
-		removeEventFromQueue(eventList[N + p->num]);
-		collisionEvent(p->num);
-		removeEventFromQueue(eventList[p->num]);
+		removeEventFromQueue(EVENT_NODE(N + p->num));
+		removeEventFromQueue(EVENT_NODE(p->num));
 		crossingEvent(p->num);
+		collisionEvent(p->num);
 	}
 	#if INTRUDER
 	collisionEventIntruder();
@@ -4801,7 +4814,7 @@ void stopGrow(){
 
 void addEventGrow(double time){
 	node* toAdd;
-	toAdd = eventList[2*N + 5];
+	toAdd = EVENT_NODE(2*N + 5);
 	toAdd->type = GROWSTOP;
 	toAdd->t = time;
 	toAdd->j = 0; 
@@ -4813,7 +4826,7 @@ void addEventGrow(double time){
 --------------------------------------------- */
 void addEventNoise(double tnoise){
 	node* toAdd;
-	toAdd = eventList[2*N + 2];
+	toAdd = EVENT_NODE(2*N + 2);
 	toAdd->type = ADDINGNOISE;
 	toAdd->t = tnoise;
 	toAdd->j = 0; //whatever.
@@ -4907,15 +4920,15 @@ void addNoise(){
 		}
 	}
 	for (int j = 0; j < N; j++){
-		removeEventFromQueue(eventList[j]);
+		removeEventFromQueue(EVENT_NODE(j));
 		crossingEvent(j);
 
-		removeEventFromQueue(eventList[N + j]);
+		removeEventFromQueue(EVENT_NODE(N + j));
 		collisionEvent(j);
 	}
 	#if INTRUDER
 	if (freeFly == &freeFlyNormal){
-		removeEventFromQueue(eventList[2*N + 8]);
+		removeEventFromQueue(EVENT_NODE(2*N + 8));
 		collisionEventIntruder();
 	}
 	#endif
@@ -4925,7 +4938,7 @@ void addNoise(){
 
 void addEventUpdate(double tupdate){
 	node* toAdd;
-	toAdd = eventList[2*N + 5];
+	toAdd = EVENT_NODE(2*N + 5);
 	toAdd->type = UPDATE;
 	toAdd->t = tupdate;
 	toAdd->j = 0; //whatever.

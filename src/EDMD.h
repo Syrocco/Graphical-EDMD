@@ -4,6 +4,12 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define EDMD_NOINLINE __attribute__((noinline))
+#else
+#define EDMD_NOINLINE
+#endif
+
 
 #define never 100000000000000000000000000.0
 
@@ -41,18 +47,19 @@ struct arguments{
 
 typedef struct particle particle;
 struct particle{
-	double rad, x, y, vx, vy, m, lastColl, t, vr;
-	particle *prv, *nxt;
-	int num, type, numberOfParticlesInWell, crossX, crossY, synchro;
-	int* particlesInWell;
+	double x, y, vx, vy, rad, t, vr;
+	particle *nxt, *prv;
+	double m, lastColl;
 	unsigned long int coll; //coll = counter of collision at collision
-	int charge;
+	int* particlesInWell;
 	#if THREE_D
-	double vz, z;
 	int cell[3], crossZ;
+	double vz, z;
 	#else
 	int cell[2];
 	#endif
+	int num, type, numberOfParticlesInWell, crossX, crossY, synchro;
+	int charge;
 	#if TANGENTIAL
     double omega;     // Angular velocity
     double J;         // Moment of inertia
@@ -66,11 +73,10 @@ struct particle{
 typedef struct node node;
 struct node{
 	node *lft, *rgt, *top;
-	int i, j, q; 
 	double t;
-	enum event type;
-
 	unsigned long int collActual; //collActual = counter of collision at event prediciton
+	int i, j, q;
+	enum event type;
 };
 
 
@@ -108,15 +114,15 @@ node* findNextEvent();
 
 
 
-void crossingEventGrow(int i);
-void crossingEventNormal(int i);
+EDMD_NOINLINE void crossingEventGrow(int i);
+EDMD_NOINLINE void crossingEventNormal(int i);
 void addCrossingEvent(int i, int info, double tCross);
 void doTheCrossing();
 
 double collisionTimeNormal(particle* p1, particle* p2);
 double collisionTimeGrow(particle* p1, particle* p2);
-void collisionEventGrow(int i);
-void collisionEventNormal(int i);
+EDMD_NOINLINE void collisionEventGrow(int i);
+EDMD_NOINLINE void collisionEventNormal(int i);
 void addCollisionEvent(int i, int j, double tColl);
 void doTheCollisionNormal();
 void doTheCollisionGrow();
@@ -146,8 +152,8 @@ void doUmbrella();
 void initMullerPlathe();
 void doMullerPlatheSwap();
 
-void freeFlyGrow(particle* p);
-void freeFlyNormal(particle* p);
+EDMD_NOINLINE void freeFlyGrow(particle* p);
+EDMD_NOINLINE void freeFlyNormal(particle* p);
 void saveTXT();
 void saveThermo();
 void saveTempProfile();
@@ -192,8 +198,3 @@ int isParticleInWellList(particle* p1, int num);
 
 void collisionEventIntruder();
 #endif
-
-
-
-
-

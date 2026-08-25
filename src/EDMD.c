@@ -244,7 +244,7 @@ double tmax = 40000000;
 double firstScreen = 100;
 double dtime = 100000;
 
-double dtimeThermo = 100000;
+double dtimeThermo = 1000;
 double firstThermo = 1000;
 int Nthermo = 1;
 

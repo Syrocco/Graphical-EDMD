@@ -8,7 +8,11 @@
 !Makefile
 !README.md
 !LICENSE
+!tests/
+tests/*
+!tests/test_prediction.c
 !src/
 !src/**
 src/EDMD_chiral.c
 src/.DS_Store
+reports

@@ -240,7 +240,7 @@ double fracCritical = -1./6.;
 
 
 
-double tmax = 40000000;
+double tmax = 30000;
 double firstScreen = 100;
 double dtime = 100000;
 
@@ -2601,7 +2601,74 @@ void doTheCrossing(){
 	Calculates the time of collision
 	of p1 and p2
 --------------------------------------- */
-double collisionTimeGrow(particle* p1, particle* p2){
+particlePrediction predictParticle(const particle* p, double targetTime,
+	enum particleFlightPhysics physics, double parameter){
+	const double dt = targetTime - p->t;
+	particlePrediction prediction = {
+		.x = p->x,
+		.y = p->y,
+		.vx = p->vx,
+		.vy = p->vy,
+		.rad = p->rad,
+		#if THREE_D
+		.z = p->z,
+		.vz = p->vz,
+		#endif
+	};
+
+	if (physics == CONSTANT_FIELD_FLIGHT){
+		prediction.x += dt*prediction.vx;
+		prediction.y += dt*prediction.vy + 0.5*parameter*dt*dt;
+		prediction.vy += dt*parameter;
+		#if THREE_D
+		prediction.z += dt*prediction.vz;
+		#endif
+	}
+	else if (physics == LINEAR_DAMPING_FLIGHT){
+		const double decay = exp(-parameter*dt);
+		prediction.x += prediction.vx/parameter*(1 - decay);
+		prediction.y += prediction.vy/parameter*(1 - decay);
+		prediction.vx *= decay;
+		prediction.vy *= decay;
+		#if THREE_D
+		prediction.z += prediction.vz/parameter*(1 - decay);
+		prediction.vz *= decay;
+		#endif
+	}
+	else if (physics == GROWTH_FLIGHT){
+		prediction.x += dt*prediction.vx;
+		prediction.y += dt*prediction.vy;
+		prediction.rad += dt*p->vr;
+		#if THREE_D
+		prediction.z += dt*prediction.vz;
+		#endif
+	}
+	else{
+		prediction.x += dt*prediction.vx;
+		prediction.y += dt*prediction.vy;
+		#if THREE_D
+		prediction.z += dt*prediction.vz;
+		#endif
+	}
+
+	return prediction;
+}
+
+particlePrediction predictFreeFlyNormal(const particle* p, double targetTime){
+	if (addField == 1){
+		return predictParticle(p, targetTime, CONSTANT_FIELD_FLIGHT, field);
+	}
+	if (damping == 1){
+		return predictParticle(p, targetTime, LINEAR_DAMPING_FLIGHT, gamm);
+	}
+	return predictParticle(p, targetTime, BALLISTIC_FLIGHT, 0);
+}
+
+particlePrediction predictFreeFlyGrow(const particle* p, double targetTime){
+	return predictParticle(p, targetTime, GROWTH_FLIGHT, 0);
+}
+
+double collisionTimeGrow(const particle* p1, const particle* p2){
 
 	double lat2 = t - p2->t;
 	
@@ -2650,13 +2717,10 @@ double collisionTimeGrow(particle* p1, particle* p2){
 	}
 	//hacky
 	else if (((minus > 0) && (plus > 0.000000001) && (plus < minus)) || ((minus < 0) && (plus > 0.000000001))){
-		printf("%lf %lf\n", minus, plus);
 		return plus;
 	}
-	if (distOfSquare - dr*dr < -0.01){
-		printf("\nERROR:\033[0;31m Overlaps detected during GROWTH between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad);
-		exit(3);
-	}
+	if (distOfSquare - dr*dr < -0.01)
+		return -never;
 	
 	return never;
 
@@ -2664,31 +2728,22 @@ double collisionTimeGrow(particle* p1, particle* p2){
 
 }
 
-double collisionTimeNormal(particle* p1, particle* p2){
-	
+double collisionTimeNormal(const particle* p1, const particle* p2){
+	const particlePrediction p2Now = predictFreeFlyNormal(p2, t);
 
-	if ((damping == 1) || (addField == 1)){
-		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. 
-
-	double lat2 = t - p2->t;
-
-	double dvx = p2->vx - p1->vx;
-	double dvy = p2->vy - p1->vy;
-	
-	
-
-	double dx = (p2->x + lat2*p2->vx) - p1->x;
-	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	double dvx = p2Now.vx - p1->vx;
+	double dvy = p2Now.vy - p1->vy;
+	double dx = p2Now.x - p1->x;
+	double dy = p2Now.y - p1->y;
 
 
 	if (addShear){
-		correctDistances(p1, p2, lat2, &dx, &dvx);
+		correctDistances(p1, p2, p2Now.x, p2Now.vx, &dx, &dvx);
 	}
 
 	#if THREE_D
-	double dvz = p2->vz - p1->vz;
-	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	double dvz = p2Now.vz - p1->vz;
+	double dz = p2Now.z - p1->z;
 	PBC(&dx, &dy, &dz);
 	double b = dx*dvx + dy*dvy + dz*dvz;
 	#else
@@ -2707,17 +2762,8 @@ double collisionTimeNormal(particle* p1, particle* p2){
 	double v2 = dvx*dvx + dvy*dvy;
 	double distOfSquare = dx*dx + dy*dy  - DIST2(p1->rad, p2->rad);
 	#endif
-	//to delete when confident with life decisions...
-	if (distOfSquare < -0.01){
-		if (bubbleStop){
-			printf("\nBubble detected! Stopping simulation...\n");
-			fprintf(thermo, "-1\n");
-			exit(4);
-		}
-		printf("\nERROR:\033[0;31m Overlaps detected during SIMULATION between particle %d and particle %d ! Position: %lf %lf %lf %lf, Speed: %lf %lf %lf %lf, Radius: %lf %lf, distance: %lf \033[0m\n", p1->num, p2->num, p1->x, p1->y, p2->x, p2->y, p1->vx, p1->vy, p2->vx, p2->vy, p1->rad, p2->rad, sqrt(dx*dx + dy*dy));
-		saveTXT();
-		exit(3);
-	}
+	if (distOfSquare < -0.01)
+		return -never;
 	double det = b*b - v2*distOfSquare;
 
 	if (det < 0)
@@ -2726,22 +2772,41 @@ double collisionTimeNormal(particle* p1, particle* p2){
 
 }
 
+static double scheduledCollisionTimeNormal(const particle* p1, const particle* p2){
+	const double prediction = collisionTimeNormal(p1, p2);
+	if (prediction != -never)
+		return prediction;
+	if (bubbleStop){
+		printf("\nBubble detected! Stopping simulation...\n");
+		fprintf(thermo, "-1\n");
+		exit(4);
+	}
+	printf("\nERROR:\033[0;31m Overlap detected during SIMULATION between particle %d and particle %d.\033[0m\n",
+		p1->num, p2->num);
+	saveTXT();
+	exit(3);
+}
+
+static double scheduledCollisionTimeGrow(const particle* p1, const particle* p2){
+	const double prediction = collisionTimeGrow(p1, p2);
+	if (prediction != -never)
+		return prediction;
+	printf("\nERROR:\033[0;31m Overlap detected during GROWTH between particle %d and particle %d.\033[0m\n",
+		p1->num, p2->num);
+	exit(3);
+}
+
 //time to enter in the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
-double sphereTime(particle* p1, particle* p2){
+double sphereTime(const particle* p1, const particle* p2){
+	const particlePrediction p2Now = predictFreeFlyNormal(p2, t);
 
-	if ((damping == 1) || (addField == 1)){
-		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. 
-
-	double lat2 = t - p2->t;
-
-	double dvx = p2->vx - p1->vx;
-	double dvy = p2->vy - p1->vy;
-	double dx = (p2->x + lat2*p2->vx) - p1->x;
-	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	double dvx = p2Now.vx - p1->vx;
+	double dvy = p2Now.vy - p1->vy;
+	double dx = p2Now.x - p1->x;
+	double dy = p2Now.y - p1->y;
 	#if THREE_D
-	double dvz = p2->vz - p1->vz;
-	double dz = (p2->z + lat2*p2->vz) - p1->z;
+	double dvz = p2Now.vz - p1->vz;
+	double dz = p2Now.z - p1->z;
 	PBC(&dx, &dy, &dz);
 	double b = dx*dvx + dy*dvy + dz*dvz;
 	#else
@@ -2771,21 +2836,16 @@ double sphereTime(particle* p1, particle* p2){
 
 
 //time to leave the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
-double separateTime(particle* p1, particle* p2){
+double separateTime(const particle* p1, const particle* p2){
+	const particlePrediction p2Now = predictFreeFlyNormal(p2, t);
 
-	if ((damping == 1)|| (addField == 1)){
-		freeFly(p2); //utterly retarded evil dumb trick. With damping == 0, no damping, v = cst, we can calculate dx by (x + lat2*vx).
-	}                //with damping, it would be harder, so I just update the position of p2. 
-
-	double lat2 = t - p2->t;
-
-	double dvx = p2->vx - p1->vx;
-	double dvy = p2->vy - p1->vy;
-	double dx = (p2->x + lat2*p2->vx) - p1->x;
-	double dy = (p2->y + lat2*p2->vy) - p1->y;
+	double dvx = p2Now.vx - p1->vx;
+	double dvy = p2Now.vy - p1->vy;
+	double dx = p2Now.x - p1->x;
+	double dy = p2Now.y - p1->y;
 	#if THREE_D
-	double dz = (p2->z + lat2*p2->vz) - p1->z;
-	double dvz = p2->vz - p1->vz;
+	double dz = p2Now.z - p1->z;
+	double dvz = p2Now.vz - p1->vz;
 	PBC(&dx, &dy, &dz);
 	double b = dx*dvx + dy*dvy + dz*dvz;
 	double v2 = dvx*dvx + dvy*dvy + dvz*dvz;
@@ -2815,12 +2875,10 @@ double separateTime(particle* p1, particle* p2){
 void collisionEventIntruder(){
 	double dt = never;
 	int index = 0;
-	freeFlyIntruder(&intru);
 
 	for (int i = 0; i < N; i++){
-		particle* p1 = particles + i;
-		freeFlyNormal(p1);
-		double time = collisionTimeIntruder(&intru, p1);
+		const particle* p1 = particles + i;
+		double time = collisionTimeIntruderAt(&intru, p1, t);
 		if ((time < dt) && (time > INTRUDER_TOL)){
 			dt = time;
 			index = i;
@@ -2970,7 +3028,7 @@ void collisionEventNormal(int i){
 					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
-								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp = scheduledCollisionTimeNormal(p1, p2);
 								dtTemp2 = separateTime(p1, p2);
 								if (dtTemp < dtTemp2){
 									typeTemp = COLLISION;
@@ -2986,7 +3044,7 @@ void collisionEventNormal(int i){
 							}
 						}
 						else{
-							dtTemp = collisionTimeNormal(p1, p2);
+							dtTemp = scheduledCollisionTimeNormal(p1, p2);
 							typeTemp = COLLISION;
 						}
 
@@ -3011,7 +3069,7 @@ void collisionEventNormal(int i){
 					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
-								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp = scheduledCollisionTimeNormal(p1, p2);
 								dtTemp2 = separateTime(p1, p2);
 								if (dtTemp < dtTemp2){
 									typeTemp = COLLISION;
@@ -3027,7 +3085,7 @@ void collisionEventNormal(int i){
 							}
 						}
 						else{
-							dtTemp = collisionTimeNormal(p1, p2);
+							dtTemp = scheduledCollisionTimeNormal(p1, p2);
 							typeTemp = COLLISION;
 						}
 
@@ -3048,7 +3106,7 @@ void collisionEventNormal(int i){
 					if (p1 != p2){
 						if (addWell){
 							if (isParticleInWellList(p1, p2->num)){
-								dtTemp = collisionTimeNormal(p1, p2);
+								dtTemp = scheduledCollisionTimeNormal(p1, p2);
 								dtTemp2 = separateTime(p1, p2);
 								if (dtTemp < dtTemp2){
 									typeTemp = COLLISION;
@@ -3064,7 +3122,7 @@ void collisionEventNormal(int i){
 							}
 						}
 						else{
-							dtTemp = collisionTimeNormal(p1, p2);
+							dtTemp = scheduledCollisionTimeNormal(p1, p2);
 							typeTemp = COLLISION;
 						}
 
@@ -3080,8 +3138,7 @@ void collisionEventNormal(int i){
 		}
 	}
 	#if INTRUDER
-    	freeFlyIntruder(&intru);
-		double time = collisionTimeIntruder(&intru, p1);
+		double time = collisionTimeIntruderAt(&intru, p1, t);
 		//printf("%lf\n", time);
 		if ((time < dt) && (time > INTRUDER_TOL)){
 			addCollisionIntruderEvent(i, -1, t + time);
@@ -3204,7 +3261,7 @@ void collisionEventGrow(int i){
 			#endif
 				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					if (p1 != p2){
-						dtTemp = collisionTimeGrow(p1, p2);
+						dtTemp = scheduledCollisionTimeGrow(p1, p2);
 						typeTemp = COLLISION;
 						
 
@@ -3600,7 +3657,7 @@ void doTheCollisionNormal(){
 	double dvy = pj->vy - pi->vy;
 
 	if (addShear){
-		correctDistances(pi, pj, 0, &dx, &dvx);
+		correctDistances(pi, pj, pj->x, pj->vx, &dx, &dvx);
 	}
 	double invMass = 1/(pi->m + pj->m);
 
@@ -4965,35 +5022,16 @@ void updateT(){
 
 
 void freeFlyNormal(particle* p){
-    double dt = t - p->t;
-    p->t = t;
-	if (addField == 1){
-		p->x += dt*p->vx;
-		#if THREE_D
-		p->z += dt*p->vz;
-		#endif
-		p->y += dt*p->vy + 0.5*field*dt*dt;
-		p->vy += dt*field;
-	}
-	else if (damping == 1){
-		double ex = exp(-gamm*dt);
-		p->x += p->vx/gamm*(1 - ex);
-		p->y += p->vy/gamm*(1 - ex);
-		p->vx *= ex;
-		p->vy *= ex;
-		#if THREE_D
-		p->z += p->vz/gamm*(1 - ex);
-		p->vz *= ex;
-		#endif
-	}
-	else{
-		p->x += dt*p->vx;
-		p->y += dt*p->vy;
-		#if THREE_D
-		p->z += dt*p->vz;
-		#endif
-		
-	}
+	const particlePrediction prediction = predictFreeFlyNormal(p, t);
+	p->t = t;
+	p->x = prediction.x;
+	p->y = prediction.y;
+	p->vx = prediction.vx;
+	p->vy = prediction.vy;
+	#if THREE_D
+	p->z = prediction.z;
+	p->vz = prediction.vz;
+	#endif
 
 	PBCpostX(&(p->x));
 	PBCpostY(&(p->y));
@@ -5003,18 +5041,18 @@ void freeFlyNormal(particle* p){
 }
 
 void freeFlyGrow(particle* p){
-    double dt = t - p->t;
-    p->t = t;
-
-	p->x += dt*p->vx;
-	p->y += dt*p->vy;
-
-	p->rad += dt*p->vr;
+	const particlePrediction prediction = predictFreeFlyGrow(p, t);
+	p->t = t;
+	p->x = prediction.x;
+	p->y = prediction.y;
+	p->rad = prediction.rad;
+	#if THREE_D
+	p->z = prediction.z;
+	#endif
 
 	PBCpostX(&(p->x));
 	PBCpostY(&(p->y));
 	#if THREE_D
-	p->z += dt*p->vz;
 	PBCpostZ(&(p->z));
 	#endif
 }
@@ -5841,6 +5879,7 @@ void randomGaussian(particle* p, double T){
 }
 
 void shearCorrection(double* x, double* vx, int sign, particle* p){
+	(void)p;
 	#if (STRESS || HEAT)
 	double oldvix = p->vx;
 	double oldviy = p->vy;
@@ -5862,18 +5901,19 @@ void shearCorrection(double* x, double* vx, int sign, particle* p){
 	PBCpostX(x);
 }
 
-void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx){
+void correctDistances(const particle* p1, const particle* p2,
+	double p2x, double p2vx, double* dx, double* dvx){
 	if (p1->cell[1] == 0 && p2->cell[1] == Nycells - 1){
-		double x = p2->x + lat2*p2->vx;
-		double vx = p2->vx;
-		shearCorrection(&x, &vx, 1, p2);
+		double x = p2x + fmod(strainRate*(t - 1/vr)*Ly, Lx);
+		double vx = p2vx + strainRate*Ly;
+		PBCpostX(&x);
 		*dx = x - p1->x;
 		*dvx = vx - p1->vx;
 		}
 	if (p1->cell[1] == Nycells - 1 && p2->cell[1] == 0){
-		double x = p2->x + lat2*p2->vx;
-		double vx = p2->vx;
-		shearCorrection(&x, &vx, -1, p2);
+		double x = p2x - fmod(strainRate*(t - 1/vr)*Ly, Lx);
+		double vx = p2vx - strainRate*Ly;
+		PBCpostX(&x);
 		*dx = x - p1->x;
 		*dvx = vx - p1->vx;
 	}

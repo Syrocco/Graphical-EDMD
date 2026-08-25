@@ -79,16 +79,19 @@ polygon stress_polygon_wheel(double radius_base, double spike_amp, double tri_am
 void rotateTranslatePolygon(intruder* intr, double angle, double X, double Y);
 void printIntruderShapeFromSmallParticles(FILE* fichier, intruder* intr, double rad, int N);
 int countFakeParticlesForIntruder(intruder* intr, double rad);
-double collisionTimeIntruder(intruder* intr, particle* p);
+EDMD_PURE double collisionTimeIntruder(const intruder* intr, const particle* p);
+EDMD_PURE double collisionTimeIntruderAt(const intruder* intr, const particle* p,
+    double referenceTime);
 
 // Helper functions for collisionTimeIntruder
-double signedDistanceParticlePolygon(particle* p, intruder* intru, double t);
-void computeCollisionNormal(particle* p, intruder* intru, double t, double* nx, double* ny);
+double signedDistanceParticlePolygon(const particle* p, const intruder* intru, double t);
+void computeCollisionNormal(const particle* p, const intruder* intru,
+    double t, double* nx, double* ny);
 double pointSegmentDistance(double px, double py, double ax, double ay, double bx, double by);
 
 
 void freeFlyIntruder(intruder* intru);
-int particleOutsideIntruder(particle* p, intruder* intru);
+int particleOutsideIntruder(const particle* p, const intruder* intru);
 
 
 

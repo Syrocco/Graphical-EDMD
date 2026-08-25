@@ -396,8 +396,12 @@ void printIntruderShapeFromSmallParticles(FILE* fichier, intruder* intr, double 
     }
 }
 
+static double signedDistanceParticlePolygonWithOffsets(const particle* p,
+    const intruder* intru, double particleDt, double intruderDt);
+
 #if fast_collision_time
-double collisionTimeIntruder(intruder* intr, particle* p) {
+static double collisionTimeIntruderFromOffsets(const intruder* intr,
+    const particle* p, double particleLead, double intruderLead) {
 
     const double tol = 1e-10;
     const int max_bisect_iters = 20;
@@ -416,15 +420,18 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
     }
 
     // Cheap broad-phase reject in world frame before expensive signed distance.
-    double dx0 = p->x - intr->x;
-    double dy0 = p->y - intr->y;
+    double dx0 = (p->x + p->vx*particleLead) -
+        (intr->x + intr->vx*intruderLead);
+    double dy0 = (p->y + p->vy*particleLead) -
+        (intr->y + intr->vy*intruderLead);
     PBC(&dx0, &dy0);
     double r0 = hypot(dx0, dy0);
     if (r0 > (L + v_bound * t_horizon)){
         return never;
     }
 
-    double g0 = signedDistanceParticlePolygon(p, intr, 0.0);
+    double g0 = signedDistanceParticlePolygonWithOffsets(
+        p, intr, particleLead, intruderLead);
     if (g0 > extent + 4*p->rad){
         return never;
     }
@@ -447,7 +454,8 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
         for (int it = 0; it < 2000; ++it) {
             tc_scan += step;
             if (tc_scan > t_horizon) return never;
-            g_scan = signedDistanceParticlePolygon(p, intr, tc_scan);
+            g_scan = signedDistanceParticlePolygonWithOffsets(
+                p, intr, particleLead + tc_scan, intruderLead + tc_scan);
             if (g_scan > 1e-12) break;
         }
         if (g_scan <= 1e-12) return never;
@@ -455,13 +463,15 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
     }
 
     for (double tc = t_prev + dt; tc <= t_horizon; tc += dt) {
-        double g_now = signedDistanceParticlePolygon(p, intr, tc);
+        double g_now = signedDistanceParticlePolygonWithOffsets(
+            p, intr, particleLead + tc, intruderLead + tc);
         if (g_now <= 0.0) {
             double a = t_prev;
             double b = tc;
             for (int iter = 0; iter < max_bisect_iters; ++iter) {
                 double m = 0.5 * (a + b);
-                double g_m = signedDistanceParticlePolygon(p, intr, m);
+                double g_m = signedDistanceParticlePolygonWithOffsets(
+                    p, intr, particleLead + m, intruderLead + m);
                 if (g_m > 0.0) {
                     a = m;
                 } else {
@@ -478,7 +488,8 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
     return never;
 }
 #else
-double collisionTimeIntruder(intruder* intr, particle* p) {
+static double collisionTimeIntruderFromOffsets(const intruder* intr,
+    const particle* p, double particleLead, double intruderLead) {
 
     const double tol = 1e-10;
     const int max_bisect_iters = 80;
@@ -503,15 +514,18 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
     }
 
     // Cheap broad-phase reject in world frame before expensive signed distance.
-    double dx0 = p->x - intr->x;
-    double dy0 = p->y - intr->y;
+    double dx0 = (p->x + p->vx*particleLead) -
+        (intr->x + intr->vx*intruderLead);
+    double dy0 = (p->y + p->vy*particleLead) -
+        (intr->y + intr->vy*intruderLead);
     PBC(&dx0, &dy0);
     double r0 = hypot(dx0, dy0);
     if (r0 > (L + v_bound * t_horizon)) {
         return never;
     }
 
-    double g0 = signedDistanceParticlePolygon(p, intr, 0.0);
+    double g0 = signedDistanceParticlePolygonWithOffsets(
+        p, intr, particleLead, intruderLead);
 
     // Early reject (keep your logic, but use the body-frame extent as the stable one)
     if (g0 > extent + 4.0 * p->rad) {
@@ -534,7 +548,8 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
         for (int it = 0; it < 2000; ++it) {
             tc += step;
             if (tc > t_horizon) return never;
-            g = signedDistanceParticlePolygon(p, intr, tc);
+            g = signedDistanceParticlePolygonWithOffsets(
+                p, intr, particleLead + tc, intruderLead + tc);
             if (g > g_touch) break;
         }
         if (g <= g_touch) return never;   // could not exit overlap
@@ -554,14 +569,16 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
         double t_next = tc + dt;
         if (t_next > t_horizon) t_next = t_horizon;
 
-        double g_next = signedDistanceParticlePolygon(p, intr, t_next);
+        double g_next = signedDistanceParticlePolygonWithOffsets(
+            p, intr, particleLead + t_next, intruderLead + t_next);
 
         // Bracket found => bisection for accurate root
         if (g_next <= 0.0) {
             double a = tc, b = t_next;
             for (int k = 0; k < max_bisect_iters; ++k) {
                 double m = 0.5 * (a + b);
-                double g_m = signedDistanceParticlePolygon(p, intr, m);
+                double g_m = signedDistanceParticlePolygonWithOffsets(
+                    p, intr, particleLead + m, intruderLead + m);
                 if (g_m > 0.0) a = m;
                 else          b = m;
                 if ((b - a) <= tol) break;
@@ -582,6 +599,16 @@ double collisionTimeIntruder(intruder* intr, particle* p) {
     return never;
 }
 #endif
+
+double collisionTimeIntruder(const intruder* intr, const particle* p) {
+    return collisionTimeIntruderFromOffsets(intr, p, 0.0, 0.0);
+}
+
+double collisionTimeIntruderAt(const intruder* intr, const particle* p,
+                               double referenceTime) {
+    return collisionTimeIntruderFromOffsets(
+        intr, p, referenceTime - p->t, referenceTime - intr->t);
+}
 
 // -----------------------------------------------------------------------------
 // Signed distance helpers
@@ -643,21 +670,22 @@ static inline int pointInPolygonEvenOdd(double px, double py, const polygon* pol
 }
 
 
-double signedDistanceParticlePolygon(particle* p, intruder* intru, double t) {
+static double signedDistanceParticlePolygonWithOffsets(const particle* p,
+    const intruder* intru, double particleDt, double intruderDt) {
     // Particle center at time t (world frame)
-    const double px = p->x + p->vx * t;
-    const double py = p->y + p->vy * t;
+    const double px = p->x + p->vx * particleDt;
+    const double py = p->y + p->vy * particleDt;
 
     // Intruder center at time t (world frame)
-    const double X = intru->x + intru->vx * t;
-    const double Y = intru->y + intru->vy * t;
+    const double X = intru->x + intru->vx * intruderDt;
+    const double Y = intru->y + intru->vy * intruderDt;
 
     // Relative vector (minimal image), then rotate into body frame
     double dx = px - X;
     double dy = py - Y;
     PBC(&dx, &dy);
 
-    const double theta = intru->angle + intru->omega * t;
+    const double theta = intru->angle + intru->omega * intruderDt;
     const double cos_theta = cos(theta);
     const double sin_theta = sin(theta);
 
@@ -687,7 +715,13 @@ double signedDistanceParticlePolygon(particle* p, intruder* intru, double t) {
 
 }
 
-void computeCollisionNormal(particle* p, intruder* intru, double t, double* nx, double* ny) {
+double signedDistanceParticlePolygon(const particle* p, const intruder* intru,
+                                     double t) {
+    return signedDistanceParticlePolygonWithOffsets(p, intru, t, t);
+}
+
+void computeCollisionNormal(const particle* p, const intruder* intru,
+                            double t, double* nx, double* ny) {
     // Particle center at time t (world frame)
     const double px = p->x + p->vx * t;
     const double py = p->y + p->vy * t;
@@ -783,7 +817,7 @@ void freeFlyIntruder(intruder* intr){
 }
 
 
-int particleOutsideIntruder(particle* p, intruder* intru) {
+int particleOutsideIntruder(const particle* p, const intruder* intru) {
     double dist = signedDistanceParticlePolygon(p, intru, 0.0);
     const double tol = 1e-8; // tolerance for touching
     if (dist < -tol) {

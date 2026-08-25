@@ -6,8 +6,10 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define EDMD_NOINLINE __attribute__((noinline))
+#define EDMD_PURE __attribute__((pure))
 #else
 #define EDMD_NOINLINE
+#define EDMD_PURE
 #endif
 
 
@@ -70,6 +72,22 @@ struct particle{
 
 };
 
+/* A value-only particle state evaluated at an explicit simulation time. */
+typedef struct particlePrediction particlePrediction;
+struct particlePrediction{
+	double x, y, vx, vy, rad;
+	#if THREE_D
+	double z, vz;
+	#endif
+};
+
+enum particleFlightPhysics{
+	BALLISTIC_FLIGHT,
+	CONSTANT_FIELD_FLIGHT,
+	LINEAR_DAMPING_FLIGHT,
+	GROWTH_FLIGHT,
+};
+
 typedef struct node node;
 struct node{
 	node *lft, *rgt, *top;
@@ -103,7 +121,8 @@ int PBCcellX(int a);
 int PBCcellY(int a);
 int PBCcellZ(int a);
 void shearCorrection(double* x, double* vx, int sign, particle* p);
-void correctDistances(particle* p1, particle* p2, double lat2, double* dx, double* dvx);
+void correctDistances(const particle* p1, const particle* p2,
+	double p2x, double p2vx, double* dx, double* dvx);
 
 void addEventToQueue(node* toAdd);
 void addEventToTree(node* toAdd);
@@ -119,8 +138,8 @@ EDMD_NOINLINE void crossingEventNormal(int i);
 void addCrossingEvent(int i, int info, double tCross);
 void doTheCrossing();
 
-double collisionTimeNormal(particle* p1, particle* p2);
-double collisionTimeGrow(particle* p1, particle* p2);
+EDMD_PURE double collisionTimeNormal(const particle* p1, const particle* p2);
+EDMD_PURE double collisionTimeGrow(const particle* p1, const particle* p2);
 EDMD_NOINLINE void collisionEventGrow(int i);
 EDMD_NOINLINE void collisionEventNormal(int i);
 void addCollisionEvent(int i, int j, double tColl);
@@ -154,6 +173,11 @@ void doMullerPlatheSwap();
 
 EDMD_NOINLINE void freeFlyGrow(particle* p);
 EDMD_NOINLINE void freeFlyNormal(particle* p);
+/* parameter is acceleration for field flight and gamma for damping flight. */
+EDMD_PURE particlePrediction predictParticle(const particle* p,
+	double targetTime, enum particleFlightPhysics physics, double parameter);
+EDMD_PURE particlePrediction predictFreeFlyGrow(const particle* p, double targetTime);
+EDMD_PURE particlePrediction predictFreeFlyNormal(const particle* p, double targetTime);
 void saveTXT();
 void saveThermo();
 void saveTempProfile();
@@ -184,8 +208,8 @@ void printInfo();
 void printClose();
 void runningCheck();
 
-double separateTime(particle* p1, particle* p2);
-double sphereTime(particle* p1, particle* p2);
+EDMD_PURE double separateTime(const particle* p1, const particle* p2);
+EDMD_PURE double sphereTime(const particle* p1, const particle* p2);
 
 void addOutEvent(int i, int j, double tColl);
 void addInEvent(int i, int j, double tColl);

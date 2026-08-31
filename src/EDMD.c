@@ -370,7 +370,7 @@ double Einit = 1;
 
 //coeff of restitution of the wall
 double resW = 1.;
-double resT = 0.;
+double resT = 1.;
 
 //coeff of restitution of particles
 double res = 1;
@@ -625,7 +625,9 @@ int main(int argc, char *argv[]){
 	#if INTRUDER
 	km_finalize_and_dump(km, intruderKMName, intru);
 	#endif
+	#if G != 1
 	printInfo();
+	#endif
 	printClose();
 	finalizeTransverseVelocityCorrelation();
 	#if G != 1
@@ -657,6 +659,7 @@ int main(int argc, char *argv[]){
 	}
 	#else
 	graphicsFree(&screenState);
+	CloseWindow();
 	#endif
 	freeArrays();
 	return 1;
@@ -1846,8 +1849,6 @@ void particlesInit(){
 --------------------------------------------- */
 
 void pairsInit(){
-
-	
 
 	particle* p1;
 

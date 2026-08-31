@@ -71,12 +71,15 @@ debug: $(SOURCES)
 profile: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0 -o EDMD_profile
 
-.PHONY: prediction-test
+.PHONY: prediction-test graphics-performance-test
 prediction-test:
 	mkdir -p build/tests
 	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra $(OPENMP_FLAGS) -DG=0 -Dmain=edmd_program_main -c -o build/tests/EDMD_prediction_test.o
 	$(CC) tests/test_prediction.c build/tests/EDMD_prediction_test.o $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0 -o build/tests/test_prediction
 	build/tests/test_prediction
+
+graphics-performance-test:
+	python3 tests/test_graphics_performance.py
 
 # Clean target
 clean:

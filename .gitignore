@@ -11,6 +11,7 @@
 !tests/
 tests/*
 !tests/test_prediction.c
+!tests/test_graphics_performance.py
 !src/
 !src/**
 src/EDMD_chiral.c

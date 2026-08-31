@@ -105,6 +105,7 @@ struct state{
     Color* colorArray;
     double (*colorFunction)(particle*);
     double* colorFunctionArray;
+    int colorFunctionCapacity;
     bool running;
     bool wallMoving;
     bool spacePressed;
@@ -122,7 +123,6 @@ struct position{
 
 typedef struct threadArg threadArg;
 struct threadArg{
-    int resting;
     int start;
     int end;
 };
@@ -130,7 +130,7 @@ struct threadArg{
 void getInput(window* screenWindow, state* screenState);
 void draw(int argc, char *argv[], window* screenWindow, state* screenState);
 
-void drawParticlesAndBox(double factor, state* screenState, float zoom);
+void drawParticlesAndBox(double factor, state* screenState, float zoom, Rectangle viewport);
 void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
 int getWhatsUnderClick(window* screenWindow, state* screenState);
 void addEventInput(double tin);

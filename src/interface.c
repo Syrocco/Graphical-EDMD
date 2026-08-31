@@ -1,4 +1,5 @@
 #include "EDMD.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -176,15 +177,15 @@ void computeLocalConcentration(particle *particles){
         int box_z = fmin((int)(particles[i].z / dz), Nz - 1);
         
         if (dbis == NULL){
-            d[box_x][box_y] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
+            d[box_x][box_y][box_z] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
         }
         
         else{
             if (particles[i].type == 1) {
-                d[box_x][box_y] +=  4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
+                d[box_x][box_y][box_z] +=  4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
             }
             else{
-                dbis[box_x][box_y] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
+                dbis[box_x][box_y][box_z] += 4./3.*particles[i].rad*particles[i].rad*particles[i].rad*M_PI/(dx*dy*dz);
             }
         }
         if (tp != NULL){

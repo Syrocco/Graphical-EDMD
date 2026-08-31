@@ -8,12 +8,16 @@
 #include <string.h>
 #include "boop.h"
 
+#if THREE_D
+extern int Nycells;
+#endif
 
 
 
 
 boop_data* computeBOOPVoronoi(particle* particles, int N, double Lx, double Ly) {
-    
+    /* The Voronoi implementation is two-dimensional.  In a 3D build this
+       observable intentionally describes the particles' XY projection. */
     boop_data* boop = calloc(N, sizeof(boop_data));
     jcv_diagram diagram = get_particle_voronoi(particles, N, Lx, Ly);
     const jcv_site* sites = jcv_diagram_get_sites(&diagram);
@@ -64,6 +68,9 @@ boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** 
         particle* p1 = &particles[i];
         int X = p1->cell[0];
         int Y = p1->cell[1];
+        #if THREE_D
+        int Z = p1->cell[2];
+        #endif
         double complex sum5 = 0.0 + 0.0*I;
         double complex sum6 = 0.0 + 0.0*I;
         double complex sum7 = 0.0 + 0.0*I;
@@ -71,14 +78,30 @@ boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** 
         // Loop over neighboring cells (including the current cell)
         for (int j = -1; j <= 1; j++) {
             for (int k = -1; k <= 1; k++) {
+                #if THREE_D
+                for (int l = -1; l <= 1; l++) {
+                    particle* p2 = cellList[
+                        PBCcellZ(Z + l) * Nycells * Nxcells +
+                        PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                #else
                 particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                #endif
                 while (p2 != NULL) {
                     if (p2->num != p1->num) {
                         double dx = p2->x - p1->x;
                         double dy = p2->y - p1->y;
+                        #if THREE_D
+                        double dz = p2->z - p1->z;
+                        PBC(&dx, &dy, &dz);
+                        double r2 = dx*dx + dy*dy + dz*dz;
+                        #else
                         PBC(&dx, &dy);
                         double r2 = dx*dx + dy*dy;
+                        #endif
                         if (r2 < r_c*r_c) {
+                            /* q5/q6/q7 here are planar angular harmonics.
+                               In 3D, select neighbors by their true 3D
+                               separation but measure projected XY order. */
                             double theta = atan2(dy, dx);
                             sum5 += cexp(5 * theta * I);
                             sum6 += cexp(6 * theta * I);
@@ -88,6 +111,9 @@ boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** 
                     }
                     p2 = p2->nxt;
                 }
+                #if THREE_D
+                }
+                #endif
             }
         }
         boop[i].neighbors = neighbors;
@@ -105,4 +131,3 @@ boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** 
     }
     return boop;
 }
-

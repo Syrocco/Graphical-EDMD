@@ -10,6 +10,20 @@
 #endif
 #include <complex.h>
 
+#if THREE_D
+extern double Lz;
+#endif
+
+/* Voronoi and complex psi_6 observables in this file are intrinsically 2D.
+   Keep them available in a 3D build as explicitly documented XY projections. */
+static inline void apply_projected_xy_pbc(double* dx, double* dy) {
+    #if THREE_D
+    double projected_dz = 0.0;
+    PBC(dx, dy, &projected_dz);
+    #else
+    PBC(dx, dy);
+    #endif
+}
 
 
 
@@ -40,9 +54,14 @@ pcf_data* calculate_pcf(particle* particles, int N, double dr, double max_r, dou
         for (int j = i + 1; j < N; j++) {
             double dx = particles[j].x - particles[i].x;
             double dy = particles[j].y - particles[i].y;
-            
+            #if THREE_D
+            double dz = particles[j].z - particles[i].z;
+            PBC(&dx, &dy, &dz);
+            double r = sqrt(dx*dx + dy*dy + dz*dz);
+            #else
             PBC(&dx, &dy);
             double r = sqrt(dx*dx + dy*dy);
+            #endif
             
             if (r < max_r) {
                 int bin = (int)(r / data->bin_width);
@@ -54,13 +73,22 @@ pcf_data* calculate_pcf(particle* particles, int N, double dr, double max_r, dou
     }
     
     // Normalize g(r)
+    #if THREE_D
+    double volume = Lx * Ly * Lz;
+    #else
     double volume = Lx * Ly;
+    #endif
     double density = N / volume;
 
     for (int i = 0; i < data->num_bins; i++) {
-        // Calculate volume of shell: 2πr·dr in 2D
         double r = data->r[i];
+        #if THREE_D
+        // Calculate volume of a spherical shell: 4πr²·dr in 3D.
+        double shell_volume = 4 * M_PI * r * r * data->bin_width;
+        #else
+        // Calculate area of an annulus: 2πr·dr in 2D.
         double shell_volume = 2 * M_PI * r * data->bin_width;
+        #endif
         
         // Normalize
         double norm = shell_volume * density * N;
@@ -111,7 +139,7 @@ bond_order_pcf_data* calculate_bond_order_pcf(particle* particles, int N, double
                 if (i == j) continue;
                 double dx = particles[j].x - particles[i].x;
                 double dy = particles[j].y - particles[i].y;
-                PBC(&dx, &dy); // Apply periodic boundary conditions
+                apply_projected_xy_pbc(&dx, &dy);
                 double r = sqrt(dx*dx + dy*dy);
                 if (r < max_r) {
                     int bin = (int)(r / data->bin_width);
@@ -195,7 +223,7 @@ g6corr_data* compute_g6_correlation(particle* particles, int N, double dr, doubl
             for (int j = i + 1; j < N; j++) {
                 double dx = particles[j].x - particles[i].x;
                 double dy = particles[j].y - particles[i].y;
-                PBC(&dx, &dy);
+                apply_projected_xy_pbc(&dx, &dy);
                 double r = sqrt(dx*dx + dy*dy);
                 if (r < max_r) {
                     int bin = (int)(r / dr);
@@ -465,5 +493,4 @@ void find_max_structure_factor_bragg(particle* particles, int N, double Lx, doub
     k[1] = best_k[1];
     //printf("Max structure factor S = %.6f at k = (%.6f, %.6f)\n", max_S, k[0], k[1]);
 }
-
 

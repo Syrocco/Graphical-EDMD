@@ -12,14 +12,20 @@ At full speed, and for ~2000 particles the algorithm can perform around $10^6$ c
 ## Compiling
 
 
-Use ```make graphics``` for the algorithm with the graphical interface (does not work on Windows) and ```make``` for the algorithm without a graphical interface. If you want to use the graphical interface.
+Use `make graphics` for the 2D algorithm with the graphical interface (does not work on Windows), and `make` for the algorithm without a graphical interface. Build the graphical interface for a 3D system with:
+
+```sh
+make graphics THREE_D=1
+```
+
+The 3D graphical build uses perspective, depth-tested, smoothly lit sphere instances with adaptive mesh detail. Its viewport follows the native framebuffer resolution on HiDPI displays. Right-drag to orbit, use the mouse wheel to zoom, and press `R` to refit the simulation box. Planar-only controls (circular walls, tangent delta kicks, 2D bond-order coloring, and direct particle/wall dragging) are disabled; the structure-factor panel remains an explicitly labeled XY projection.
 
 ##### Dependencies:
   For the graphical part: [raylib](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)
 
 ## Running
 
-Compile and execute the ```./a.out```. You can pass option in the command line such as ```./a.out -N 1000 --phi 0.8```. This is particularly useful for the no-graphics mode of the program but almost useless when the graphical interface is used.
+Compile and execute `./a.out`. You can pass options on the command line, such as `./a.out -N 1000 --phi 0.8`. This is particularly useful for the no-graphics mode of the program but almost useless when the graphical interface is used.
 Without graphical interface the program ouputs files readable by [ovito](https://www.ovito.org/about/).
 ## Structure of the program
 

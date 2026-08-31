@@ -31,6 +31,14 @@ SRC_DIR = src
 SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c $(SRC_DIR)/intruder.c $(SRC_DIR)/field.c
 GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c
 
+# Select the simulation dimension at build time, e.g. `make graphics THREE_D=1`.
+# When omitted, EDMD.h supplies the default so source-level configurations keep
+# working as before.
+THREE_D ?=
+ifneq ($(strip $(THREE_D)),)
+DIMENSION_FLAGS = -DTHREE_D=$(THREE_D)
+endif
+
 INCLUDE_FLAGS = -I$(SRC_DIR)
 
 ifeq ($(OPENMP_SUPPORT),yes)
@@ -57,25 +65,25 @@ else
 endif
 
 EDMD: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) -DG=0
 
 
 graphics: $(GRAPHICS_SOURCES)
-	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) -DG=1
+	$(CC) $(GRAPHICS_SOURCES) $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -std=c99 -Wall -Wno-missing-braces -Wno-unused-value -O3 -ffast-math $(GRAPHICS_LIBS) -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) -DG=1
 
 
 debug: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm -DG=0
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O0 -g -Wall -Wextra -lm $(DIMENSION_FLAGS) -DG=0
 
 # Profiling build (good symbols and call stacks for time profiling)
 profile: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0 -o EDMD_profile
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) -DG=0 -o EDMD_profile
 
 .PHONY: prediction-test graphics-performance-test
 prediction-test:
 	mkdir -p build/tests
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra $(OPENMP_FLAGS) -DG=0 -Dmain=edmd_program_main -c -o build/tests/EDMD_prediction_test.o
-	$(CC) tests/test_prediction.c build/tests/EDMD_prediction_test.o $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) -DG=0 -o build/tests/test_prediction
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) -DG=0 -Dmain=edmd_program_main -c -o build/tests/EDMD_prediction_test.o
+	$(CC) tests/test_prediction.c build/tests/EDMD_prediction_test.o $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 -ffast-math -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) -DG=0 -o build/tests/test_prediction
 	build/tests/test_prediction
 
 graphics-performance-test:

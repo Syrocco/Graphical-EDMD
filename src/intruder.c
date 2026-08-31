@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#if !THREE_D
+
 #define fast_collision_time 1
 
 double polygon_I_com(const polygon* p, double M){
@@ -1107,3 +1109,5 @@ void rethermalize_bath_particle_at_intruder_contact(particle* p, intruder* P,
     p->y = contactY + (p->rad + rethermalize_eps) * ny;
     PBC(&(p->x), &(p->y));
 }
+
+#endif /* !THREE_D */

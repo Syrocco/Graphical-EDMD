@@ -15,7 +15,6 @@
 
 #define never 100000000000000000000000000.0
 
-#define THREE_D 0
 #ifndef THREE_D
 #    define THREE_D 0
 #endif

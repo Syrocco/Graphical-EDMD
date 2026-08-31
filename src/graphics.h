@@ -3,6 +3,9 @@
 
 extern double Lx;
 extern double Ly;
+#if THREE_D
+extern double Lz;
+#endif
 extern int N;
 extern particle* particles;
 extern node** eventList;
@@ -88,6 +91,12 @@ struct window{
     double xGUI;
     double yGUI;
     Camera2D cam;
+    #if THREE_D
+    Camera3D cam3D;
+    double cameraBoxLx;
+    double cameraBoxLy;
+    double cameraBoxLz;
+    #endif
 };
 
 typedef struct state state;
@@ -111,6 +120,9 @@ struct state{
     bool spacePressed;
     bool editVx;
     bool editVy;
+    #if THREE_D
+    bool editVz;
+    #endif
     bool editM;
     bool wallEditing;
     int wallParam;
@@ -138,7 +150,9 @@ Color colorSelect(double value, Color* colorArray);
 double colorVelocity(particle* p);
 double colorCollision(particle* p);
 double colorRadius(particle* p);
+#if !THREE_D
 double colorBOOP(particle* p1);
+#endif
 double colorCharge(particle* p);
 void* computeStructureFactorGraphic(void* arg);
 void normalizeStruct();

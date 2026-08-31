@@ -478,6 +478,22 @@ double get_boxy(char* h,size_t sh,Dump* dump){
 	return read_doubleval("BOX",1,1,dump);
 }
 
+double get_boxz(char* h,size_t sh,Dump* dump){
+	/* Returns the box length along z in the current frame. */
+	if(h!=NULL){
+		char header[LINESIZE];
+		get_header("BOX",header,LINESIZE,dump);
+		char* tok=strtok(header," \t"); //ITEM:
+		tok=strtok(NULL," \t");         //BOX
+		tok=strtok(NULL," \t");         //BOUNDS
+		tok=strtok(NULL," \t");         //xlabel
+		tok=strtok(NULL," \t");         //ylabel
+		tok=strtok(NULL," \t");         //What we want
+		strlcpy(h,tok,sh);
+	}
+	return read_doubleval("BOX",2,1,dump);
+}
+
 void get_intatomprop(char* prop,int* ptr,int natoms,Dump* dump){
 	/*
 	 * Parses the first natoms values of column prop of ITEM: ATOMS as int and stores them in ptr.

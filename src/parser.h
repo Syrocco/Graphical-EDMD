@@ -62,6 +62,7 @@ double get_timestep(Dump* dump);
 int get_natoms(Dump* dump);
 double get_boxx(char* h,size_t sh,Dump* dump);
 double get_boxy(char* h,size_t sh,Dump* dump);
+double get_boxz(char* h,size_t sh,Dump* dump);
 void get_intatomprop(char* prop,int* ptr,int natoms,Dump* dump);
 void get_doubleatomprop(char* prop,double* ptr,int natoms,Dump* dump);
 void get_floatatomprop(char* prop,float* ptr,int natoms,Dump* dump);

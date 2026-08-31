@@ -1,4 +1,5 @@
 #include "EDMD.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,6 +16,12 @@ cluster* clusters;
 
 extern int clusterMode;
 extern int clusterNeighborThreshold;
+extern double cellxSize;
+extern double cellySize;
+#if THREE_D
+extern int Nzcells;
+extern double cellzSize;
+#endif
 
 bool areParticlesClose(particle* p1, particle* p2, double r_c);
 void addParticleToCluster(cluster* cl, particle* p);
@@ -23,6 +30,32 @@ void findClustersOld(particle* particles, int N, double r_c, particle** cellList
 void freeClusters();
 int compareClusters(const void* a, const void* b);
 void sortClustersBySize();
+
+
+
+/* Cells whose indices differ by d can contain points separated by as little
+   as (d - 1)*cellSize.  Clustering includes particles exactly at r_c, so the
+   closed-cutoff stencil needs floor(r_c/cellSize) + 1 cells in each axis. */
+static int clusterCellRange(double r_c, double cellSize) {
+    return (int)floor(fabs(r_c)/cellSize) + 1;
+}
+
+/* If a periodic dimension is shorter than the requested stencil, traverse
+   every cell once.  Re-visiting wrapped cells would inflate neighborCount. */
+static int clusterNeighborCellCount(int cellCount, int range) {
+    return (range >= cellCount/2) ? cellCount : 2*range + 1;
+}
+
+static int clusterNeighborCellCoordinate(int center, int cellCount,
+                                         int range, int index) {
+    if (range >= cellCount/2) {
+        return index;
+    }
+    int coordinate = center - range + index;
+    if (coordinate < 0) coordinate += cellCount;
+    if (coordinate >= cellCount) coordinate -= cellCount;
+    return coordinate;
+}
 
 
 
@@ -63,7 +96,14 @@ void findClustersOld(particle* particles, int N, double r_c, particle** cellList
     bool* visited = calloc(N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;
-    int mul = floor(r_c/2) + 1;
+    const int rangeX = clusterCellRange(r_c, cellxSize);
+    const int rangeY = clusterCellRange(r_c, cellySize);
+    const int numberX = clusterNeighborCellCount(Nxcells, rangeX);
+    const int numberY = clusterNeighborCellCount(Nycells, rangeY);
+    #if THREE_D
+    const int rangeZ = clusterCellRange(r_c, cellzSize);
+    const int numberZ = clusterNeighborCellCount(Nzcells, rangeZ);
+    #endif
     for (int i = 0; i < N; i++) {
         if (!visited[i]) {
             cluster cl;
@@ -80,13 +120,16 @@ void findClustersOld(particle* particles, int N, double r_c, particle** cellList
                 #if THREE_D
                 int Z = p1->cell[2];
                 #endif
-                for (int m = -mul; m <= mul; m++){
-                    for (int k = -mul; k <= mul; k++){
+                for (int yi = 0; yi < numberY; yi++){
+                    const int neighborY = clusterNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+                    for (int xi = 0; xi < numberX; xi++){
+                        const int neighborX = clusterNeighborCellCoordinate(X, Nxcells, rangeX, xi);
                         #if THREE_D
-                        for (int l = -mul; l <= mul; l++){
-                            particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + m) * Nxcells + PBCcellX(X + l)];
+                        for (int zi = 0; zi < numberZ; zi++){
+                            const int neighborZ = clusterNeighborCellCoordinate(Z, Nzcells, rangeZ, zi);
+                            particle* p2 = cellList[neighborZ * Nycells * Nxcells + neighborY * Nxcells + neighborX];
                         #else
-                            particle* p2 = cellList[PBCcellY(Y + m) * Nxcells + PBCcellX(X + k)];
+                            particle* p2 = cellList[neighborY * Nxcells + neighborX];
                         #endif
                         while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
                             if (!visited[p2->num] && areParticlesClose(p1, p2, r_c)) {
@@ -117,7 +160,14 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
     bool* targetLike = calloc((unsigned int)N, sizeof(bool));
     numClusters = 0;
     clusters = NULL;
-    int mul = floor(r_c/2) + 1;
+    const int rangeX = clusterCellRange(r_c, cellxSize);
+    const int rangeY = clusterCellRange(r_c, cellySize);
+    const int numberX = clusterNeighborCellCount(Nxcells, rangeX);
+    const int numberY = clusterNeighborCellCount(Nycells, rangeY);
+    #if THREE_D
+    const int rangeZ = clusterCellRange(r_c, cellzSize);
+    const int numberZ = clusterNeighborCellCount(Nzcells, rangeZ);
+    #endif
 
     // First pass: identify liquidlike particles
     for (int i = 0; i < N; i++) {
@@ -128,13 +178,16 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
         #if THREE_D
         int Z = p1->cell[2];
         #endif
-        for (int m = -mul; m <= mul; m++) {
-            for (int k = -mul; k <= mul; k++) {
+        for (int yi = 0; yi < numberY; yi++) {
+            const int neighborY = clusterNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+            for (int xi = 0; xi < numberX; xi++) {
+                const int neighborX = clusterNeighborCellCoordinate(X, Nxcells, rangeX, xi);
                 #if THREE_D
-                for (int l = -mul; l <= mul; l++) {
-                    particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + m) * Nxcells + PBCcellX(X + l)];
+                for (int zi = 0; zi < numberZ; zi++) {
+                    const int neighborZ = clusterNeighborCellCoordinate(Z, Nzcells, rangeZ, zi);
+                    particle* p2 = cellList[neighborZ * Nycells * Nxcells + neighborY * Nxcells + neighborX];
                 #else
-                    particle* p2 = cellList[PBCcellY(Y + m) * Nxcells + PBCcellX(X + k)];
+                    particle* p2 = cellList[neighborY * Nxcells + neighborX];
                 #endif
                 while (p2 != NULL) {
                     if (p1->num != p2->num && areParticlesClose(p1, p2, r_c)) {
@@ -175,13 +228,16 @@ void findClusters(particle* particles, int N, double r_c, particle** cellList, i
                 #if THREE_D
                 int Z = p1->cell[2];
                 #endif
-                for (int m = -mul; m <= mul; m++) {
-                    for (int k = -mul; k <= mul; k++) {
+                for (int yi = 0; yi < numberY; yi++) {
+                    const int neighborY = clusterNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+                    for (int xi = 0; xi < numberX; xi++) {
+                        const int neighborX = clusterNeighborCellCoordinate(X, Nxcells, rangeX, xi);
                         #if THREE_D
-                        for (int l = -mul; l <= mul; l++) {
-                            particle* p2 = cellList[PBCcellZ(Z + k) * Nycells * Nxcells + PBCcellY(Y + m) * Nxcells + PBCcellX(X + l)];
+                        for (int zi = 0; zi < numberZ; zi++) {
+                            const int neighborZ = clusterNeighborCellCoordinate(Z, Nzcells, rangeZ, zi);
+                            particle* p2 = cellList[neighborZ * Nycells * Nxcells + neighborY * Nxcells + neighborX];
                         #else
-                            particle* p2 = cellList[PBCcellY(Y + m) * Nxcells + PBCcellX(X + k)];
+                            particle* p2 = cellList[neighborY * Nxcells + neighborX];
                         #endif
                         while (p2 != NULL) {
                             if (targetLike[p2->num] && !visited[p2->num] && areParticlesClose(p1, p2, r_c)) {

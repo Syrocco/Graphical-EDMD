@@ -61,6 +61,11 @@ static Texture2D defaultMaterialTexture = {0};
 static bool spriteMaterialLoaded = false;
 static particlePrediction* renderPredictions = NULL;
 static int renderPredictionCapacity = 0;
+#if !THREE_D
+static double maximumPredictedParticleRadius = 0;
+static double maximumPredictedParticleRadiusTime = NAN;
+static int maximumPredictedParticleRadiusCount = -1;
+#endif
 
 typedef struct particleColorCache particleColorCache;
 struct particleColorCache{
@@ -99,7 +104,44 @@ static int sceneTargetHeight = 0;
 #endif
 
 static particlePrediction graphicsParticlePrediction(const particle* p);
+#if !THREE_D
+static double graphicsMaximumParticleRadius(void);
+#endif
 static void invalidateParticleColorCache(void);
+
+#if !THREE_D
+/* Return the smallest symmetric cell stencil that can contain a point within
+ * cutoff of any point in the center cell. */
+static int graphicsCellNeighborRange(double cutoff, double boxLength, int cellCount){
+	if (!(cutoff > 0) || !(boxLength > 0) || (cellCount <= 1)){
+		return 0;
+	}
+	const double range = ceil(cutoff*cellCount/boxLength);
+	if (!isfinite(range) || (range >= cellCount)){
+		return cellCount;
+	}
+	return (int)range;
+}
+
+/* Consecutive periodic offsets are unique until their span covers the whole
+ * axis.  Enumerating all coordinates in that case also avoids out-of-bounds
+ * one-step wrapping in boxes with only one or two cells. */
+static int graphicsNeighborCellCount(int cellCount, int range){
+	const long long stencilWidth = 2LL*range + 1;
+	return (stencilWidth >= cellCount) ? cellCount : (int)stencilWidth;
+}
+
+static int graphicsNeighborCellCoordinate(int center, int cellCount,
+	int range, int index){
+	if (graphicsNeighborCellCount(cellCount, range) == cellCount){
+		return index;
+	}
+	long long coordinate = (long long)center - range + index;
+	coordinate %= cellCount;
+	if (coordinate < 0) coordinate += cellCount;
+	return (int)coordinate;
+}
+#endif
 
 #if THREE_D
 static void resetCamera3D(window* screenWindow);
@@ -171,10 +213,18 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 	if ((x >= 0) && (x < Lx) && (y >= 0) && (y < Ly)){
 		int X = coordToCell(x, 1);
 		int Y = coordToCell(y, 0);
+		const double maximumRadius = graphicsMaximumParticleRadius();
+		const int rangeX = graphicsCellNeighborRange(maximumRadius, Lx, Nxcells);
+		const int rangeY = graphicsCellNeighborRange(maximumRadius, Ly, Nycells);
+		const int numberX = graphicsNeighborCellCount(Nxcells, rangeX);
+		const int numberY = graphicsNeighborCellCount(Nycells, rangeY);
 
-		for (int j = -1; j <= 1; j++){
-			for (int k = -1; k <= 1; k++){
-				screenState->particleUnderClick =  cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+		for (int yi = 0; yi < numberY; yi++){
+			const int neighborY = graphicsNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+			for (int xi = 0; xi < numberX; xi++){
+				const int neighborX = graphicsNeighborCellCoordinate(X, Nxcells, rangeX, xi);
+				screenState->particleUnderClick =
+					cellList[neighborY*Nxcells + neighborX];
 				while (screenState->particleUnderClick != NULL){ //while there is a particle in the doubly linked list of the cellList do...
 					const particlePrediction predicted = graphicsParticlePrediction(screenState->particleUnderClick);
 					double dx = predicted.x - x;
@@ -506,6 +556,9 @@ void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *text
 
 static void invalidateParticleColorCache(void){
 	colorCache.valid = false;
+	#if !THREE_D
+	maximumPredictedParticleRadiusCount = -1;
+	#endif
 }
 
 static particlePrediction graphicsParticlePrediction(const particle* p){
@@ -524,6 +577,27 @@ static particlePrediction graphicsParticlePrediction(const particle* p){
 	return prediction;
 }
 
+#if !THREE_D
+static double graphicsMaximumParticleRadius(void){
+	if ((maximumPredictedParticleRadiusCount == N) &&
+		(maximumPredictedParticleRadiusTime == t)){
+		return maximumPredictedParticleRadius;
+	}
+
+	double maximumRadius = 0;
+	for (int i = 0; i < N; i++){
+		const particlePrediction predicted = graphicsParticlePrediction(particles + i);
+		if (isfinite(predicted.rad) && (predicted.rad > maximumRadius)){
+			maximumRadius = predicted.rad;
+		}
+	}
+	maximumPredictedParticleRadius = maximumRadius;
+	maximumPredictedParticleRadiusTime = t;
+	maximumPredictedParticleRadiusCount = N;
+	return maximumRadius;
+}
+#endif
+
 static bool refreshRenderPredictions(void){
 	if (renderPredictionCapacity != N){
 		particlePrediction* resized = realloc(renderPredictions,
@@ -535,9 +609,23 @@ static bool refreshRenderPredictions(void){
 		renderPredictions = resized;
 		renderPredictionCapacity = N;
 	}
+	#if !THREE_D
+	double maximumRadius = 0;
+	#endif
 	for (int i = 0; i < N; i++){
 		renderPredictions[i] = graphicsParticlePrediction(particles + i);
+		#if !THREE_D
+		if (isfinite(renderPredictions[i].rad) &&
+			(renderPredictions[i].rad > maximumRadius)){
+			maximumRadius = renderPredictions[i].rad;
+		}
+		#endif
 	}
+	#if !THREE_D
+	maximumPredictedParticleRadius = maximumRadius;
+	maximumPredictedParticleRadiusTime = t;
+	maximumPredictedParticleRadiusCount = N;
+	#endif
 	return true;
 }
 
@@ -1102,6 +1190,13 @@ static void drawBoxBoundary3D(Color color){
 	}
 }
 
+static void drawSphericalBoundary3D(Color color){
+	const Vector3 center = {
+		(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz),
+	};
+	DrawSphereWires(center, (float)(0.5*Lx), 24, 48, color);
+}
+
 static void drawWallGrid3D(int axis, float coordinate, Color color){
 	const int divisions = 5;
 	for (int i = 0; i <= divisions; i++){
@@ -1130,7 +1225,13 @@ static void drawParticlesAndBox3D(state* screenState){
 	const bool colorsReady = refreshParticleColorCache(screenState);
 	const bool sphereBatchReady = ensureSphereBatch(&particleSphereBatch, N);
 	particleSphereBatch.count = 0;
-	drawBoxBoundary3D((Color){105, 115, 125, 255});
+	const Color boundaryColor = (Color){105, 115, 125, 255};
+	if (addCircularWall){
+		drawSphericalBoundary3D(boundaryColor);
+	}
+	else{
+		drawBoxBoundary3D(boundaryColor);
+	}
 	if (addWallx){
 		const Color wallColor = Fade(BLACK, 0.45f);
 		drawWallGrid3D(0, 0.0f, wallColor);
@@ -1143,9 +1244,15 @@ static void drawParticlesAndBox3D(state* screenState){
 	}
 
 	const float axisLength = (float)(0.12*fmin(Lx, fmin(Ly, Lz)));
-	DrawLine3D((Vector3){0}, (Vector3){axisLength, 0, 0}, RED);
-	DrawLine3D((Vector3){0}, (Vector3){0, axisLength, 0}, GREEN);
-	DrawLine3D((Vector3){0}, (Vector3){0, 0, axisLength}, BLUE);
+	const Vector3 axisOrigin = addCircularWall ?
+		(Vector3){(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz)} :
+		(Vector3){0};
+	DrawLine3D(axisOrigin,
+		(Vector3){axisOrigin.x + axisLength, axisOrigin.y, axisOrigin.z}, RED);
+	DrawLine3D(axisOrigin,
+		(Vector3){axisOrigin.x, axisOrigin.y + axisLength, axisOrigin.z}, GREEN);
+	DrawLine3D(axisOrigin,
+		(Vector3){axisOrigin.x, axisOrigin.y, axisOrigin.z + axisLength}, BLUE);
 
 	for (int i = N - 1; i >= 0; i--){
 		const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
@@ -1501,14 +1608,15 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			(Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI},
 			"Pot. rad.", name, &sig, 1.01f, 2.5f);
 		if (sig != oldPotentialRadius){
-			free(cellList);
-			boxConstantHelper();
-			cellListInit();
+			/* Synchronize coordinates before rebuilding their linked-cell index. */
 			for(int i = 0; i < N; i++){
 				particle *p = particles + i;
 				freeFly(p);
 				free(p->particlesInWell);
-			} 
+			}
+			free(cellList);
+			boxConstantHelper();
+			cellListInit();
 			pairsInit();
 			
 			for (int i = 0; i < N; i++){
@@ -1568,10 +1676,21 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 		invalidateParticleColorCache();
 	}
 
+	bool oldNormalDelta = addDelta;
+	bool oldTangentDelta = addDeltaTangent;
 	GuiCheckBox((Rectangle){start + 250*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Delta", &addDelta);
-	#if !THREE_D
-	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Tangent Delta", &addDeltaTangent);
-	#endif
+	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI},
+		#if THREE_D
+		"Tangent Delta (uz x n)",
+		#else
+		"Tangent Delta",
+		#endif
+		&addDeltaTangent);
+	/* These are distinct collision laws; the last one enabled wins. */
+	if (!oldNormalDelta && addDelta)
+		addDeltaTangent = false;
+	if (!oldTangentDelta && addDeltaTangent)
+		addDelta = false;
 	if (addDelta || addDeltaTangent){
 		sprintf(name, "%.3f", delta);
 		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 1);
@@ -1691,7 +1810,7 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 
 	int dirtyWallParam = screenState->wallParam;
 	#if THREE_D
-	const char* wallModeNames = "No Wall; Horiz. Wall; Vert. Wall; Square Walls";
+	const char* wallModeNames = "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Spher. Wall";
 	#else
 	const char* wallModeNames = "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall";
 	#endif
@@ -1719,13 +1838,11 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 				addWally = 1;
 				addCircularWall = 0;
 			}
-			#if !THREE_D
 			else if (screenState->wallParam == 4){
 				addWallx = 0;
 				addWally = 0;
 				addCircularWall = 1;
 			}
-			#endif
 			if (screenState->wallParam != 0){
 				
 				if (structFactorActivated)
@@ -1842,17 +1959,30 @@ double colorBOOP(particle* p1){
 	if ((addWell) && (U > 0)){
 		treshold *= sig;
 	}
+	if (p1->type != 1){
+		return 0;
+	}
 	int count = 0;
 	int X = p1->cell[0];
 	int Y = p1->cell[1];
 	double re = 0;
 	double im = 0;
 	const particlePrediction p1Now = cachedGraphicsParticlePrediction(p1);
-	for (int j = -1; j <= 1; j++){
-		for (int k = -1; k <= 1; k++){
-			particle* p2 =  cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+	/* The predicate below has a center-distance cutoff of
+	 * sqrt(treshold)*(r1 + r2), not one linked-cell width. */
+	const double maximumCutoff = sqrt(treshold)*
+		(p1Now.rad + graphicsMaximumParticleRadius());
+	const int rangeX = graphicsCellNeighborRange(maximumCutoff, Lx, Nxcells);
+	const int rangeY = graphicsCellNeighborRange(maximumCutoff, Ly, Nycells);
+	const int numberX = graphicsNeighborCellCount(Nxcells, rangeX);
+	const int numberY = graphicsNeighborCellCount(Nycells, rangeY);
+	for (int yi = 0; yi < numberY; yi++){
+		const int neighborY = graphicsNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+		for (int xi = 0; xi < numberX; xi++){
+			const int neighborX = graphicsNeighborCellCoordinate(X, Nxcells, rangeX, xi);
+			particle* p2 = cellList[neighborY*Nxcells + neighborX];
 			while (p2 != NULL){
-				if ((p1->num != p2->num) && (p1->type == 1) && (p2->type == 1)){
+				if ((p1->num != p2->num) && (p2->type == 1)){
 					const particlePrediction p2Now = cachedGraphicsParticlePrediction(p2);
 					double dy = p1Now.y - p2Now.y;
 					double dx = p1Now.x - p2Now.x;
@@ -2153,10 +2283,9 @@ window graphicalInit(){
 
 	aspectRatio = 1;
 	#if THREE_D
-	/* These controls have only planar implementations. */
+	/* Start with optional confinement and fixed-axis tangent forcing disabled. */
 	addCircularWall = 0;
 	addDeltaTangent = false;
-	res = 1;
 	damping = false;
 	#endif
 	Camera2D cam = {0};

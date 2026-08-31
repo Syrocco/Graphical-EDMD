@@ -8,9 +8,36 @@
 #include <string.h>
 #include "boop.h"
 
-#if THREE_D
 extern int Nycells;
+extern double cellxSize;
+extern double cellySize;
+#if THREE_D
+extern int Nzcells;
+extern double cellzSize;
 #endif
+
+
+
+/* BOOP uses a strict distance cutoff.  With cell width h, an index offset d
+   can contribute iff (d - 1)*h < r_c, giving ceil(r_c/h) cells per axis. */
+static int boopCellRange(double r_c, double cellSize) {
+    return (int)ceil(fabs(r_c)/cellSize);
+}
+
+static int boopNeighborCellCount(int cellCount, int range) {
+    return (range >= cellCount/2) ? cellCount : 2*range + 1;
+}
+
+static int boopNeighborCellCoordinate(int center, int cellCount,
+                                      int range, int index) {
+    if (range >= cellCount/2) {
+        return index;
+    }
+    int coordinate = center - range + index;
+    if (coordinate < 0) coordinate += cellCount;
+    if (coordinate >= cellCount) coordinate -= cellCount;
+    return coordinate;
+}
 
 
 
@@ -64,6 +91,14 @@ boop_data* computeBOOPVoronoi(particle* particles, int N, double Lx, double Ly) 
 
 boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** cellList, int Nxcells) {
     boop_data* boop = calloc(N, sizeof(boop_data));
+    const int rangeX = boopCellRange(r_c, cellxSize);
+    const int rangeY = boopCellRange(r_c, cellySize);
+    const int numberX = boopNeighborCellCount(Nxcells, rangeX);
+    const int numberY = boopNeighborCellCount(Nycells, rangeY);
+    #if THREE_D
+    const int rangeZ = boopCellRange(r_c, cellzSize);
+    const int numberZ = boopNeighborCellCount(Nzcells, rangeZ);
+    #endif
     for (int i = 0; i < N; i++) {
         particle* p1 = &particles[i];
         int X = p1->cell[0];
@@ -76,15 +111,18 @@ boop_data* computeBOOPCutoff(particle* particles, int N, double r_c, particle** 
         double complex sum7 = 0.0 + 0.0*I;
         int neighbors = 0;
         // Loop over neighboring cells (including the current cell)
-        for (int j = -1; j <= 1; j++) {
-            for (int k = -1; k <= 1; k++) {
+        for (int yi = 0; yi < numberY; yi++) {
+            const int neighborY = boopNeighborCellCoordinate(Y, Nycells, rangeY, yi);
+            for (int xi = 0; xi < numberX; xi++) {
+                const int neighborX = boopNeighborCellCoordinate(X, Nxcells, rangeX, xi);
                 #if THREE_D
-                for (int l = -1; l <= 1; l++) {
+                for (int zi = 0; zi < numberZ; zi++) {
+                    const int neighborZ = boopNeighborCellCoordinate(Z, Nzcells, rangeZ, zi);
                     particle* p2 = cellList[
-                        PBCcellZ(Z + l) * Nycells * Nxcells +
-                        PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                        neighborZ * Nycells * Nxcells +
+                        neighborY * Nxcells + neighborX];
                 #else
-                particle* p2 = cellList[PBCcellY(Y + j) * Nxcells + PBCcellX(X + k)];
+                particle* p2 = cellList[neighborY * Nxcells + neighborX];
                 #endif
                 while (p2 != NULL) {
                     if (p2->num != p1->num) {

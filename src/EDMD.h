@@ -59,7 +59,8 @@ struct particle{
 	#else
 	int cell[2];
 	#endif
-	int num, type, numberOfParticlesInWell, crossX, crossY, synchro;
+	int num, type, numberOfParticlesInWell, particlesInWellCapacity;
+	int crossX, crossY, synchro;
 	int charge;
 	#if TANGENTIAL
     double omega;     // Angular velocity
@@ -217,7 +218,7 @@ void pairsInit();
 
 void addParticleInWellList(particle* p1, int num);
 void removeParticleInWellList(particle* p1, int num);
-int isParticleInWellList(particle* p1, int num);
+int isParticleInWellList(const particle* p1, int num);
 
 void collisionEventIntruder();
 #endif

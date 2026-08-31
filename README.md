@@ -18,7 +18,7 @@ Use `make graphics` for the 2D algorithm with the graphical interface (does not 
 make graphics THREE_D=1
 ```
 
-The 3D graphical build uses perspective, depth-tested, smoothly lit sphere instances with adaptive mesh detail. Its viewport follows the native framebuffer resolution on HiDPI displays. Right-drag to orbit, use the mouse wheel to zoom, and press `R` to refit the simulation box. Planar-only controls (circular walls, tangent delta kicks, 2D bond-order coloring, and direct particle/wall dragging) are disabled; the structure-factor panel remains an explicitly labeled XY projection.
+The 3D graphical build uses perspective, depth-tested, smoothly lit sphere instances with adaptive mesh detail. Its viewport follows the native framebuffer resolution on HiDPI displays. Right-drag to orbit, use the mouse wheel to zoom, and press `R` to refit the simulation box. Spherical confinement and fixed-axis tangent delta kicks (`u_z x n`, with `n` the contact normal) are available from the physics controls. Planar-only bond-order coloring and direct particle/wall dragging remain disabled; the structure-factor panel remains an explicitly labeled XY projection.
 
 ##### Dependencies:
   For the graphical part: [raylib](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux)

@@ -1,23 +1,43 @@
-#define RAYGUI_IMPLEMENTATION
-#include "raygui.h" 
-#include "color.h"
 #include "graphics.h"
+#include "color.h"
+#include "gui_imgui.h"
+#include "live_analysis.h"
+#include "sim_lifecycle.h"
 #include "EDMD.h"
-#include "tex_data.h"  
 #include "raymath.h"
+#include <errno.h>
+#include <float.h>
 #include <math.h>
+#if !defined(PLATFORM_WEB)
 #include <pthread.h>
+#else
+#include <emscripten/emscripten.h>
+#include <emscripten/html5.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
+
+extern double E;
+extern double pressure;
+extern double tmax;
+extern const int suppSizeEvent;
+#if THREE_D
+extern int Nzcells;
+#endif
 
 #define qN 180
 #define SIZE 400
 #define NUM_THREADS 4
-#define STRUCTURE_FACTOR_MAX_SAMPLES 4096
-#define STRUCTURE_FACTOR_REFRESH_SECONDS 0.5
-#define COLOR_REFRESH_SECONDS (1.0/30.0)
+#define PARTICLE_DRAG_THRESHOLD_PIXELS 5.0f
+#define PARTICLE_DRAG_REFERENCE_FPS 60.0
+#define PARTICLE_DRAG_VELOCITY_BLEND 0.30
+#define STRUCTURE_FACTOR_DEFAULT_SAMPLE_CAP 4096
+#define STRUCTURE_FACTOR_HARD_SAMPLE_CAP 8192
+#define STRUCTURE_FACTOR_DEFAULT_REFRESH_SECONDS 0.5
+#define COLOR_DEFAULT_REFRESH_SECONDS (1.0/30.0)
+#define RENDER_REFRESH_MIN_SECONDS (1.0/1000.0)
+#define RENDER_REFRESH_MAX_SECONDS 3600.0
 #if !THREE_D
-#define BOOP_COLOR_REFRESH_SECONDS 0.2
 int nSym = 4;
 #endif
 
@@ -25,19 +45,35 @@ double qxG[qN] = {0};
 float structFactorGraphics[qN][qN] = {0};
 bool structFactorActivated = 0;
 position* positions;
+#if !defined(PLATFORM_WEB)
 pthread_t threads[NUM_THREADS];
 threadArg threadArgs[NUM_THREADS];
+#endif
 
-typedef struct spriteBatch spriteBatch;
-struct spriteBatch{
+#if !THREE_D
+typedef struct circleBatch circleBatch;
+struct circleBatch{
 	Mesh mesh;
 	int capacity;
 	int count;
 	bool loaded;
 };
 
-static spriteBatch particleBatch = {0};
-static spriteBatch arrowBatch = {0};
+static circleBatch particleCircleBatch = {0};
+enum { VELOCITY_ARROW_VERTICES = 18 };
+typedef struct velocityArrowBatch velocityArrowBatch;
+struct velocityArrowBatch{
+	Mesh mesh;
+	int capacity;
+	int count;
+	bool loaded;
+};
+static velocityArrowBatch arrowBatch = {0};
+static Material arrowMaterial = {0};
+static bool arrowMaterialLoaded = false;
+static Material proceduralCircleMaterial = {0};
+static bool proceduralCircleMaterialLoaded = false;
+#endif
 #if THREE_D
 typedef struct sphereBatch sphereBatch;
 struct sphereBatch{
@@ -56,9 +92,6 @@ struct sphereBatch{
 };
 static sphereBatch particleSphereBatch = {0};
 #endif
-static Material spriteMaterial = {0};
-static Texture2D defaultMaterialTexture = {0};
-static bool spriteMaterialLoaded = false;
 static particlePrediction* renderPredictions = NULL;
 static int renderPredictionCapacity = 0;
 #if !THREE_D
@@ -80,27 +113,161 @@ struct particleColorCache{
 
 static particleColorCache colorCache = {0};
 
+#if !defined(PLATFORM_WEB)
 static pthread_mutex_t structMutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t structJobReady = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t structJobFinished = PTHREAD_COND_INITIALIZER;
+#else
+static int structWebNextRow = 0;
+#endif
 static unsigned long structJobGeneration = 0;
+#if !defined(PLATFORM_WEB)
 static int structWorkersRemaining = 0;
+#endif
 static int structSampleCount = 0;
+static int structSampleCapacity = 0;
+static int structRejectedSampleCount = -1;
 static bool structJobRunning = false;
+static bool structJobCancelRequested = false;
 static bool structThreadPoolStopping = false;
 static bool structThreadPoolStarted = false;
-static double lastStructLaunchTime = -STRUCTURE_FACTOR_REFRESH_SECONDS;
+static double lastStructLaunchTime = -STRUCTURE_FACTOR_DEFAULT_REFRESH_SECONDS;
 
 Image image;
 Texture2D texture;
 
-Texture2D circleTexture;
-Texture2D arrowTexture;
-
-#if THREE_D
 static RenderTexture2D sceneTarget = {0};
 static int sceneTargetWidth = 0;
 static int sceneTargetHeight = 0;
+static GuiViewport guiViewport = {0};
+static bool imguiInitialized = false;
+static char pendingRuntimeError[1024] = {0};
+static bool pendingRuntimeFault = false;
+/* Keep the declarative configuration separate from mutable engine working
+ * state.  Recapturing derived runtime values as the user's applied
+ * configuration could make an unrelated slider edit silently reset or
+ * misclassify that state. */
+static SimulationConfig hostAppliedConfig = {0};
+static bool hostAppliedConfigValid = false;
+static GuiLiveState guiLive = {
+	.running = true,
+	.pace_simulation_time = false,
+	.target_simulation_time_rate = 1.0,
+	.show_scene = true,
+	.show_fps = true,
+	.show_help = true,
+	.show_axes = true,
+	.show_boundary = true,
+	.show_selection_outline = true,
+	.color_mode = SIM_COLOR_BY_TYPE,
+	.palette = SIM_PALETTE_PLASMA,
+	.sphere_quality = SIM_SPHERE_QUALITY_AUTO,
+	.target_fps = 144,
+	.scene_supersampling = 1.0,
+	.camera_fov_degrees = 45.0,
+	.structure_factor_sample_cap = STRUCTURE_FACTOR_DEFAULT_SAMPLE_CAP,
+	.structure_factor_refresh_seconds = STRUCTURE_FACTOR_DEFAULT_REFRESH_SECONDS,
+	.color_refresh_seconds = COLOR_DEFAULT_REFRESH_SECONDS,
+	.type0_rgba = 0x4296faffu,
+	.type1_rgba = 0xf29d49ffu,
+	.background_rgba = 0x181a1fffu,
+	.boundary_rgba = 0x8b949effu,
+};
+static GuiMetrics guiMetrics = {0};
+static double lastMetricsWallTime = -1.0;
+static double lastMetricsSimulationTime = 0.0;
+static unsigned long lastMetricsEvents = 0;
+#if !defined(PLATFORM_WEB)
+static int appliedTargetFps = 144;
+#endif
+
+typedef struct simulationPacingState simulationPacingState;
+struct simulationPacingState{
+	bool initialized;
+	bool running;
+	bool enabled;
+	double rate;
+	double wallAnchor;
+	double simulationAnchor;
+	double targetSimulationTime;
+	double lag;
+	double lastSimulationTime;
+};
+
+static simulationPacingState pacingState = {0};
+
+static double sanitizedSimulationPacingRate(void){
+	double rate = guiLive.target_simulation_time_rate;
+	if (!isfinite(rate) || rate <= 0)
+		rate = 1.0;
+	return fmin(fmax(rate, 1e-6), 1e9);
+}
+
+static void synchronizeSimulationPacing(bool running,
+	double currentSimulationTime){
+	const double now = GetTime();
+	const bool enabled = guiLive.pace_simulation_time;
+	const double rate = sanitizedSimulationPacingRate();
+	const double timeTolerance = 64*DBL_EPSILON*
+		(fabs(currentSimulationTime) + fabs(pacingState.lastSimulationTime) + 1);
+	const bool simulationRestarted = pacingState.initialized &&
+		currentSimulationTime < pacingState.lastSimulationTime - timeTolerance;
+	const bool modeChanged = !pacingState.initialized ||
+		pacingState.running != running || pacingState.enabled != enabled ||
+		pacingState.rate != rate || simulationRestarted;
+
+	if (modeChanged || !running){
+		pacingState.wallAnchor = now;
+		pacingState.simulationAnchor = currentSimulationTime;
+	}
+	pacingState.initialized = true;
+	pacingState.running = running;
+	pacingState.enabled = enabled;
+	pacingState.rate = rate;
+	pacingState.lastSimulationTime = currentSimulationTime;
+
+	if (!running || !enabled){
+		pacingState.targetSimulationTime = currentSimulationTime;
+		pacingState.lag = 0;
+		return;
+	}
+	const double wallElapsed = fmax(0.0, now - pacingState.wallAnchor);
+	const double target = pacingState.simulationAnchor + rate*wallElapsed;
+	if (!isfinite(target)){
+		/* A malformed clock/rate must never lock event processing. */
+		pacingState.enabled = false;
+		pacingState.targetSimulationTime = currentSimulationTime;
+		pacingState.lag = 0;
+		return;
+	}
+	pacingState.targetSimulationTime = target;
+	pacingState.lag = fmax(0.0, target - currentSimulationTime);
+}
+
+typedef struct particleDrag particleDrag;
+struct particleDrag{
+	bool active;
+	int index;
+	double lastWallTime;
+	#if THREE_D
+	Vector3 planePoint;
+	Vector3 planeNormal;
+	#endif
+};
+
+typedef struct particlePress particlePress;
+struct particlePress{
+	bool pending;
+	int index;
+	Vector2 screenPoint;
+};
+
+static particleDrag activeParticleDrag = {.index = -1};
+static particlePress pendingParticlePress = {.index = -1};
+#if THREE_D
+static bool camera3DNeedsReset = true;
+#else
+static bool camera2DNeedsReset = true;
 #endif
 
 static particlePrediction graphicsParticlePrediction(const particle* p);
@@ -146,11 +313,12 @@ static int graphicsNeighborCellCoordinate(int center, int cellCount,
 #if THREE_D
 static void resetCamera3D(window* screenWindow);
 static void ensureCamera3D(window* screenWindow);
-static bool ensureSceneTarget3D(int width, int height);
-static void sceneTargetSize3D(int logicalWidth, int logicalHeight,
-	int* pixelWidth, int* pixelHeight);
 static void drawParticlesAndBox3D(state* screenState);
+#else
+static void resetCamera2D(window* screenWindow);
 #endif
+static bool ensureSceneTarget(int width, int height);
+static bool screenPointToScene(Vector2 screenPoint, Vector2* scenePoint);
 
 #if !THREE_D
 static void graphicsPBCXY(double* dx, double* dy){
@@ -158,25 +326,43 @@ static void graphicsPBCXY(double* dx, double* dy){
 }
 #endif
 
+static bool screenPointToScene(Vector2 screenPoint, Vector2* scenePoint){
+	if (scenePoint == NULL || sceneTargetWidth <= 0 || sceneTargetHeight <= 0 ||
+		guiViewport.width <= 0 || guiViewport.height <= 0){
+		return false;
+	}
+	if (screenPoint.x < guiViewport.x || screenPoint.y < guiViewport.y ||
+		screenPoint.x >= guiViewport.x + guiViewport.width ||
+		screenPoint.y >= guiViewport.y + guiViewport.height){
+		return false;
+	}
+	scenePoint->x = (screenPoint.x - guiViewport.x)*
+		(float)sceneTargetWidth/guiViewport.width;
+	scenePoint->y = (screenPoint.y - guiViewport.y)*
+		(float)sceneTargetHeight/guiViewport.height;
+	return true;
+}
+
+static Color colorFromRgba(uint32_t rgba){
+	return (Color){
+		.r = (unsigned char)((rgba >> 24) & 0xffu),
+		.g = (unsigned char)((rgba >> 16) & 0xffu),
+		.b = (unsigned char)((rgba >> 8) & 0xffu),
+		.a = (unsigned char)(rgba & 0xffu),
+	};
+}
+
 int getWhatsUnderClick(window* screenWindow, state* screenState){
 	const Vector2 mouse = GetMousePosition();
-	if ((mouse.x < 0) || (mouse.x >= screenWindow->start) ||
-		(mouse.y < 0) || (mouse.y >= GetScreenHeight())){
+	Vector2 sceneMouse = {0};
+	if (!screenPointToScene(mouse, &sceneMouse)){
 		return -1;
 	}
 
 	#if THREE_D
 	ensureCamera3D(screenWindow);
-	int scenePixelWidth = 0;
-	int scenePixelHeight = 0;
-	sceneTargetSize3D(screenWindow->start, GetScreenHeight(),
-		&scenePixelWidth, &scenePixelHeight);
-	const Vector2 sceneMouse = {
-		mouse.x*scenePixelWidth/(float)screenWindow->start,
-		mouse.y*scenePixelHeight/(float)GetScreenHeight(),
-	};
 	const Ray ray = GetScreenToWorldRayEx(sceneMouse, screenWindow->cam3D,
-		scenePixelWidth, scenePixelHeight);
+		sceneTargetWidth, sceneTargetHeight);
 	double closestDistance = INFINITY;
 	particle* closestParticle = NULL;
 	for (int i = 0; i < N; i++){
@@ -198,7 +384,7 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 	return 0;
 	#else
 	double factor = screenWindow->factor;
-	Vector2 pos = GetScreenToWorld2D(mouse, screenWindow->cam);
+	Vector2 pos = GetScreenToWorld2D(sceneMouse, screenWindow->cam);
 	double x = pos.x/factor;
 	double y = Ly - pos.y/factor; 
 
@@ -242,40 +428,7 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 	#endif
 }
 
-#if THREE_D
-static float boxRadius3D(void){
-	const double diagonalSquared = Lx*Lx + Ly*Ly + Lz*Lz;
-	return (float)(0.5*sqrt(fmax(diagonalSquared, 1.0)));
-}
-
-static void resetCamera3D(window* screenWindow){
-	const Vector3 center = {
-		(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz),
-	};
-	const Vector3 viewDirection = Vector3Normalize((Vector3){1.25f, 0.9f, 1.4f});
-	const float distance = fmaxf(3.0f*boxRadius3D(), 5.0f);
-	screenWindow->cam3D = (Camera3D){
-		.position = Vector3Add(center, Vector3Scale(viewDirection, distance)),
-		.target = center,
-		.up = (Vector3){0.0f, 1.0f, 0.0f},
-		.fovy = 45.0f,
-		.projection = CAMERA_PERSPECTIVE,
-	};
-	screenWindow->cameraBoxLx = Lx;
-	screenWindow->cameraBoxLy = Ly;
-	screenWindow->cameraBoxLz = Lz;
-}
-
-static void ensureCamera3D(window* screenWindow){
-	if ((screenWindow->cameraBoxLx <= 0) ||
-		(fabs(screenWindow->cameraBoxLx - Lx) > 1e-9) ||
-		(fabs(screenWindow->cameraBoxLy - Ly) > 1e-9) ||
-		(fabs(screenWindow->cameraBoxLz - Lz) > 1e-9)){
-		resetCamera3D(screenWindow);
-	}
-}
-
-static bool ensureSceneTarget3D(int width, int height){
+static bool ensureSceneTarget(int width, int height){
 	if ((width <= 0) || (height <= 0)){
 		return false;
 	}
@@ -291,30 +444,63 @@ static bool ensureSceneTarget3D(int width, int height){
 	if (sceneTarget.texture.id == 0){
 		sceneTargetWidth = 0;
 		sceneTargetHeight = 0;
-		TraceLog(LOG_ERROR, "Unable to allocate the 3D scene render target");
+		TraceLog(LOG_ERROR, "Unable to allocate the simulation render target");
 		return false;
 	}
 	sceneTargetWidth = width;
 	sceneTargetHeight = height;
 	SetTextureFilter(sceneTarget.texture, TEXTURE_FILTER_BILINEAR);
+	#if THREE_D
+	camera3DNeedsReset = true;
+	#else
+	camera2DNeedsReset = true;
+	#endif
 	return true;
 }
 
-static void sceneTargetSize3D(int logicalWidth, int logicalHeight,
-	int* pixelWidth, int* pixelHeight){
-	const int screenWidth = GetScreenWidth();
-	const int screenHeight = GetScreenHeight();
-	float scaleX = (screenWidth > 0) ?
-		(float)GetRenderWidth()/(float)screenWidth : 1.0f;
-	float scaleY = (screenHeight > 0) ?
-		(float)GetRenderHeight()/(float)screenHeight : 1.0f;
+#if THREE_D
+static float boxRadius3D(void){
+	const double diagonalSquared = Lx*Lx + Ly*Ly + Lz*Lz;
+	return (float)(0.5*sqrt(fmax(diagonalSquared, 1.0)));
+}
 
-	/* Match Retina/HiDPI framebuffer pixels. On a 1x display, modest
-	 * supersampling keeps thin 3D edges from becoming stair-stepped. */
-	scaleX = fmaxf(scaleX, 1.5f);
-	scaleY = fmaxf(scaleY, 1.5f);
-	*pixelWidth = (int)ceilf(logicalWidth*scaleX);
-	*pixelHeight = (int)ceilf(logicalHeight*scaleY);
+static void resetCamera3D(window* screenWindow){
+	const Vector3 center = {
+		(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz),
+	};
+	const Vector3 viewDirection = Vector3Normalize((Vector3){1.25f, 0.9f, 1.4f});
+	const float radius = boxRadius3D();
+	const float verticalFov = Clamp((float)guiLive.camera_fov_degrees,
+		10.0f, 120.0f)*DEG2RAD;
+	const float aspect = (sceneTargetWidth > 0 && sceneTargetHeight > 0)
+		? (float)sceneTargetWidth/(float)sceneTargetHeight : 1.0f;
+	const float horizontalFov = 2.0f*atanf(tanf(0.5f*verticalFov)*aspect);
+	const float limitingHalfFov = 0.5f*fminf(verticalFov, horizontalFov);
+	/* Fit the complete box bounding sphere in both the horizontal and vertical
+	   field of view.  The previous fixed 3-radius distance looked arbitrary in
+	   tall/narrow dock layouts. */
+	const float distance = fmaxf(
+		1.12f*radius/fmaxf(sinf(limitingHalfFov), 0.08f), 5.0f);
+	screenWindow->cam3D = (Camera3D){
+		.position = Vector3Add(center, Vector3Scale(viewDirection, distance)),
+		.target = center,
+		.up = (Vector3){0.0f, 1.0f, 0.0f},
+		.fovy = 45.0f,
+		.projection = CAMERA_PERSPECTIVE,
+	};
+	screenWindow->cameraBoxLx = Lx;
+	screenWindow->cameraBoxLy = Ly;
+	screenWindow->cameraBoxLz = Lz;
+	camera3DNeedsReset = false;
+}
+
+static void ensureCamera3D(window* screenWindow){
+	if (camera3DNeedsReset || (screenWindow->cameraBoxLx <= 0) ||
+		(fabs(screenWindow->cameraBoxLx - Lx) > 1e-9) ||
+		(fabs(screenWindow->cameraBoxLy - Ly) > 1e-9) ||
+		(fabs(screenWindow->cameraBoxLz - Lz) > 1e-9)){
+		resetCamera3D(screenWindow);
+	}
 }
 
 static void orbitCamera3D(window* screenWindow, Vector2 mouseDelta){
@@ -353,6 +539,25 @@ static void zoomCamera3D(window* screenWindow, float wheel){
 	offset = Vector3Scale(offset, newDistance/oldDistance);
 	screenWindow->cam3D.position = Vector3Add(screenWindow->cam3D.target, offset);
 }
+#else
+static void resetCamera2D(window* screenWindow){
+	if (sceneTargetWidth <= 0 || sceneTargetHeight <= 0 ||
+		!(Lx > 0) || !(Ly > 0)){
+		return;
+	}
+	const double fitX = 0.90*sceneTargetWidth/Lx;
+	const double fitY = 0.90*sceneTargetHeight/Ly;
+	screenWindow->factor = fmax(1e-9, fmin(fitX, fitY));
+	screenWindow->cam = (Camera2D){
+		.offset = {(float)sceneTargetWidth*0.5f,
+			(float)sceneTargetHeight*0.5f},
+		.target = {(float)(0.5*Lx*screenWindow->factor),
+			(float)(0.5*Ly*screenWindow->factor)},
+		.rotation = 0.0f,
+		.zoom = 1.0f,
+	};
+	camera2DNeedsReset = false;
+}
 #endif
 
 static void updateWindowLayout(window* screenWindow, bool rememberWindowedSize){
@@ -368,191 +573,322 @@ static void updateWindowLayout(window* screenWindow, bool rememberWindowedSize){
 	screenWindow->yGUI = height/900.0;
 }
 
-void getInput(window* screenWindow, state* screenState){
-	#if !THREE_D
-	particle* particleUnderClick = screenState->particleUnderClick;
+static void toggleFullscreenWindow(window* screenWindow){
+	const int display = GetCurrentMonitor();
+	if (IsWindowFullscreen()){
+		ToggleFullscreen();
+		SetWindowSize(screenWindow->screenWidth, screenWindow->screenHeight);
+	}
+	else{
+		screenWindow->screenWidth = GetScreenWidth();
+		screenWindow->screenHeight = GetScreenHeight();
+		SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
+		ToggleFullscreen();
+	}
+	updateWindowLayout(screenWindow, false);
+}
+
+#if THREE_D
+static bool pointOnDragPlane(Ray ray, Vector3 point, Vector3 normal,
+	Vector3* result){
+	const float denominator = Vector3DotProduct(ray.direction, normal);
+	if (result == NULL || fabsf(denominator) < 1e-6f){
+		return false;
+	}
+	const float distance = Vector3DotProduct(
+		Vector3Subtract(point, ray.position), normal)/denominator;
+	if (!isfinite(distance)){
+		return false;
+	}
+	*result = Vector3Add(ray.position, Vector3Scale(ray.direction, distance));
+	return true;
+}
+#endif
+
+static bool beginParticleDrag(window* screenWindow, state* screenState,
+	Vector2 sceneMouse){
+	particle* p = screenState->particleUnderClick;
+	if (p == NULL || p->num < 0 || p->num >= N){
+		return false;
+	}
+	if (gui_imgui_simulation_faulted()){
+		return false;
+	}
+
+	/* Fix the 3D pull plane at the particle's current depth.  This makes the
+	   mouse act as a damped spring in a camera-facing plane without ever
+	   teleporting the particle or invalidating pair membership. */
+	#if THREE_D
+	const particlePrediction predicted = graphicsParticlePrediction(p);
+	ensureCamera3D(screenWindow);
+	const Vector3 planePoint = {
+		(float)predicted.x, (float)predicted.y, (float)predicted.z};
+	const Vector3 planeNormal = Vector3Normalize(Vector3Subtract(
+		screenWindow->cam3D.position, screenWindow->cam3D.target));
+	const Ray ray = GetScreenToWorldRayEx(sceneMouse, screenWindow->cam3D,
+		sceneTargetWidth, sceneTargetHeight);
+	Vector3 hit = planePoint;
+	if (!pointOnDragPlane(ray, planePoint, planeNormal, &hit)){
+		return false;
+	}
+	#else
+	if (!(screenWindow->factor > 0) || !isfinite(screenWindow->factor)){
+		return false;
+	}
+	const Vector2 world = GetScreenToWorld2D(sceneMouse, screenWindow->cam);
+	const double pointerX = world.x/screenWindow->factor;
+	const double pointerY = Ly - world.y/screenWindow->factor;
+	if (!isfinite(pointerX) || !isfinite(pointerY)){
+		return false;
+	}
 	#endif
 
+	const double now = GetTime();
+	activeParticleDrag = (particleDrag){
+		.active = true,
+		.index = p->num,
+		/* Give the first update the same impulse as one 60 Hz frame. */
+		.lastWallTime = now - 1.0/PARTICLE_DRAG_REFERENCE_FPS,
+		#if THREE_D
+		.planePoint = planePoint,
+		.planeNormal = planeNormal,
+		#endif
+	};
+	screenState->leftClicked = true;
+	return true;
+}
+
+static void updateParticleDrag(window* screenWindow, Vector2 sceneMouse){
+	if (!activeParticleDrag.active || activeParticleDrag.index < 0 ||
+		activeParticleDrag.index >= N){
+		return;
+	}
+	particle* p = particles + activeParticleDrag.index;
+	double targetX = 0;
+	double targetY = 0;
+	#if THREE_D
+	double targetZ = 0;
+	#endif
+	#if THREE_D
+	const Ray ray = GetScreenToWorldRayEx(sceneMouse, screenWindow->cam3D,
+		sceneTargetWidth, sceneTargetHeight);
+	Vector3 hit;
+	if (!pointOnDragPlane(ray, activeParticleDrag.planePoint,
+		activeParticleDrag.planeNormal, &hit)) return;
+	targetX = hit.x;
+	targetY = hit.y;
+	targetZ = hit.z;
+	#else
+	if (!(screenWindow->factor > 0) || !isfinite(screenWindow->factor)) return;
+	const Vector2 world = GetScreenToWorld2D(sceneMouse, screenWindow->cam);
+	targetX = world.x/screenWindow->factor;
+	targetY = Ly - world.y/screenWindow->factor;
+	#endif
+	if (!isfinite(targetX) || !isfinite(targetY)
+		#if THREE_D
+		|| !isfinite(targetZ)
+		#endif
+	) return;
+
+	#if (STRESS || HEAT)
+	beginTransportVelocityBatch();
+	#endif
+	freeFly(p);
+	const double oldVx = p->vx;
+	const double oldVy = p->vy;
+	#if THREE_D
+	const double oldVz = p->vz;
+	#else
+	const double oldVz = 0;
+	#endif
+
+	double dx = targetX - p->x;
+	double dy = targetY - p->y;
+	#if THREE_D
+	double dz = targetZ - p->z;
+	PBC(&dx, &dy, &dz);
+	#else
+	PBC(&dx, &dy);
+	const double dz = 0;
+	#endif
+	const double now = GetTime();
+	double wallDt = now - activeParticleDrag.lastWallTime;
+	if (!isfinite(wallDt) || wallDt <= 0){
+		wallDt = 1.0/PARTICLE_DRAG_REFERENCE_FPS;
+	}
+	/* Clamp long UI stalls: resuming the window must not produce an enormous
+	   one-frame kick.  The exponential form exactly reproduces the old 0.3
+	   spring/damping blend at 60 Hz and is stable at other frame rates. */
+	wallDt = fmin(wallDt, 0.05);
+	const double response = 1.0 - pow(1.0 - PARTICLE_DRAG_VELOCITY_BLEND,
+		wallDt*PARTICLE_DRAG_REFERENCE_FPS);
+	p->vx += response*(dx - p->vx);
+	p->vy += response*(dy - p->vy);
+	#if THREE_D
+	p->vz += response*(dz - p->vz);
+	#endif
+	activeParticleDrag.lastWallTime = now;
+
+	#if (STRESS || HEAT)
+	recordTransportVelocityChange(p, oldVx, oldVy, oldVz);
+	#else
+	(void)oldVx;
+	(void)oldVy;
+	(void)oldVz;
+	(void)dz;
+	#endif
+	/* A velocity impulse invalidates predictions but leaves coordinates, cell
+	   links, potential membership, and MSD continuity intact. */
+	p->coll++;
+	removeEventFromQueue(eventList[p->num]);
+	removeEventFromQueue(eventList[N + p->num]);
+	crossingEvent(p->num);
+	collisionEvent(p->num);
+	physicalQ();
+	invalidateParticleColorCache();
+}
+
+static void finishParticleDrag(state* screenState){
+	if (!activeParticleDrag.active || activeParticleDrag.index < 0 ||
+		activeParticleDrag.index >= N){
+		activeParticleDrag = (particleDrag){.index = -1};
+		return;
+	}
+	particle* p = particles + activeParticleDrag.index;
+	screenState->particleUnderClick = p;
+	screenState->selected = true;
+	screenState->leftClicked = false;
+	activeParticleDrag = (particleDrag){.index = -1};
+}
+
+static void clearPendingParticlePress(void){
+	pendingParticlePress = (particlePress){.index = -1};
+}
+
+static bool pendingParticlePressMoved(Vector2 currentScreen){
+	const float dx = currentScreen.x - pendingParticlePress.screenPoint.x;
+	const float dy = currentScreen.y - pendingParticlePress.screenPoint.y;
+	const float thresholdSquared = PARTICLE_DRAG_THRESHOLD_PIXELS*
+		PARTICLE_DRAG_THRESHOLD_PIXELS;
+	return dx*dx + dy*dy > thresholdSquared;
+}
+
+static bool startPendingParticleDrag(window* screenWindow, state* screenState,
+	Vector2 currentScreen, bool finishImmediately){
+	const int pendingIndex = pendingParticlePress.index;
+	Vector2 dragMouse = {0};
+	clearPendingParticlePress();
+	if (!screenPointToScene(currentScreen, &dragMouse) ||
+		screenState->particleUnderClick == NULL ||
+		screenState->particleUnderClick->num != pendingIndex ||
+		!beginParticleDrag(screenWindow, screenState, dragMouse)){
+		return false;
+	}
+	updateParticleDrag(screenWindow, dragMouse);
+	if (finishImmediately){
+		finishParticleDrag(screenState);
+	}
+	return true;
+}
+
+
+void getInput(window* screenWindow, state* screenState){
 	if (IsWindowResized()){
 		updateWindowLayout(screenWindow, !IsWindowFullscreen());
 	}
 
-	if (IsKeyPressed(KEY_F)){
-		const int display = GetCurrentMonitor();
-		if (IsWindowFullscreen()){
-			ToggleFullscreen();
-			SetWindowSize(screenWindow->screenWidth,
-				screenWindow->screenHeight);
-		}
-		else{
-			screenWindow->screenWidth = GetScreenWidth();
-			screenWindow->screenHeight = GetScreenHeight();
-			SetWindowSize(GetMonitorWidth(display), GetMonitorHeight(display));
-			ToggleFullscreen();
-		}
-		updateWindowLayout(screenWindow, false);
-	}
+	Vector2 sceneMouse = {0};
+	const bool mouseInScene = guiViewport.hovered &&
+		screenPointToScene(GetMousePosition(), &sceneMouse);
 
 	#if THREE_D
 	ensureCamera3D(screenWindow);
-	const Vector2 mouse = GetMousePosition();
-	const bool mouseInScene = (mouse.x >= 0) && (mouse.x < screenWindow->start) &&
-		(mouse.y >= 0) && (mouse.y < GetScreenHeight());
-	const float wheel = GetMouseWheelMove();
-	if (mouseInScene && (wheel != 0)){
-		zoomCamera3D(screenWindow, wheel);
-	}
-	if (mouseInScene && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
-		orbitCamera3D(screenWindow, GetMouseDelta());
-	}
-	if (IsKeyPressed(KEY_R)){
-		resetCamera3D(screenWindow);
-	}
-	if (mouseInScene && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
-		const int result = getWhatsUnderClick(screenWindow, screenState);
-		screenState->selected = (result == 1);
-		screenState->leftClicked = (result == 1);
-		if (result != 1){
-			screenState->particleUnderClick = NULL;
+	if (mouseInScene){
+		const float wheel = GetMouseWheelMove();
+		if (wheel != 0){
+			zoomCamera3D(screenWindow, wheel);
 		}
-	}
-	if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)){
-		screenState->leftClicked = 0;
+		if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
+			const Vector2 mouseDelta = GetMouseDelta();
+			const Vector2 sceneDelta = {
+				mouseDelta.x*(float)sceneTargetWidth/guiViewport.width,
+				mouseDelta.y*(float)sceneTargetHeight/guiViewport.height,
+			};
+			orbitCamera3D(screenWindow, sceneDelta);
+		}
 	}
 	#else
-	float wheel = GetMouseWheelMove();
-	if (wheel != 0){
-		Vector2 mouseWorldPos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
-		screenWindow->cam.offset = GetMousePosition();
-		screenWindow->cam.target = mouseWorldPos;
-
-		// evil trick
-		double speed = 0.0625f*100/Ly;
-		screenWindow->cam.zoom += wheel * speed*(screenWindow->cam.zoom*screenWindow->cam.zoom);
-		if (screenWindow->cam.zoom < 0.2)
-			screenWindow->cam.zoom = 0.2;
-		if (screenWindow->cam.zoom > 10)
-			screenWindow->cam.zoom = 10;
-	}
-
-	if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
-		Vector2 delta = GetMouseDelta();
-		float scale = -1./screenWindow->cam.zoom;
-		delta.x = delta.x*scale;
-		delta.y = delta.y*scale;
-		screenWindow->cam.target.x += delta.x;
-		screenWindow->cam.target.y += delta.y;
-	}
-
-	if (IsKeyDown(KEY_R)){
-		screenWindow->cam.zoom = 1;
-		screenWindow->cam.offset = (Vector2){0, 0};
-		screenWindow->cam.target = (Vector2){0, 0};
-	}
-	if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)){
-		
-		if (screenState->leftClicked > 0){
-			freeFly(particleUnderClick);
-			invalidateParticleColorCache();
-			Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
-
-			particleUnderClick->coll++;
-		
-			double x = pos.x/screenWindow->factor;
-			double y = Ly - pos.y/screenWindow->factor; 
-			double dx = (particleUnderClick->x - x);
-			double dy = (particleUnderClick->y - y);
-			graphicsPBCXY(&dx, &dy);
-
-			particleUnderClick->vx -= dx*0.3 + 0.3*particleUnderClick->vx;
-
-			particleUnderClick->vy -= dy*0.3 + 0.3*particleUnderClick->vy;
-
-			
-			removeEventFromQueue(eventList[particleUnderClick->num]);
-			crossingEvent(particleUnderClick->num);
-
-			removeEventFromQueue(eventList[N + particleUnderClick->num]);
-			collisionEvent(particleUnderClick->num);
+	if (mouseInScene){
+		const float wheel = GetMouseWheelMove();
+		if (wheel != 0){
+			const Vector2 mouseWorldPos =
+				GetScreenToWorld2D(sceneMouse, screenWindow->cam);
+			screenWindow->cam.offset = sceneMouse;
+			screenWindow->cam.target = mouseWorldPos;
+			const double speed = 0.0625*100.0/Ly;
+			screenWindow->cam.zoom += (float)(wheel*speed*
+				screenWindow->cam.zoom*screenWindow->cam.zoom);
+			screenWindow->cam.zoom = Clamp(screenWindow->cam.zoom, 0.2f, 10.0f);
 		}
-		else{
-			int resultat = getWhatsUnderClick(screenWindow, screenState);
-			if (resultat == 2){
-				screenState->wallMoving = true;
-				Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
-				if (Lx < pos.x/screenWindow->factor)
-					Lx = pos.x/screenWindow->factor;
-			}
-			if (resultat == 3){
-				screenState->wallMoving = true;
-				Vector2 pos = GetScreenToWorld2D(GetMousePosition(), screenWindow->cam);
-				if (Ly < (Ly - pos.y/screenWindow->factor)){
-					Ly = (Ly - pos.y/screenWindow->factor);
-					screenWindow->cam.target.y += fabs(pos.y);
-				}
-			}
-			if (resultat == 1){
-				GuiLock();
-				screenState->leftClicked = 1;
-				screenState->selected = 1;
-			}
-			else if (resultat == 0){
-				screenState->selected = 0;
-			}
-		}
-	}
-	else{
-		GuiUnlock();
-		screenState->leftClicked = 0;
-		if (screenState->wallMoving){
-			screenState->wallMoving = false;
-			invalidateParticleColorCache();
-			for(int i = 0; i < N; i++){
-				particle* p = particles + i;
-				freeFly(p);
-				if (addWell){
-					free(p->particlesInWell);
-				}
-				
-			}
-			free(cellList);
-			boxConstantHelper();
-			cellListInit();
-			if (addWell)
-				pairsInit();
-			
-			for (int i = 0; i < N; i++){
-				particle* p = particles + i;
-				removeEventFromQueue(eventList[N + p->num]);
-				removeEventFromQueue(eventList[p->num]);
-				crossingEvent(p->num);
-				collisionEvent(p->num);
-			}
+		if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)){
+			Vector2 delta = GetMouseDelta();
+			delta.x *= (float)sceneTargetWidth/guiViewport.width;
+			delta.y *= (float)sceneTargetHeight/guiViewport.height;
+			const float scale = -1.0f/screenWindow->cam.zoom;
+			screenWindow->cam.target.x += delta.x*scale;
+			screenWindow->cam.target.y += delta.y*scale;
 		}
 	}
 	#endif
 
-	if (IsKeyPressed(KEY_SPACE) && !screenState->spacePressed){
-		screenState->spacePressed = true;
-		screenState->running = !screenState->running;
+	if (activeParticleDrag.active){
+		Vector2 dragMouse = {0};
+		if (gui_imgui_simulation_faulted()){
+			finishParticleDrag(screenState);
+		}
+		else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+			screenPointToScene(GetMousePosition(), &dragMouse)){
+			updateParticleDrag(screenWindow, dragMouse);
+		}
+		if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)){
+			finishParticleDrag(screenState);
+		}
 	}
-	
-	if (IsKeyReleased(KEY_SPACE)){
-		screenState->spacePressed = false;
+	else if (pendingParticlePress.pending){
+		const Vector2 currentScreen = GetMousePosition();
+		const bool moved = pendingParticlePressMoved(currentScreen);
+		if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)){
+			if (moved){
+				startPendingParticleDrag(screenWindow, screenState,
+					currentScreen, true);
+			}
+			else{
+				clearPendingParticlePress();
+			}
+		}
+		else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && moved){
+			startPendingParticleDrag(screenWindow, screenState,
+				currentScreen, false);
+		}
 	}
-	if (IsKeyReleased(KEY_S)){
-		saveSnapshotGraphics();
+	else if (mouseInScene && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)){
+		const int result = getWhatsUnderClick(screenWindow, screenState);
+		screenState->selected = (result == 1);
+		screenState->leftClicked = false;
+		if (result != 1){
+			screenState->particleUnderClick = NULL;
+		}
+		else if (!gui_imgui_simulation_faulted()){
+			pendingParticlePress = (particlePress){
+				.pending = true,
+				.index = screenState->particleUnderClick->num,
+				.screenPoint = GetMousePosition(),
+			};
+		}
 	}
+
 }
 
-void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue){
-	const float oldFloatValue = (float)*value;
-	float floatValue = oldFloatValue;
-	GuiSliderBar(bounds, textLeft, textRight, &floatValue, minValue, maxValue);
-	if (floatValue != oldFloatValue){
-		*value = (double)floatValue;
-	}
-}
 
 static void invalidateParticleColorCache(void){
 	colorCache.valid = false;
@@ -569,10 +905,13 @@ static particlePrediction graphicsParticlePrediction(const particle* p){
 	else{
 		prediction = predictFreeFlyNormal(p, t);
 	}
-	PBCpostX(&prediction.x);
-	PBCpostY(&prediction.y);
+	if (!addWallx && !addCircularWall)
+		PBCpostX(&prediction.x);
+	if (!addWally && !addCircularWall)
+		PBCpostY(&prediction.y);
 	#if THREE_D
-	PBCpostZ(&prediction.z);
+	if (!addCircularWall)
+		PBCpostZ(&prediction.z);
 	#endif
 	return prediction;
 }
@@ -659,18 +998,27 @@ static bool ensureColorFunctionArray(state* screenState){
 	return true;
 }
 
+static double validatedRenderRefreshSeconds(double requested, double fallback){
+	if (!isfinite(requested) || (requested <= 0)){
+		requested = fallback;
+	}
+	if (requested < RENDER_REFRESH_MIN_SECONDS){
+		return RENDER_REFRESH_MIN_SECONDS;
+	}
+	if (requested > RENDER_REFRESH_MAX_SECONDS){
+		return RENDER_REFRESH_MAX_SECONDS;
+	}
+	return requested;
+}
+
 static bool refreshParticleColorCache(state* screenState){
 	if ((screenState->colorParam2 == 0) || !ensureColorFunctionArray(screenState)){
 		return false;
 	}
 
 	const double now = GetTime();
-	double refreshInterval = COLOR_REFRESH_SECONDS;
-	#if !THREE_D
-	if ((screenState->colorParam2 == 3) || (screenState->colorParam2 == 4)){
-		refreshInterval = BOOP_COLOR_REFRESH_SECONDS;
-	}
-	#endif
+	const double refreshInterval = validatedRenderRefreshSeconds(
+		guiLive.color_refresh_seconds, COLOR_DEFAULT_REFRESH_SECONDS);
 	const bool configurationChanged = !colorCache.valid ||
 		(colorCache.mode != screenState->colorParam2) ||
 		(colorCache.particleCount != N);
@@ -709,14 +1057,82 @@ static bool refreshParticleColorCache(state* screenState){
 	return true;
 }
 
-static void unloadSpriteBatch(spriteBatch* batch){
+#if !THREE_D
+/* A signed-distance circle keeps the dense 2D path to one mesh draw without
+ * shipping or magnifying a bitmap image.  fwidth provides approximately one
+ * physical pixel of antialiasing at every camera zoom and framebuffer DPI. */
+static const char* proceduralCircleFragmentShader2D =
+	#if defined(PLATFORM_WEB)
+	"#version 300 es\n"
+	"precision highp float;\n"
+	#else
+	"#version 330\n"
+	#endif
+	"in vec2 fragTexCoord;\n"
+	"in vec4 fragColor;\n"
+	"uniform vec4 colDiffuse;\n"
+	"uniform float circleEdgeScale;\n"
+	"out vec4 finalColor;\n"
+	"void main(void)\n"
+	"{\n"
+	"    vec2 centered = 2.0*fragTexCoord - vec2(1.0);\n"
+	"    float distanceSquared = dot(centered, centered);\n"
+	"    float edgeWidth = max(circleEdgeScale*fwidth(distanceSquared), 0.002);\n"
+	"    float coverage = 1.0 - smoothstep(1.0-edgeWidth, 1.0+edgeWidth,\n"
+	"                                      distanceSquared);\n"
+	"    if (coverage <= 0.0) discard;\n"
+	"    vec4 color = fragColor*colDiffuse;\n"
+	"    finalColor = vec4(color.rgb, color.a*coverage);\n"
+	"}\n";
+
+static bool loadProceduralCircleMaterial(void){
+	Shader shader = LoadShaderFromMemory(NULL,
+		proceduralCircleFragmentShader2D);
+	/* A failed raylib shader load can yield its default shader.  The unique
+	 * uniform distinguishes that fallback from the program requested above. */
+	if ((shader.id == 0) || (shader.locs == NULL)){
+		if (shader.id != 0) UnloadShader(shader);
+		TraceLog(LOG_WARNING,
+			"Procedural particle shader unavailable; using immediate circles");
+		return false;
+	}
+	const int edgeScaleLocation = GetShaderLocation(shader, "circleEdgeScale");
+	if (edgeScaleLocation < 0){
+		/* LoadShaderFromMemory returns the shared default program on a compile
+		 * failure, but with a newly allocated location table.  Do not ask
+		 * UnloadShader() to unload that shared program; release only its table. */
+		if (arrowMaterialLoaded && shader.id == arrowMaterial.shader.id)
+			MemFree(shader.locs);
+		else
+			UnloadShader(shader);
+		TraceLog(LOG_WARNING,
+			"Procedural particle shader unavailable; using immediate circles");
+		return false;
+	}
+
+	Material material = LoadMaterialDefault();
+	if (material.maps == NULL){
+		UnloadShader(shader);
+		TraceLog(LOG_WARNING,
+			"Procedural particle material unavailable; using immediate circles");
+		return false;
+	}
+	material.shader = shader;
+	const float edgeScale = 1.0f;
+	SetShaderValue(shader, edgeScaleLocation, &edgeScale, SHADER_UNIFORM_FLOAT);
+	proceduralCircleMaterial = material;
+	proceduralCircleMaterialLoaded = true;
+	return true;
+}
+
+static void unloadCircleBatch(circleBatch* batch){
 	if (batch->loaded){
 		UnloadMesh(batch->mesh);
 	}
-	*batch = (spriteBatch){0};
+	*batch = (circleBatch){0};
 }
 
-static bool loadSpriteBatch(spriteBatch* batch, int capacity){
+static bool loadCircleBatch(circleBatch* batch, int capacity){
 	if (capacity <= 0){
 		return false;
 	}
@@ -740,8 +1156,8 @@ static bool loadSpriteBatch(spriteBatch* batch, int capacity){
 		0.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f,
 		0.0f, 0.0f,  1.0f, 1.0f,  1.0f, 0.0f,
 	};
-	for (int sprite = 0; sprite < capacity; sprite++){
-		memcpy(mesh.texcoords + (size_t)sprite*12, quadUV, sizeof(quadUV));
+	for (int circle = 0; circle < capacity; circle++){
+		memcpy(mesh.texcoords + (size_t)circle*12, quadUV, sizeof(quadUV));
 	}
 	memset(mesh.colors, 255, vertexCount*4*sizeof(unsigned char));
 
@@ -753,15 +1169,16 @@ static bool loadSpriteBatch(spriteBatch* batch, int capacity){
 	return true;
 }
 
-static bool ensureSpriteBatch(spriteBatch* batch, int capacity){
+static bool ensureCircleBatch(circleBatch* batch, int capacity){
 	if (batch->loaded && (batch->capacity == capacity)){
 		return true;
 	}
-	unloadSpriteBatch(batch);
-	return loadSpriteBatch(batch, capacity);
+	unloadCircleBatch(batch);
+	return loadCircleBatch(batch, capacity);
 }
 
-static void setBatchVertex(spriteBatch* batch, int vertex, float x, float y, Color color){
+static void setCircleBatchVertex(circleBatch* batch, int vertex,
+	float x, float y, Color color){
 	float* position = batch->mesh.vertices + (size_t)vertex*3;
 	position[0] = x;
 	position[1] = y;
@@ -774,7 +1191,8 @@ static void setBatchVertex(spriteBatch* batch, int vertex, float x, float y, Col
 	vertexColor[3] = color.a;
 }
 
-static bool appendBatchQuad(spriteBatch* batch, const Vector2 corners[4], Color color){
+static bool appendCircleQuad(circleBatch* batch, const Vector2 corners[4],
+	Color color){
 	if (!batch->loaded || (batch->count >= batch->capacity)){
 		return false;
 	}
@@ -783,13 +1201,13 @@ static bool appendBatchQuad(spriteBatch* batch, const Vector2 corners[4], Color 
 	static const int cornerOrder[6] = {0, 1, 2, 0, 2, 3};
 	for (int i = 0; i < 6; i++){
 		const Vector2 corner = corners[cornerOrder[i]];
-		setBatchVertex(batch, firstVertex + i, corner.x, corner.y, color);
+		setCircleBatchVertex(batch, firstVertex + i, corner.x, corner.y, color);
 	}
 	batch->count++;
 	return true;
 }
 
-static void drawSpriteBatch(spriteBatch* batch, Texture2D texture){
+static void drawCircleBatch(circleBatch* batch){
 	if (!batch->loaded || (batch->count == 0)){
 		return;
 	}
@@ -803,13 +1221,192 @@ static void drawSpriteBatch(spriteBatch* batch, Texture2D texture){
 	Mesh visibleMesh = batch->mesh;
 	visibleMesh.vertexCount = vertexCount;
 	visibleMesh.triangleCount = batch->count*2;
-	spriteMaterial.maps[MATERIAL_MAP_DIFFUSE].texture = texture;
-	DrawMesh(visibleMesh, spriteMaterial, MatrixIdentity());
+	DrawMesh(visibleMesh, proceduralCircleMaterial, MatrixIdentity());
 }
+
+typedef struct velocityArrowShape2D velocityArrowShape2D;
+struct velocityArrowShape2D{
+	Vector2 start;
+	Vector2 shaftEnd;
+	Vector2 tip;
+	Vector2 normal;
+	float outerShaftHalfWidth;
+	float outerHeadHalfWidth;
+	float innerShaftHalfWidth;
+	float innerHeadHalfWidth;
+};
+
+static void unloadVelocityArrowBatch(velocityArrowBatch* batch){
+	if (batch->loaded){
+		UnloadMesh(batch->mesh);
+	}
+	*batch = (velocityArrowBatch){0};
+}
+
+static bool loadVelocityArrowBatch(velocityArrowBatch* batch, int capacity){
+	if (capacity <= 0){
+		return false;
+	}
+	const size_t vertexCount = (size_t)capacity*VELOCITY_ARROW_VERTICES;
+	Mesh mesh = {0};
+	mesh.vertexCount = (int)vertexCount;
+	mesh.triangleCount = (int)(vertexCount/3);
+	mesh.vertices = calloc(vertexCount*3, sizeof(float));
+	mesh.colors = malloc(vertexCount*4*sizeof(unsigned char));
+	if (mesh.vertices == NULL || mesh.colors == NULL){
+		free(mesh.vertices);
+		free(mesh.colors);
+		TraceLog(LOG_ERROR, "Unable to allocate the velocity-arrow render batch");
+		return false;
+	}
+	memset(mesh.colors, 255, vertexCount*4*sizeof(unsigned char));
+	UploadMesh(&mesh, true);
+	batch->mesh = mesh;
+	batch->capacity = capacity;
+	batch->count = 0;
+	batch->loaded = true;
+	return true;
+}
+
+static bool ensureVelocityArrowBatch(velocityArrowBatch* batch, int capacity){
+	if (batch->loaded && batch->capacity == capacity){
+		return true;
+	}
+	unloadVelocityArrowBatch(batch);
+	return loadVelocityArrowBatch(batch, capacity);
+}
+
+static void setVelocityArrowVertex(velocityArrowBatch* batch, int vertex,
+	Vector2 point, Color color){
+	float* position = batch->mesh.vertices + (size_t)vertex*3;
+	position[0] = point.x;
+	position[1] = point.y;
+	position[2] = 0;
+	unsigned char* vertexColor = batch->mesh.colors + (size_t)vertex*4;
+	vertexColor[0] = color.r;
+	vertexColor[1] = color.g;
+	vertexColor[2] = color.b;
+	vertexColor[3] = color.a;
+}
+
+static void appendVelocityArrowTriangle(velocityArrowBatch* batch, int* vertex,
+	Vector2 a, Vector2 b, Vector2 c, Color color){
+	setVelocityArrowVertex(batch, (*vertex)++, a, color);
+	setVelocityArrowVertex(batch, (*vertex)++, b, color);
+	setVelocityArrowVertex(batch, (*vertex)++, c, color);
+}
+
+static bool velocityArrowShape(double vx, double vy, Vector2 center,
+	float radius, float zoom, velocityArrowShape2D* shape){
+	const double speedSquared = vx*vx + vy*vy;
+	if (shape == NULL || !isfinite(speedSquared) || speedSquared <= 1e-20){
+		return false;
+	}
+	const double speed = sqrt(speedSquared);
+	const Vector2 direction = {
+		(float)(vx/speed),
+		(float)(-vy/speed),
+	};
+	const float safeZoom = fmaxf(zoom, 0.01f);
+	const float lengthScale = Clamp(1.55f + 0.70f*(float)log1p(speed),
+		1.55f, 4.75f);
+	const float length = fmaxf(radius*lengthScale, 8.0f/safeZoom);
+	const float headLength = fminf(0.36f*length,
+		fmaxf(1.05f*radius, 4.0f/safeZoom));
+	const Vector2 normal = {-direction.y, direction.x};
+	shape->start = Vector2Subtract(center,
+		Vector2Scale(direction, 0.12f*radius));
+	shape->tip = Vector2Add(center, Vector2Scale(direction, length));
+	shape->shaftEnd = Vector2Subtract(shape->tip,
+		Vector2Scale(direction, headLength));
+	shape->normal = normal;
+	shape->outerShaftHalfWidth = fmaxf(0.10f*radius, 0.80f/safeZoom);
+	shape->outerHeadHalfWidth = fmaxf(0.34f*radius, 2.40f/safeZoom);
+	shape->innerShaftHalfWidth = 0.56f*shape->outerShaftHalfWidth;
+	shape->innerHeadHalfWidth = 0.68f*shape->outerHeadHalfWidth;
+	return true;
+}
+
+static void appendVelocityArrowLayer(velocityArrowBatch* batch, int* vertex,
+	const velocityArrowShape2D* shape, float shaftHalfWidth,
+	float headHalfWidth, Color color){
+	const Vector2 shaftOffset = Vector2Scale(shape->normal, shaftHalfWidth);
+	const Vector2 headOffset = Vector2Scale(shape->normal, headHalfWidth);
+	const Vector2 startMinus = Vector2Subtract(shape->start, shaftOffset);
+	const Vector2 startPlus = Vector2Add(shape->start, shaftOffset);
+	const Vector2 endMinus = Vector2Subtract(shape->shaftEnd, shaftOffset);
+	const Vector2 endPlus = Vector2Add(shape->shaftEnd, shaftOffset);
+	appendVelocityArrowTriangle(batch, vertex,
+		startMinus, startPlus, endPlus, color);
+	appendVelocityArrowTriangle(batch, vertex,
+		startMinus, endPlus, endMinus, color);
+	appendVelocityArrowTriangle(batch, vertex,
+		Vector2Subtract(shape->shaftEnd, headOffset),
+		Vector2Add(shape->shaftEnd, headOffset), shape->tip, color);
+}
+
+static bool appendVelocityArrow2D(velocityArrowBatch* batch, double vx,
+	double vy, Vector2 center, float radius, float zoom){
+	if (!batch->loaded || batch->count >= batch->capacity){
+		return false;
+	}
+	velocityArrowShape2D shape;
+	if (!velocityArrowShape(vx, vy, center, radius, zoom, &shape)){
+		return false;
+	}
+	int vertex = batch->count*VELOCITY_ARROW_VERTICES;
+	const Color outline = {236, 239, 244, 235};
+	const Color fill = {255, 183, 45, 255};
+	appendVelocityArrowLayer(batch, &vertex, &shape,
+		shape.outerShaftHalfWidth, shape.outerHeadHalfWidth, outline);
+	appendVelocityArrowLayer(batch, &vertex, &shape,
+		shape.innerShaftHalfWidth, shape.innerHeadHalfWidth, fill);
+	batch->count++;
+	return true;
+}
+
+static void drawVelocityArrow2DImmediate(double vx, double vy, Vector2 center,
+	float radius, float zoom){
+	velocityArrowShape2D shape;
+	if (!velocityArrowShape(vx, vy, center, radius, zoom, &shape)) return;
+	const Color outline = {236, 239, 244, 235};
+	const Color fill = {255, 183, 45, 255};
+	const Vector2 outerHead = Vector2Scale(shape.normal,
+		shape.outerHeadHalfWidth);
+	const Vector2 innerHead = Vector2Scale(shape.normal,
+		shape.innerHeadHalfWidth);
+	DrawLineEx(shape.start, shape.shaftEnd,
+		2.0f*shape.outerShaftHalfWidth, outline);
+	DrawTriangle(Vector2Subtract(shape.shaftEnd, outerHead),
+		Vector2Add(shape.shaftEnd, outerHead), shape.tip, outline);
+	DrawLineEx(shape.start, shape.shaftEnd,
+		2.0f*shape.innerShaftHalfWidth, fill);
+	DrawTriangle(Vector2Subtract(shape.shaftEnd, innerHead),
+		Vector2Add(shape.shaftEnd, innerHead), shape.tip, fill);
+}
+
+static void drawVelocityArrowBatch(velocityArrowBatch* batch){
+	if (!batch->loaded || batch->count == 0) return;
+	const int vertexCount = batch->count*VELOCITY_ARROW_VERTICES;
+	UpdateMeshBuffer(batch->mesh, 0, batch->mesh.vertices,
+		vertexCount*3*(int)sizeof(float), 0);
+	UpdateMeshBuffer(batch->mesh, 3, batch->mesh.colors,
+		vertexCount*4*(int)sizeof(unsigned char), 0);
+	Mesh visibleMesh = batch->mesh;
+	visibleMesh.vertexCount = vertexCount;
+	visibleMesh.triangleCount = vertexCount/3;
+	DrawMesh(visibleMesh, arrowMaterial, MatrixIdentity());
+}
+#endif
 
 #if THREE_D
 static const char* sphereVertexShader3D =
+	#if defined(PLATFORM_WEB)
+	"#version 300 es\n"
+	"precision highp float;\n"
+	#else
 	"#version 330\n"
+	#endif
 	"layout(location = 0) in vec3 vertexPosition;\n"
 	"layout(location = 2) in vec3 vertexNormal;\n"
 	"layout(location = 9) in mat4 instanceTransform;\n"
@@ -830,7 +1427,12 @@ static const char* sphereVertexShader3D =
 	"}\n";
 
 static const char* sphereFragmentShader3D =
+	#if defined(PLATFORM_WEB)
+	"#version 300 es\n"
+	"precision highp float;\n"
+	#else
 	"#version 330\n"
+	#endif
 	"in vec3 sphereNormal;\n"
 	"in vec4 sphereColor;\n"
 	"out vec4 finalColor;\n"
@@ -841,11 +1443,24 @@ static const char* sphereFragmentShader3D =
 	"    vec3 fillLight = normalize(vec3(0.55, -0.20, -0.80));\n"
 	"    float key = max(dot(normal, keyLight), 0.0);\n"
 	"    float fill = max(dot(normal, fillLight), 0.0);\n"
-	"    float brightness = min(1.0, 0.30 + 0.62*key + 0.12*fill);\n"
+	"    float brightness = min(1.0, 0.42 + 0.50*key + 0.10*fill);\n"
 	"    finalColor = vec4(sphereColor.rgb*brightness, sphereColor.a);\n"
 	"}\n";
 
 static void sphereResolution3D(int particleCount, int* rings, int* slices){
+	switch (guiLive.sphere_quality){
+		case SIM_SPHERE_QUALITY_LOW:
+			*rings = 4; *slices = 6; return;
+		case SIM_SPHERE_QUALITY_MEDIUM:
+			*rings = 8; *slices = 12; return;
+		case SIM_SPHERE_QUALITY_HIGH:
+			*rings = 16; *slices = 24; return;
+		case SIM_SPHERE_QUALITY_ULTRA:
+			*rings = 24; *slices = 36; return;
+		case SIM_SPHERE_QUALITY_AUTO:
+		default:
+			break;
+	}
 	/* Keep the total triangle budget roughly constant as systems get larger. */
 	if (particleCount <= 2500){
 		*rings = 16;
@@ -995,10 +1610,12 @@ static void drawSphereBatch(sphereBatch* batch){
 }
 #endif
 
+#if !THREE_D
 static bool particleIntersectsViewport(float left, float top, float right, float bottom, Rectangle viewport){
 	return !((right < viewport.x) || (left > viewport.x + viewport.width) ||
 		(bottom < viewport.y) || (top > viewport.y + viewport.height));
 }
+#endif
 
 static int structureFactorPopulation(void){
 	int population = N - (int)(N*fractionSmallN);
@@ -1007,23 +1624,49 @@ static int structureFactorPopulation(void){
 	return population;
 }
 
+static int validatedStructureFactorSampleCap(void){
+	int cap = guiLive.structure_factor_sample_cap;
+	if (cap <= 0){
+		cap = STRUCTURE_FACTOR_DEFAULT_SAMPLE_CAP;
+	}
+	if (cap > STRUCTURE_FACTOR_HARD_SAMPLE_CAP){
+		cap = STRUCTURE_FACTOR_HARD_SAMPLE_CAP;
+	}
+	return cap;
+}
+
 static int desiredStructureFactorSampleCount(void){
 	const int population = structureFactorPopulation();
-	return (population < STRUCTURE_FACTOR_MAX_SAMPLES) ? population : STRUCTURE_FACTOR_MAX_SAMPLES;
+	const int sampleCap = validatedStructureFactorSampleCap();
+	return (population < sampleCap) ? population : sampleCap;
 }
 
 static bool allocateStructureFactorPositions(void){
-	structSampleCount = desiredStructureFactorSampleCount();
-	if (structSampleCount == 0){
-		positions = NULL;
-		return false;
-	}
-	positions = calloc((size_t)structSampleCount, sizeof(position));
-	if (positions == NULL){
+	const int desiredCount = desiredStructureFactorSampleCount();
+	if (desiredCount == 0){
 		structSampleCount = 0;
-		TraceLog(LOG_ERROR, "Unable to allocate the structure-factor sample");
 		return false;
 	}
+	if ((positions != NULL) && (desiredCount <= structSampleCapacity)){
+		structSampleCount = desiredCount;
+		structRejectedSampleCount = -1;
+		return true;
+	}
+	if (desiredCount == structRejectedSampleCount){
+		return false;
+	}
+	position* resized = realloc(positions, (size_t)desiredCount*sizeof(position));
+	if (resized == NULL){
+		structRejectedSampleCount = desiredCount;
+		TraceLog(LOG_ERROR,
+			"Unable to grow the structure-factor sample buffer to %d particles",
+			desiredCount);
+		return false;
+	}
+	positions = resized;
+	structSampleCapacity = desiredCount;
+	structSampleCount = desiredCount;
+	structRejectedSampleCount = -1;
 	return true;
 }
 
@@ -1041,27 +1684,44 @@ static void captureStructureFactorPositions(void){
 }
 
 static bool structureFactorJobIsRunning(void){
+	#if defined(PLATFORM_WEB)
+	return structJobRunning;
+	#else
 	pthread_mutex_lock(&structMutex);
 	const bool running = structJobRunning;
 	pthread_mutex_unlock(&structMutex);
 	return running;
+	#endif
 }
 
 static void releaseStructureFactorPositions(void){
+	#if defined(PLATFORM_WEB)
+	structJobCancelRequested = true;
+	#else
+	pthread_mutex_lock(&structMutex);
+	if (structJobRunning){
+		structJobCancelRequested = true;
+	}
+	pthread_mutex_unlock(&structMutex);
+	#endif
 	awaitStructFactor();
 	free(positions);
 	positions = NULL;
 	structSampleCount = 0;
+	structSampleCapacity = 0;
+	structRejectedSampleCount = -1;
 }
 
+#if !THREE_D
 void drawParticlesAndBox(double factor, state* screenState, float zoom, Rectangle viewport){
 	particle* particleUnderClick = screenState->particleUnderClick;
 	const bool predictionsReady = refreshRenderPredictions();
 	const bool colorsReady = refreshParticleColorCache(screenState);
-	const bool particleBatchReady = ensureSpriteBatch(&particleBatch, N);
+	const bool particleBatchReady = proceduralCircleMaterialLoaded &&
+		ensureCircleBatch(&particleCircleBatch, N);
 	const bool arrowBatchReady = !screenState->arrow ||
-		(particleBatchReady && ensureSpriteBatch(&arrowBatch, N));
-	particleBatch.count = 0;
+		(arrowMaterialLoaded && ensureVelocityArrowBatch(&arrowBatch, N));
+	particleCircleBatch.count = 0;
 	arrowBatch.count = 0;
 
 	for (int i = N - 1; i >= 0; i--){
@@ -1087,88 +1747,64 @@ void drawParticlesAndBox(double factor, state* screenState, float zoom, Rectangl
 			{left, top}, {left, top + diameter},
 			{left + diameter, top + diameter}, {left + diameter, top},
 		};
-		if (particleBatchReady){
-			appendBatchQuad(&particleBatch, particleCorners, screenState->particleColor);
-		}
-		else{
-			DrawTexturePro(circleTexture,
-				(Rectangle){0.0f, 0.0f, (float)circleTexture.width, (float)circleTexture.height},
-				(Rectangle){left, top, diameter, diameter}, (Vector2){0, 0}, 0.0f,
-				screenState->particleColor);
+		if (!particleBatchReady || !appendCircleQuad(&particleCircleBatch,
+			particleCorners, screenState->particleColor)){
+			DrawCircleV((Vector2){left + 0.5f*diameter, top + 0.5f*diameter},
+				0.5f*diameter, screenState->particleColor);
 		}
 
-		// Draw velocity arrow if enabled
-		if (screenState->arrow) {
-			double vx = predicted.vx;
-			double vy = predicted.vy;
-			double speed_squared = vx*vx + vy*vy;
-			
-			if (speed_squared > 1e-20) {
-				const double inverseSpeed = 1.0/sqrt(speed_squared);
-				const float sine = (float)(vx*inverseSpeed);
-				const float cosine = (float)(vy*inverseSpeed);
-				const float halfArrow = (float)(predicted.rad*factor*0.5);
-				const float centerX = (float)(predicted.x*factor);
-				const float centerY = (float)((Ly - predicted.y)*factor);
-				const Vector2 localCorners[4] = {
-					{-halfArrow, -halfArrow}, {-halfArrow, halfArrow},
-					{halfArrow, halfArrow}, {halfArrow, -halfArrow},
-				};
-				Vector2 arrowCorners[4];
-				for (int corner = 0; corner < 4; corner++){
-					arrowCorners[corner].x = centerX + localCorners[corner].x*cosine - localCorners[corner].y*sine;
-					arrowCorners[corner].y = centerY + localCorners[corner].x*sine + localCorners[corner].y*cosine;
-				}
-				if (arrowBatchReady){
-					appendBatchQuad(&arrowBatch, arrowCorners, BLACK);
-				}
-			}
+		if (screenState->arrow && arrowBatchReady){
+			appendVelocityArrow2D(&arrowBatch, predicted.vx, predicted.vy,
+				(Vector2){(float)(predicted.x*factor),
+					(float)((Ly - predicted.y)*factor)},
+				(float)(predicted.rad*factor), zoom);
 		}
 	}
 
 	if (particleBatchReady){
-		drawSpriteBatch(&particleBatch, circleTexture);
+		drawCircleBatch(&particleCircleBatch);
 	}
 	if (screenState->arrow && arrowBatchReady){
-		drawSpriteBatch(&arrowBatch, arrowTexture);
+		drawVelocityArrowBatch(&arrowBatch);
 	}
 	else if (screenState->arrow){
 		for (int i = N - 1; i >= 0; i--){
 			const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
 				graphicsParticlePrediction(particles + i);
-			const double speedSquared = predicted.vx*predicted.vx + predicted.vy*predicted.vy;
-			if (speedSquared <= 1e-20) continue;
 			const float radius = (float)(predicted.rad*factor);
 			const float centerX = (float)(predicted.x*factor);
 			const float centerY = (float)((Ly - predicted.y)*factor);
 			if (!particleIntersectsViewport(centerX - radius, centerY - radius,
 				centerX + radius, centerY + radius, viewport)) continue;
-			DrawTexturePro(arrowTexture,
-				(Rectangle){0.0f, 0.0f, (float)arrowTexture.width, (float)arrowTexture.height},
-				(Rectangle){centerX, centerY, radius, radius},
-				(Vector2){radius*0.5f, radius*0.5f},
-				(float)(atan2(predicted.vx, predicted.vy)*180.0/M_PI), BLACK);
+			drawVelocityArrow2DImmediate(predicted.vx, predicted.vy,
+				(Vector2){centerX, centerY}, radius, zoom);
 		}
 	}
-	if (screenState->selected){
+	if (guiLive.show_selection_outline && screenState->selected &&
+		particleUnderClick != NULL){
 		const particlePrediction selected = cachedGraphicsParticlePrediction(particleUnderClick);
+		const Color selectionColor = {245, 247, 250, 255};
 		DrawRing((Vector2){selected.x*factor, (Ly - selected.y)*factor},
-			0.7*selected.rad*factor, selected.rad*factor, 0, 360, 20, BLACK);
+			1.03*selected.rad*factor, 1.13*selected.rad*factor,
+			0, 360, 48, selectionColor);
 	}
-	if (addWallx){
-		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor} , 0.3*factor/zoom, BLACK);
-		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, BLACK);
+	if (guiLive.show_boundary && addWallx){
+		const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
+		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor} , 0.3*factor/zoom, boundaryColor);
+		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, boundaryColor);
 	}
-	if (addWally){
-		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0} , 0.3*factor/zoom, BLACK);
-		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, BLACK);
+	if (guiLive.show_boundary && addWally){
+		const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
+		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0} , 0.3*factor/zoom, boundaryColor);
+		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor} , 0.3*factor/zoom, boundaryColor);
 	}
 	#if !THREE_D
-	else if (addCircularWall){
-		DrawRing((Vector2){Lx/2*factor, Lx/2*factor}, Lx/2*factor, (Lx/2 + 1)*factor, 0, 360, 360, BLACK);
+	else if (guiLive.show_boundary && addCircularWall){
+		DrawRing((Vector2){Lx/2*factor, Lx/2*factor}, Lx/2*factor, (Lx/2 + 1)*factor, 0, 360, 360, colorFromRgba(guiLive.boundary_rgba));
 	}
 	#endif
 }
+#endif
 
 #if THREE_D
 static void drawBoxBoundary3D(Color color){
@@ -1209,7 +1845,7 @@ static void drawWallGrid3D(int axis, float coordinate, Color color){
 			DrawLine3D((Vector3){coordinate, 0, z},
 				(Vector3){coordinate, (float)Ly, z}, color);
 		}
-		else{
+		else if (axis == 1){
 			const float x = (float)(u*Lx);
 			const float z = (float)(u*Lz);
 			DrawLine3D((Vector3){x, coordinate, 0},
@@ -1217,7 +1853,48 @@ static void drawWallGrid3D(int axis, float coordinate, Color color){
 			DrawLine3D((Vector3){0, coordinate, z},
 				(Vector3){(float)Lx, coordinate, z}, color);
 		}
+		else{
+			const float x = (float)(u*Lx);
+			const float y = (float)(u*Ly);
+			DrawLine3D((Vector3){x, 0, coordinate},
+				(Vector3){x, (float)Ly, coordinate}, color);
+			DrawLine3D((Vector3){0, y, coordinate},
+				(Vector3){(float)Lx, y, coordinate}, color);
+		}
 	}
+}
+
+static void drawVelocityArrow3D(const particlePrediction* predicted){
+	if (predicted == NULL || !isfinite(predicted->rad) || predicted->rad <= 0)
+		return;
+	const double speedSquared = predicted->vx*predicted->vx +
+		predicted->vy*predicted->vy + predicted->vz*predicted->vz;
+	if (!isfinite(speedSquared) || speedSquared <= 1e-20) return;
+	const double speed = sqrt(speedSquared);
+	const Vector3 direction = {
+		(float)(predicted->vx/speed),
+		(float)(predicted->vy/speed),
+		(float)(predicted->vz/speed),
+	};
+	const float radius = (float)predicted->rad;
+	const float lengthScale = Clamp(2.20f + 0.80f*(float)log1p(speed),
+		2.20f, 5.50f);
+	const float length = radius*lengthScale;
+	const float headLength = fminf(0.34f*length, 1.15f*radius);
+	const Vector3 center = {
+		(float)predicted->x, (float)predicted->y, (float)predicted->z,
+	};
+	const Vector3 tip = Vector3Add(center, Vector3Scale(direction, length));
+	const Vector3 shaftEnd = Vector3Subtract(tip,
+		Vector3Scale(direction, headLength));
+	const Color shaftColor = {236, 239, 244, 245};
+	const Color headColor = {255, 181, 30, 255};
+	/* A real shaft and cone remain readable while orbiting, unlike the old
+	   one-pixel line.  Low side counts keep the opt-in overlay inexpensive. */
+	DrawCylinderEx(center, shaftEnd, 0.095f*radius, 0.095f*radius,
+		6, shaftColor);
+	DrawCylinderEx(shaftEnd, tip, 0.30f*radius, 0.0f,
+		8, headColor);
 }
 
 static void drawParticlesAndBox3D(state* screenState){
@@ -1225,34 +1902,43 @@ static void drawParticlesAndBox3D(state* screenState){
 	const bool colorsReady = refreshParticleColorCache(screenState);
 	const bool sphereBatchReady = ensureSphereBatch(&particleSphereBatch, N);
 	particleSphereBatch.count = 0;
-	const Color boundaryColor = (Color){105, 115, 125, 255};
-	if (addCircularWall){
-		drawSphericalBoundary3D(boundaryColor);
+	const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
+	if (guiLive.show_boundary){
+		if (addCircularWall){
+			drawSphericalBoundary3D(boundaryColor);
+		}
+		else{
+			drawBoxBoundary3D(boundaryColor);
+		}
 	}
-	else{
-		drawBoxBoundary3D(boundaryColor);
-	}
-	if (addWallx){
-		const Color wallColor = Fade(BLACK, 0.45f);
+	if (guiLive.show_boundary && addWallx){
+		const Color wallColor = Fade(boundaryColor, 0.55f);
 		drawWallGrid3D(0, 0.0f, wallColor);
 		drawWallGrid3D(0, (float)Lx, wallColor);
 	}
-	if (addWally){
-		const Color wallColor = Fade(BLACK, 0.45f);
+	if (guiLive.show_boundary && addWally){
+		const Color wallColor = Fade(boundaryColor, 0.55f);
 		drawWallGrid3D(1, 0.0f, wallColor);
 		drawWallGrid3D(1, (float)Ly, wallColor);
 	}
+	if (guiLive.show_boundary && addWallz){
+		const Color wallColor = Fade(boundaryColor, 0.55f);
+		drawWallGrid3D(2, 0.0f, wallColor);
+		drawWallGrid3D(2, (float)Lz, wallColor);
+	}
 
-	const float axisLength = (float)(0.12*fmin(Lx, fmin(Ly, Lz)));
-	const Vector3 axisOrigin = addCircularWall ?
-		(Vector3){(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz)} :
-		(Vector3){0};
-	DrawLine3D(axisOrigin,
-		(Vector3){axisOrigin.x + axisLength, axisOrigin.y, axisOrigin.z}, RED);
-	DrawLine3D(axisOrigin,
-		(Vector3){axisOrigin.x, axisOrigin.y + axisLength, axisOrigin.z}, GREEN);
-	DrawLine3D(axisOrigin,
-		(Vector3){axisOrigin.x, axisOrigin.y, axisOrigin.z + axisLength}, BLUE);
+	if (guiLive.show_axes){
+		const float axisLength = (float)(0.12*fmin(Lx, fmin(Ly, Lz)));
+		const Vector3 axisOrigin = addCircularWall ?
+			(Vector3){(float)(0.5*Lx), (float)(0.5*Ly), (float)(0.5*Lz)} :
+			(Vector3){0};
+		DrawLine3D(axisOrigin,
+			(Vector3){axisOrigin.x + axisLength, axisOrigin.y, axisOrigin.z}, RED);
+		DrawLine3D(axisOrigin,
+			(Vector3){axisOrigin.x, axisOrigin.y + axisLength, axisOrigin.z}, GREEN);
+		DrawLine3D(axisOrigin,
+			(Vector3){axisOrigin.x, axisOrigin.y, axisOrigin.z + axisLength}, BLUE);
+	}
 
 	for (int i = N - 1; i >= 0; i--){
 		const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
@@ -1276,659 +1962,748 @@ static void drawParticlesAndBox3D(state* screenState){
 		else{
 			DrawSphereEx(center, (float)predicted.rad, 4, 8, particleColor);
 		}
-
-		if (screenState->arrow){
-			const double speedSquared = predicted.vx*predicted.vx +
-				predicted.vy*predicted.vy + predicted.vz*predicted.vz;
-			if (speedSquared > 1e-20){
-				const float arrowLength = (float)(2.5*predicted.rad);
-				const float inverseSpeed = (float)(1.0/sqrt(speedSquared));
-				const Vector3 end = {
-					center.x + arrowLength*(float)predicted.vx*inverseSpeed,
-					center.y + arrowLength*(float)predicted.vy*inverseSpeed,
-					center.z + arrowLength*(float)predicted.vz*inverseSpeed,
-				};
-				DrawLine3D(center, end, BLACK);
-			}
-		}
 	}
 	if (sphereBatchReady){
 		drawSphereBatch(&particleSphereBatch);
 	}
+	if (screenState->arrow){
+		for (int i = N - 1; i >= 0; i--){
+			const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
+				graphicsParticlePrediction(particles + i);
+			drawVelocityArrow3D(&predicted);
+		}
+	}
 
-	if (screenState->selected && (screenState->particleUnderClick != NULL)){
+	if (guiLive.show_selection_outline && screenState->selected &&
+		(screenState->particleUnderClick != NULL)){
 		const particlePrediction selected = cachedGraphicsParticlePrediction(
 			screenState->particleUnderClick);
 		const Vector3 center = {
 			(float)selected.x, (float)selected.y, (float)selected.z,
 		};
-		DrawSphereWires(center, (float)(1.08*selected.rad), 8, 12, BLACK);
+		const Color selectionColor = {245, 247, 250, 255};
+		DrawSphereWires(center, (float)(1.08*selected.rad),
+			8, 12, selectionColor);
 	}
 }
 #endif
 
-void draw(int argc, char *argv[], window* screenWindow, state* screenState){
-    int start = screenWindow->start;
-	double xGUI = screenWindow->xGUI;
-    double yGUI = screenWindow->yGUI;
-	#if !THREE_D
-    double factor = screenWindow->factor;
-	#endif
-	particle* particleUnderClick = screenState->particleUnderClick;
-	char name[200];
-
-	#if THREE_D
-	ensureCamera3D(screenWindow);
-	int scenePixelWidth = 0;
-	int scenePixelHeight = 0;
-	sceneTargetSize3D(start, GetScreenHeight(),
-		&scenePixelWidth, &scenePixelHeight);
-	const bool sceneReady = ensureSceneTarget3D(scenePixelWidth,
-		scenePixelHeight);
-	if (sceneReady){
-		BeginTextureMode(sceneTarget);
-		ClearBackground((Color){245, 247, 250, 255});
-		BeginMode3D(screenWindow->cam3D);
-		drawParticlesAndBox3D(screenState);
-		EndMode3D();
-		EndTextureMode();
+static void setGraphicalStructureFactorEnabled(bool enabled){
+	if (enabled == structFactorActivated){
+		return;
 	}
-	#endif
-
-	BeginDrawing();
-
-	ClearBackground(RAYWHITE);
-	#if THREE_D
-	if (sceneReady){
-		DrawTexturePro(sceneTarget.texture,
-			(Rectangle){0, 0, (float)sceneTargetWidth, (float)-sceneTargetHeight},
-			(Rectangle){0, 0, (float)start, (float)GetScreenHeight()},
-			(Vector2){0, 0}, 0.0f, WHITE);
+	if (enabled){
+		if (!allocateStructureFactorPositions()){
+			releaseStructureFactorPositions();
+			guiLive.graphical_structure_factor = false;
+			return;
+		}
+		structFactorActivated = true;
+		captureStructureFactorPositions();
+		asyncStructFactor();
+		lastStructLaunchTime = GetTime();
 	}
 	else{
-		DrawText("Unable to create the 3D viewport", 20, 20, 20, MAROON);
+		releaseStructureFactorPositions();
+		structFactorActivated = false;
 	}
-	DrawText("Right drag: orbit   Wheel: zoom   R: reset view",
-		10, 10, 18, Fade(BLACK, 0.7f));
-	#else
-	const Vector2 viewportCornerA = GetScreenToWorld2D((Vector2){0, 0}, screenWindow->cam);
-	const Vector2 viewportCornerB = GetScreenToWorld2D(
-		(Vector2){(float)screenWindow->start, (float)GetScreenHeight()}, screenWindow->cam);
-	const Rectangle particleViewport = {
-		.x = fminf(viewportCornerA.x, viewportCornerB.x),
-		.y = fminf(viewportCornerA.y, viewportCornerB.y),
-		.width = fabsf(viewportCornerB.x - viewportCornerA.x),
-		.height = fabsf(viewportCornerB.y - viewportCornerA.y),
-	};
+}
 
-	BeginMode2D(screenWindow->cam);
-	drawParticlesAndBox(factor, screenState, screenWindow->cam.zoom, particleViewport);
-	
-	EndMode2D();
-	#endif
-
-	DrawRectangle(start, 0, GetScreenWidth() - start, GetScreenHeight(), Fade((Color){220, 220, 220, 255}, 1.f));
-
-	if (screenState->selected && (particleUnderClick != NULL)){
-		freeFly(particleUnderClick);
-		int changes = 0;
-		changes += doubleBox(&(particleUnderClick->vx), "vx", &screenState->editVx, (Rectangle){ start + 40*xGUI, 800*yGUI, 120*xGUI, 24*yGUI});
-		changes += doubleBox(&(particleUnderClick->vy), "vy", &screenState->editVy, (Rectangle){ start + 40*xGUI, 824*yGUI, 120*xGUI, 24*yGUI});
-		#if THREE_D
-		changes += doubleBox(&(particleUnderClick->vz), "vz", &screenState->editVz, (Rectangle){ start + 40*xGUI, 848*yGUI, 120*xGUI, 24*yGUI});
-		changes += doubleBox(&(particleUnderClick->m), "m", &screenState->editM, (Rectangle){ start + 40*xGUI, 872*yGUI, 120*xGUI, 24*yGUI});
-		#else
-		changes += doubleBox(&(particleUnderClick->m), "m", &screenState->editM, (Rectangle){ start + 40*xGUI, 848*yGUI, 120*xGUI, 24*yGUI});
-		#endif
-		if (changes){
-			invalidateParticleColorCache();
-			particleUnderClick->coll++;
-
-			removeEventFromQueue(eventList[N + particleUnderClick->num]);
-			removeEventFromQueue(eventList[particleUnderClick->num]);
-			crossingEvent(particleUnderClick->num);
-			collisionEvent(particleUnderClick->num);
+static void updateGraphicalStructureFactor(void){
+	setGraphicalStructureFactorEnabled(guiLive.graphical_structure_factor);
+	if (!structFactorActivated){
+		return;
+	}
+	if (finishedStructComputation()){
+		awaitStructFactor();
+		normalizeStruct();
+		UpdateTexture(texture, structFactorGraphics);
+		lastStructLaunchTime = GetTime();
+	}
+	bool sampleCountChanged = false;
+	if (!structureFactorJobIsRunning() &&
+		(structSampleCount != desiredStructureFactorSampleCount())){
+		const int previousSampleCount = structSampleCount;
+		if (allocateStructureFactorPositions()){
+			sampleCountChanged = (structSampleCount != previousSampleCount);
 		}
 	}
+	const double refreshInterval = validatedRenderRefreshSeconds(
+		guiLive.structure_factor_refresh_seconds,
+		STRUCTURE_FACTOR_DEFAULT_REFRESH_SECONDS);
+	if (!structureFactorJobIsRunning() &&
+		(sampleCountChanged || (guiLive.running &&
+		GetTime() - lastStructLaunchTime >= refreshInterval))){
+		captureStructureFactorPositions();
+		asyncStructFactor();
+		lastStructLaunchTime = GetTime();
+	}
+}
 
-	if (screenState->colorEditing2) 
-		GuiLock();
+static void updateAppearance(state* screenState){
+	const int previousMode = screenState->colorParam2;
+	const int requestedMode = (int)guiLive.color_mode;
+	screenState->particleArray[0] = colorFromRgba(guiLive.type0_rgba);
+	screenState->particleArray[1] = colorFromRgba(guiLive.type1_rgba);
+	screenState->arrow = guiLive.velocity_arrows;
 
-	int dirtyColorParam2 = screenState->colorParam2;
-	#if THREE_D
-	const char* colorModeNames = "Uniform; Coll. Based; Vel. Based; Radius Based; Charge Based";
-	#else
-	const char* colorModeNames = "Uniform; Coll. Based; Vel. Based; Hex. Based; Square. Based; Radius Based; Charge Based";
-	#endif
-	if (GuiDropdownBox((Rectangle){start  + 100*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, colorModeNames, &screenState->colorParam2, screenState->colorEditing2)){
-		
-		screenState->colorEditing2 = !screenState->colorEditing2;
-		if (screenState->colorParam2 == 0){
-			screenState->particleColor = MAROON;
-		}
-		else if (screenState->colorParam2 == 1){
+	switch (guiLive.palette){
+		case SIM_PALETTE_VIRIDIS: screenState->colorArray = Viridis; break;
+		case SIM_PALETTE_COPPER: screenState->colorArray = Copper; break;
+		case SIM_PALETTE_PLASMA:
+		default: screenState->colorArray = Plasma; break;
+	}
+
+	screenState->colorParam2 = requestedMode;
+	switch (guiLive.color_mode){
+		case SIM_COLOR_BY_COLLISIONS:
 			screenState->colorFunction = &colorCollision;
-		}
-		else if (screenState->colorParam2 == 2){
+			break;
+		case SIM_COLOR_BY_SPEED:
 			screenState->colorFunction = &colorVelocity;
-		}
-		#if THREE_D
-		else if (screenState->colorParam2 == 3){
-			screenState->colorFunction = &colorRadius;
-		}
-		else if (screenState->colorParam2 == 4){
-			screenState->colorFunction = &colorCharge;
-		}
-		#else
-		else if (screenState->colorParam2 == 3){
+			break;
+		#if !THREE_D
+		case SIM_COLOR_BY_HEX_ORDER:
 			nSym = 6;
 			screenState->colorFunction = &colorBOOP;
-		}
-		else if (screenState->colorParam2 == 4){
+			break;
+		case SIM_COLOR_BY_SQUARE_ORDER:
 			nSym = 4;
 			screenState->colorFunction = &colorBOOP;
-		}
-		else if (screenState->colorParam2 == 5){
-			nSym = 4;
+			break;
+		#endif
+		case SIM_COLOR_BY_RADIUS:
 			screenState->colorFunction = &colorRadius;
-		}
-		else if (screenState->colorParam2 == 6){
+			break;
+		case SIM_COLOR_BY_CHARGE:
 			screenState->colorFunction = &colorCharge;
-		}
-		#endif
-		if (dirtyColorParam2 != screenState->colorParam2){
-			invalidateParticleColorCache();
-		}
-		if (screenState->colorParam2 != 0){
-			ensureColorFunctionArray(screenState);
-		}
-		else if (dirtyColorParam2 != 0){
-			free(screenState->colorFunctionArray);
-			screenState->colorFunctionArray = NULL;
-			screenState->colorFunctionCapacity = 0;
-		}
+			break;
+		case SIM_COLOR_BY_TYPE:
+		default:
+			screenState->colorParam2 = 0;
+			break;
 	}
 
-	bool tempPoly = polydispersity;
-	GuiCheckBox((Rectangle){start + 100*xGUI, 715*yGUI, 40*xGUI, 40*yGUI}, "Polydisp.", &polydispersity);
-	if (polydispersity != tempPoly){
-		if (polydispersity){
-			//small hack to get the structure factor right!
-			fractionSmallN = 0;
-		}
-		if (structFactorActivated)
-			releaseStructureFactorPositions();
-		freeArrays();
-
-		reset(argc, argv, &screenWindow->factor, screenState);
-		
+	if (screenState->colorParam2 != 0){
+		ensureColorFunctionArray(screenState);
 	}
-
-	GuiCheckBox((Rectangle){start + 200*xGUI, 715*yGUI, 40*xGUI, 40*yGUI}, "Arrow", &screenState->arrow);
-
-	if (screenState->leftClicked == 0)
-		GuiUnlock();
-
-	if (screenState->colorParam2){
-		if (screenState->colorEditing) 
-			GuiLock();
-
-		if (GuiDropdownBox((Rectangle){start  + 220*xGUI, 755*yGUI, 120*xGUI, 15*yGUI }, "Plasma;Viridis;Copper", &screenState->colorParam, screenState->colorEditing)){
-			screenState->colorEditing = !screenState->colorEditing;
-			if (screenState->colorParam == 0){
-				screenState->colorArray = Plasma;
-			}
-			else if (screenState->colorParam == 1){
-				screenState->colorArray = Viridis;
-			}
-			else{
-				screenState->colorArray = Copper;
-			}
-		}	
-
-		if (screenState->leftClicked == 0)
-			GuiUnlock();
-	}		
-	
-	const bool oldDamping = damping;
-	bool requestedDamping = damping;
-	GuiCheckBox((Rectangle){start + 406*xGUI, 40*yGUI, 40*xGUI, 40*yGUI},
-		"Damping", &requestedDamping);
-	if (oldDamping != requestedDamping){
-		/* Commit every particle with the old law before changing event semantics. */
-		for(int i = 0; i < N; i++){
-			freeFly(particles + i);
-		}
-		/* Remove the complete old-law schedule before rebuilding any new-law event. */
-		for(int i = 0; i < N; i++){
-			particle* p = particles + i;
-			removeEventFromQueue(eventList[N + p->num]);
-			removeEventFromQueue(eventList[p->num]);
-		}
-		#if INTRUDER
-		removeEventFromQueue(eventList[2*N + 8]);
-		#endif
-		damping = requestedDamping;
-		for(int i = 0; i < N; i++){
-			particle* p = particles + i;
-			crossingEvent(p->num);
-			collisionEvent(p->num);
-		}
-		#if INTRUDER
-		if (freeFly == &freeFlyNormal){
-			collisionEventIntruder();
-		}
-		#endif
-		invalidateParticleColorCache();
-	}
-	else{
-		damping = requestedDamping;
-	}
-
-	
-
-
-	int dirtyNoise = noise;
-	GuiToggleGroup((Rectangle){start  + 100*xGUI, 40*yGUI, 100*xGUI, 40*yGUI}, "No Thermostat;Langevin;Vel. Rescale", &noise); 
-	
-	if (dirtyNoise != noise){
-
-		if (noise == 0){
-			removeEventFromQueue(eventList[2*N + 2]);
-		}
-		if (dirtyNoise == 0){
-			addEventNoise(t + dtnoise);
-		}
-	}	
-
-	if (noise != 0 || damping != 0){
-		const double oldGamma = gamm;
-		sprintf(name, "%.3f", gamm);
-		GuiSliderBarDouble(
-			(Rectangle){ start + 100*xGUI, 130*yGUI, 505*xGUI, 40*yGUI },
-			"Gamma", name, &gamm, 0.001f, 0.1f);
-		if (oldGamma != gamm){
-			if (damping){
-				for(int i = 0; i < N; i++){
-					particle* p = particles + i;
-					freeFly(p);
-					removeEventFromQueue(eventList[N + p->num]);
-					removeEventFromQueue(eventList[p->num]);
-					crossingEvent(p->num);
-					collisionEvent(p->num);
-				}
-			}
-			invalidateParticleColorCache();
-		}
-		if (noise == 1){
-			sprintf(name, "%.3f", T);
-			GuiSliderBarDouble((Rectangle){ start  + 100*xGUI, 80*yGUI, 505*xGUI, 40*yGUI}, "Temperature", name, &T, 0.0000000001f, 1.f);
-		}
-	}
-	
-
-	bool dirtyWell = addWell;
-	GuiCheckBox((Rectangle){ start  + 100*xGUI, 180*yGUI, 40*xGUI, 40*yGUI}, "Potential", &addWell);
-	if (dirtyWell != addWell){
-		invalidateParticleColorCache();
-		for(int i = 0; i < N; i++){
-			particle* p = particles + i;
-			freeFly(p);
-			if (addWell == 0){
-				free(p->particlesInWell);
-			}
-			
-		}
-		
-		free(cellList);
-		boxConstantHelper();
-		cellListInit();
-		if (addWell)
-			pairsInit();
-		
-		for (int i = 0; i < N; i++){
-			particle* p = particles + i;
-			removeEventFromQueue(eventList[N + p->num]);
-			removeEventFromQueue(eventList[p->num]);
-			crossingEvent(p->num);
-			collisionEvent(p->num);
-		}
-	}
-	
-	if (addWell){
-		const double oldPotential = U;
-		sprintf(name, "%.6f", U);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 220*yGUI, 505*xGUI, 40*yGUI }, "U", name, &U, -1.f, 1.f);
-		if (U != oldPotential){
-			invalidateParticleColorCache();
-		}
-		const double oldPotentialRadius = sig;
-		sprintf(name, "%.3f", sig);
-		GuiSliderBarDouble(
-			(Rectangle){ start  + 100*xGUI, 270*yGUI, 505*xGUI, 40*yGUI},
-			"Pot. rad.", name, &sig, 1.01f, 2.5f);
-		if (sig != oldPotentialRadius){
-			/* Synchronize coordinates before rebuilding their linked-cell index. */
-			for(int i = 0; i < N; i++){
-				particle *p = particles + i;
-				freeFly(p);
-				free(p->particlesInWell);
-			}
-			free(cellList);
-			boxConstantHelper();
-			cellListInit();
-			pairsInit();
-			
-			for (int i = 0; i < N; i++){
-				particle* p = particles + i;
-				removeEventFromQueue(eventList[N + p->num]);
-				removeEventFromQueue(eventList[p->num]);
-				crossingEvent(p->num);
-				collisionEvent(p->num);
-				
-
-			}
-			invalidateParticleColorCache();
-		}
-		
-		GuiCheckBox((Rectangle){ start  + 200*xGUI, 180*yGUI, 40*xGUI, 40*yGUI}, "Charged", &charged);
-		if (charged){
-			const double oldPositiveChargeFraction = proportionPositivelyCharged;
-			sprintf(name, "%.2f", proportionPositivelyCharged);
-			GuiSliderBarDouble(
-				(Rectangle){ start + 400*xGUI, 180*yGUI, 50*xGUI, 40*yGUI },
-				"%+", name, &proportionPositivelyCharged, 0.f, 0.5f);
-			const double oldNeutralChargeFraction = proportionNeutralyCharged;
-			sprintf(name, "%.2f", proportionNeutralyCharged);
-			GuiSliderBarDouble(
-				(Rectangle){ start + 500*xGUI, 180*yGUI, 50*xGUI, 40*yGUI },
-				"%n", name, &proportionNeutralyCharged, 0.f, 0.5f);
-			if ((oldPositiveChargeFraction != proportionPositivelyCharged) ||
-				(oldNeutralChargeFraction != proportionNeutralyCharged)){
-				for (int i = 0; i < N; i++){
-					double randomTemp = drand(0, 1);
-					if (randomTemp < proportionPositivelyCharged){
-						particles[i].charge = 1;
-					}
-					else if (randomTemp < proportionNeutralyCharged + proportionPositivelyCharged){
-						particles[i].charge = 0;
-					}
-					else{
-						particles[i].charge = -1;
-					}
-				}
-				invalidateParticleColorCache();
-			}
-		}
-	}
-
-	bool dirtyField = addField;
-	GuiCheckBox((Rectangle){ start  + 100*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Const. Field", &addField);
-	if (dirtyField != addField){
-		for(int i = 0; i < N; i++){			
-			particle* p = particles + i;
-			freeFly(p);
-			removeEventFromQueue(eventList[N + p->num]);
-			removeEventFromQueue(eventList[p->num]);
-			crossingEvent(p->num);
-			collisionEvent(p->num);
-		}
-		invalidateParticleColorCache();
-	}
-
-	bool oldNormalDelta = addDelta;
-	bool oldTangentDelta = addDeltaTangent;
-	GuiCheckBox((Rectangle){start + 250*xGUI, 320*yGUI, 40*xGUI, 40*yGUI}, "Delta", &addDelta);
-	GuiCheckBox((Rectangle){start + 400*xGUI, 320*yGUI, 40*xGUI, 40*yGUI},
-		#if THREE_D
-		"Tangent Delta (uz x n)",
-		#else
-		"Tangent Delta",
-		#endif
-		&addDeltaTangent);
-	/* These are distinct collision laws; the last one enabled wins. */
-	if (!oldNormalDelta && addDelta)
-		addDeltaTangent = false;
-	if (!oldTangentDelta && addDeltaTangent)
-		addDelta = false;
-	if (addDelta || addDeltaTangent){
-		sprintf(name, "%.3f", delta);
-		GuiSliderBarDouble((Rectangle){ start + 100*xGUI, 360*yGUI, 505*xGUI, 20*yGUI}, "Delta", name, &delta, 0, 1);
-	}
-
-	if (addField){
-		const double oldField = field;
-		sprintf(name, "%.3f", field);
-		GuiSliderBarDouble(
-			(Rectangle){ start + 100*xGUI, 380*yGUI, 505*xGUI, 20*yGUI},
-			"g", name, &field, -0.03, -0.0001);
-		if (oldField != field){
-			for (int i = 0; i < N; i++){
-				particle* p = particles + i;
-				freeFly(p);
-				removeEventFromQueue(eventList[N + p->num]);
-				removeEventFromQueue(eventList[p->num]);
-				crossingEvent(p->num);
-				collisionEvent(p->num);
-
-			}
-			invalidateParticleColorCache();
-		}
-	}
-	
-	sprintf(name, "%.3f", res);
-	GuiSliderBarDouble((Rectangle){start + 100*xGUI, 580*yGUI, 200*xGUI, 40*yGUI}, "Coeff of res.", name, &res, 0.f, 1.f);
-
-	float requestedParticleCount = (float)N;
-	sprintf(name, "%d", N);
-	GuiSliderBar((Rectangle){start + 100*xGUI, 615*yGUI, 200*xGUI, 25*yGUI},
-		"N. of particles", name, &requestedParticleCount, 50.f, 50000.f);
-	const int newParticleCount = (int)requestedParticleCount;
-	if (newParticleCount != N){
-		if (structFactorActivated)
-			releaseStructureFactorPositions();
-		freeArrays();
+	else if (screenState->colorFunctionArray != NULL){
 		free(screenState->colorFunctionArray);
 		screenState->colorFunctionArray = NULL;
 		screenState->colorFunctionCapacity = 0;
-		N = newParticleCount;
-		reset(argc, argv, &screenWindow->factor, screenState);
-		if (screenState->colorParam2)
-			ensureColorFunctionArray(screenState);
 	}
-
-	const double oldSizeRatio = sizeratio;
-	const double oldSmallFraction = fractionSmallN;
-	if (!polydispersity){
-		
-		sprintf(name, "%.3lf", sizeratio);
-		GuiSliderBarDouble(
-			(Rectangle){start + 100*xGUI, 640*yGUI, 200*xGUI, 25*yGUI},
-			"Sizeratio", name, &sizeratio, 0.25, 1);
-
-
-		sprintf(name, "%.3lf", fractionSmallN);
-		GuiSliderBarDouble(
-			(Rectangle){start + 100*xGUI, 665*yGUI, 200*xGUI, 25*yGUI},
-			"Frac. Of Small.", name, &fractionSmallN, 0, 1);
+	if (previousMode != screenState->colorParam2){
+		invalidateParticleColorCache();
 	}
-	
-
-	const double oldPackingFraction = phi;
-	sprintf(name, "%.3lf", phi);
-	GuiSliderBarDouble(
-		(Rectangle){start + 100*xGUI, 690*yGUI, 200*xGUI, 25*yGUI},
-		"Packing fraction", name, &phi, 0.1, 0.88);
-	if ((oldPackingFraction != phi) || (oldSmallFraction != fractionSmallN) ||
-		(oldSizeRatio != sizeratio)){
-	/*
-		if ((phiTemp > phi) && (t > 1/vr)){
-			double mult = sqrt(phiTemp/phi);
-			Lx = Lx*mult;
-			Ly = Lx;
-			for (int i = 0; i < N; i++){
-				particle* p = particles + i;
-				freeFly(p);
-				p->x = p->x*mult;
-				p->y = p->y*mult;
-			}
-			printf("Lx = %lf\n", Lx);
-			
-			free(cellList);
-			boxConstantHelper();
-			cellListInit();
-			factor = screenHeight/Ly;
-			if (addWell){
-				for (int i = 0; i < N; i++){
-					particle* p = particles + i;
-					free(particles[i].particlesInWell);
-				}
-				pairsInit();
-			}
-			for (int i = 0; i < N; i++){
-				particle* p = particles + i;
-				p->coll++;
-				removeEventFromQueue(eventList[N + p->num]);
-				removeEventFromQueue(eventList[p->num]);
-				crossingEvent(p->num);
-				collisionEvent(p->num);
-			}
-		}
-		else{
-		*/
-		if (structFactorActivated)
-			releaseStructureFactorPositions();
-		freeArrays();
-
-		reset(argc, argv, &screenWindow->factor, screenState);
-        
-		//}
-	}
-	
-
-
-
-	int dirtyWallParam = screenState->wallParam;
-	#if THREE_D
-	const char* wallModeNames = "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Spher. Wall";
-	#else
-	const char* wallModeNames = "No Wall; Horiz. Wall; Vert. Wall; Square Walls; Circl. Wall";
-	#endif
-	if (GuiDropdownBox((Rectangle){start + 100*xGUI, 400*yGUI, 120*xGUI, 24*yGUI }, wallModeNames, &screenState->wallParam, screenState->wallEditing)){
-		screenState->wallEditing = !screenState->wallEditing;
-		if (dirtyWallParam != screenState->wallParam){
-			invalidateParticleColorCache();
-			if (screenState->wallParam == 0){
-				addWallx = 0;
-				addWally = 0;
-				addCircularWall = 0;
-			}
-			else if (screenState->wallParam == 1){
-				addWallx = 0;
-				addWally = 1;
-				addCircularWall = 0;
-			}
-			else if (screenState->wallParam == 2){
-				addWallx = 1;
-				addWally = 0;
-				addCircularWall = 0;
-			}
-			else if (screenState->wallParam == 3){
-				addWallx = 1;
-				addWally = 1;
-				addCircularWall = 0;
-			}
-			else if (screenState->wallParam == 4){
-				addWallx = 0;
-				addWally = 0;
-				addCircularWall = 1;
-			}
-			if (screenState->wallParam != 0){
-				
-				if (structFactorActivated)
-					releaseStructureFactorPositions();
-				freeArrays();
-				reset(argc, argv, &screenWindow->factor, screenState);
-			}
-			else{
-				if (addWell){
-					//To take care of the boundary conditions
-					for (int i = 0; i < N; i++){
-						particle* p = particles + i;
-						freeFly(p);
-						free(particles[i].particlesInWell);
-					}
-					pairsInit();
-				}
-				for (int i = 0; i < N; i++){
-					particle* p = particles + i;
-					freeFly(p);
-					p->coll++;
-					removeEventFromQueue(eventList[N + p->num]);
-					removeEventFromQueue(eventList[p->num]);
-					crossingEvent(p->num);
-					collisionEvent(p->num);
-				}
-			}
-		}
-	}	
-
-	
-	bool tempStruct = structFactorActivated;
-	#if THREE_D
-	const char* structureFactorLabel = "XY Struct. Factor";
-	#else
-	const char* structureFactorLabel = "Struct. Factor";
-	#endif
-	GuiCheckBox((Rectangle){start + 500*xGUI, 40*yGUI, 40*xGUI, 40*yGUI}, structureFactorLabel, &structFactorActivated);
-	if (tempStruct != structFactorActivated){
-		if (structFactorActivated){
-			if (allocateStructureFactorPositions()){
-				captureStructureFactorPositions();
-				asyncStructFactor();
-				lastStructLaunchTime = GetTime();
-			}
-			else{
-				structFactorActivated = false;
-			}
-		}
-		else{
-			releaseStructureFactorPositions();
-		}
-	}
-	if (structFactorActivated){
-		if (finishedStructComputation()){
-			awaitStructFactor();
-			normalizeStruct();
-			UpdateTexture(texture, structFactorGraphics);
-			lastStructLaunchTime = GetTime();
-		}
-		if (screenState->running && !structureFactorJobIsRunning() &&
-			(GetTime() - lastStructLaunchTime >= STRUCTURE_FACTOR_REFRESH_SECONDS)){
-			captureStructureFactorPositions();
-			asyncStructFactor();
-			lastStructLaunchTime = GetTime();
-		}
-		DrawTexturePro(texture,
-            (Rectangle){ 0, 0, qN, qN },
-            (Rectangle){ 400 + start*xGUI, 450*yGUI, SIZE*xGUI, SIZE*yGUI},
-            (Vector2){ 0, 0 }, 0.0f, (Color){255, 255, 255, 255});
-	}
-
-
-	DrawFPS(GetScreenWidth() - 100, 10);
-	
-	EndDrawing();
 }
+
+static GuiParticleSnapshot selectedParticleSnapshot(const state* screenState){
+	GuiParticleSnapshot result = {0};
+	if (!screenState->selected || screenState->particleUnderClick == NULL){
+		return result;
+	}
+	const particle* p = screenState->particleUnderClick;
+	const particlePrediction predicted = graphicsParticlePrediction(p);
+	result.valid = true;
+	result.index = p->num;
+	result.type = p->type;
+	result.charge = p->charge;
+	result.collisions = (uint64_t)p->coll;
+	result.x = predicted.x;
+	result.y = predicted.y;
+	result.vx = predicted.vx;
+	result.vy = predicted.vy;
+	#if THREE_D
+	result.z = predicted.z;
+	result.vz = predicted.vz;
+	#endif
+	result.radius = predicted.rad;
+	result.mass = p->m;
+	result.last_collision_time = p->lastColl;
+	return result;
+}
+
+double graphicsSimulationTimeLimit(double currentSimulationTime){
+	synchronizeSimulationPacing(true, currentSimulationTime);
+	if (!pacingState.enabled)
+		return HUGE_VAL;
+	/* A manual single-step can put the event clock ahead of its pacing target.
+	 * Never move time backwards; wall time will naturally catch up. */
+	return fmax(currentSimulationTime, pacingState.targetSimulationTime);
+}
+
+static const GuiMetrics* refreshGuiMetrics(void){
+	const double now = GetTime();
+	synchronizeSimulationPacing(guiLive.running, t);
+	guiMetrics.simulation_time_pacing = pacingState.enabled;
+	guiMetrics.target_simulation_time_rate = pacingState.rate;
+	guiMetrics.simulation_time_lag = pacingState.lag;
+	if (lastMetricsWallTime >= 0 && now - lastMetricsWallTime < 0.2){
+		guiMetrics.frames_per_second = (float)GetFPS();
+		return &guiMetrics;
+	}
+	const double elapsed = (lastMetricsWallTime >= 0) ?
+		fmax(now - lastMetricsWallTime, 1e-9) : 0;
+	const unsigned long events = ncol + ncross;
+	guiMetrics.dimensions = THREE_D ? 3 : 2;
+	guiMetrics.particle_count = N;
+	guiMetrics.cells_x = Nxcells;
+	guiMetrics.cells_y = Nycells;
+	#if THREE_D
+	guiMetrics.cells_z = Nzcells;
+	guiMetrics.box_lz = Lz;
+	#else
+	guiMetrics.cells_z = 1;
+	guiMetrics.box_lz = 0;
+	#endif
+	guiMetrics.queued_events = 0;
+	guiMetrics.event_capacity = 2*N + suppSizeEvent;
+	if (eventList != NULL){
+		for (int index = 0; index < guiMetrics.event_capacity; index++){
+			if (eventList[index] != NULL && eventList[index]->q >= 0){
+				guiMetrics.queued_events++;
+			}
+		}
+	}
+	guiMetrics.simulation_time = t;
+	guiMetrics.box_lx = Lx;
+	guiMetrics.box_ly = Ly;
+	guiMetrics.packing_fraction = phi;
+	guiMetrics.pressure = pressure;
+	/* Pressure is accumulated by the headless thermodynamic sampling path,
+	 * which graphical runs intentionally do not schedule. */
+	guiMetrics.pressure_valid = false;
+	guiMetrics.bath_temperature = T;
+	guiMetrics.collisions = (uint64_t)ncol;
+	guiMetrics.crossings = (uint64_t)ncross;
+	guiMetrics.frames_per_second = (float)GetFPS();
+	guiMetrics.growing = freeFly == &freeFlyGrow;
+
+	double energy = 0;
+	for (int i = 0; i < N; i++){
+		const particlePrediction predicted = graphicsParticlePrediction(particles + i);
+		double speedSquared = predicted.vx*predicted.vx + predicted.vy*predicted.vy;
+		#if THREE_D
+		speedSquared += predicted.vz*predicted.vz;
+		#endif
+		energy += 0.5*particles[i].m*speedSquared;
+	}
+	guiMetrics.total_energy = energy;
+	guiMetrics.energy_per_particle = (N > 0) ? energy/N : 0;
+	guiMetrics.temperature = (N > 0) ?
+		2.0*energy/((THREE_D ? 3.0 : 2.0)*N) : 0;
+	if (elapsed > 0){
+		guiMetrics.event_rate = (events - lastMetricsEvents)/elapsed;
+		guiMetrics.simulation_time_rate =
+			(t - lastMetricsSimulationTime)/elapsed;
+	}
+	lastMetricsWallTime = now;
+	lastMetricsSimulationTime = t;
+	lastMetricsEvents = events;
+	return &guiMetrics;
+}
+
+static void requestedSceneTargetSize(int* width, int* height){
+	const double supersampling = Clamp((float)guiLive.scene_supersampling,
+		0.5f, 3.0f);
+	#if defined(PLATFORM_WEB)
+	/* raylib 5.5 reports a fixed 1x DPI scale on PLATFORM_WEB (and logs a
+	 * warning whenever GetWindowScaleDPI() is queried).  Use the browser's
+	 * actual backing-store ratio so the particle scene is still rendered with
+	 * enough samples on Retina/HiDPI displays. */
+	const double browserDpi = emscripten_get_device_pixel_ratio();
+	const double dpiX = (isfinite(browserDpi) && browserDpi > 0) ?
+		Clamp(browserDpi, 1.0, 4.0) : 1.0;
+	const double dpiY = dpiX;
+	#else
+	const Vector2 dpi = GetWindowScaleDPI();
+	const double dpiX = (isfinite(dpi.x) && dpi.x > 0) ?
+		Clamp(dpi.x, 1.0f, 4.0f) : 1.0;
+	const double dpiY = (isfinite(dpi.y) && dpi.y > 0) ?
+		Clamp(dpi.y, 1.0f, 4.0f) : 1.0;
+	#endif
+	const float logicalWidth = (guiViewport.width > 16) ?
+		guiViewport.width : (float)GetScreenWidth();
+	const float logicalHeight = (guiViewport.height > 16) ?
+		guiViewport.height : (float)GetScreenHeight();
+	/* ImGui reports logical points, while this texture is sampled into the
+	 * native framebuffer. Include the display scale so 1.0 means one scene
+	 * pixel per physical display pixel. Quantization avoids reallocating a
+	 * large GPU target for every pixel of a dock-splitter drag. */
+	*width = ((int)ceilf((float)(logicalWidth*dpiX*supersampling)/16.0f))*16;
+	*height = ((int)ceilf((float)(logicalHeight*dpiY*supersampling)/16.0f))*16;
+	if (*width > 6144) *width = 6144;
+	if (*height > 6144) *height = 6144;
+	if (*width < 64) *width = 64;
+	if (*height < 64) *height = 64;
+}
+
+static bool renderSimulationScene(window* screenWindow, state* screenState){
+	int width = 0;
+	int height = 0;
+	requestedSceneTargetSize(&width, &height);
+	if (!ensureSceneTarget(width, height)){
+		return false;
+	}
+	BeginTextureMode(sceneTarget);
+	ClearBackground(colorFromRgba(guiLive.background_rgba));
+	#if THREE_D
+	ensureCamera3D(screenWindow);
+	screenWindow->cam3D.fovy = (float)guiLive.camera_fov_degrees;
+	BeginMode3D(screenWindow->cam3D);
+	drawParticlesAndBox3D(screenState);
+	EndMode3D();
+	#else
+	if (camera2DNeedsReset){
+		resetCamera2D(screenWindow);
+	}
+	const Vector2 cornerA = GetScreenToWorld2D((Vector2){0, 0}, screenWindow->cam);
+	const Vector2 cornerB = GetScreenToWorld2D(
+		(Vector2){(float)sceneTargetWidth, (float)sceneTargetHeight},
+		screenWindow->cam);
+	const Rectangle particleViewport = {
+		.x = fminf(cornerA.x, cornerB.x),
+		.y = fminf(cornerA.y, cornerB.y),
+		.width = fabsf(cornerB.x - cornerA.x),
+		.height = fabsf(cornerB.y - cornerA.y),
+	};
+	BeginMode2D(screenWindow->cam);
+	drawParticlesAndBox(screenWindow->factor, screenState,
+		screenWindow->cam.zoom, particleViewport);
+	EndMode2D();
+	#endif
+	EndTextureMode();
+	return true;
+}
+
+static void clearParticleSelection(state* screenState){
+	clearPendingParticlePress();
+	screenState->selected = 0;
+	screenState->leftClicked = 0;
+	screenState->particleUnderClick = NULL;
+}
+
+static void updateSelectedParticle(const GuiParticleUpdate* update,
+	state* screenState){
+	if (gui_imgui_simulation_faulted()){
+		return;
+	}
+	if (update == NULL || update->index < 0 || update->index >= N){
+		return;
+	}
+	particle* p = particles + update->index;
+	#if (STRESS || HEAT)
+	beginTransportVelocityBatch();
+	#endif
+	freeFly(p);
+	const double oldVx = p->vx;
+	const double oldVy = p->vy;
+	#if THREE_D
+	const double oldVz = p->vz;
+	#else
+	const double oldVz = 0;
+	#endif
+	p->vx = update->vx;
+	p->vy = update->vy;
+	#if THREE_D
+	p->vz = update->vz;
+	#endif
+	#if (STRESS || HEAT)
+	recordTransportVelocityChange(p, oldVx, oldVy, oldVz);
+	#else
+	(void)oldVx;
+	(void)oldVy;
+	(void)oldVz;
+	#endif
+	p->m = update->mass;
+	p->coll++;
+	removeEventFromQueue(eventList[N + p->num]);
+	removeEventFromQueue(eventList[p->num]);
+	crossingEvent(p->num);
+	collisionEvent(p->num);
+	physicalQ();
+	live_analysis_reset_generation();
+	screenState->particleUnderClick = p;
+	screenState->selected = 1;
+	invalidateParticleColorCache();
+}
+
+static void handleGuiCommand(const GuiCommand* command, window* screenWindow,
+	state* screenState){
+	if (command == NULL){
+		return;
+	}
+	switch (command->type){
+		case GUI_COMMAND_APPLY_CONFIG: {
+			SimulationConfig current;
+			char message[512] = {0};
+			if (hostAppliedConfigValid){
+				current = hostAppliedConfig;
+			}
+			else{
+				simulation_config_capture_globals(&current);
+			}
+			const SimulationReconfigureAction action =
+				simulation_reconfigure_core(&current, &command->config,
+					message, sizeof(message));
+
+			if (action == SIM_RECONFIGURE_FAILED){
+				char retainedMessage[1024];
+				snprintf(retainedMessage, sizeof(retainedMessage),
+					"Live update rolled back. The previous valid configuration "
+					"and particle state were retained; no partial changes were "
+					"applied.%s%s",
+					message[0] != '\0' ? "\n\n" : "",
+					message[0] != '\0' ? message : "");
+				TraceLog(LOG_ERROR, "%s", retainedMessage);
+				gui_imgui_acknowledge_applied_config(
+					NULL, GUI_CONFIG_APPLY_REJECTED, retainedMessage);
+				break;
+			}
+
+			if (action != SIM_RECONFIGURE_RESTART_REQUIRED){
+				/* In-place updates retain particle addresses, selection, camera,
+				 * drag state, time, and counters.  Only derived displays whose
+				 * meaning changed with the physics are refreshed. */
+				gui_imgui_acknowledge_applied_config(
+					&command->config, GUI_CONFIG_APPLY_SUCCEEDED, NULL);
+				hostAppliedConfig = command->config;
+				hostAppliedConfigValid = true;
+				if (action != SIM_RECONFIGURE_UNCHANGED){
+					live_analysis_reset_generation();
+					invalidateParticleColorCache();
+					lastMetricsWallTime = -1;
+				}
+				if (simulationHasFault()){
+					graphicsPauseSimulation(screenState);
+					graphicsReportSimulationFault(simulationFaultMessage());
+				}
+				break;
+			}
+
+			/* State-defining edits and runtime constraints which cannot contain
+			 * the current particles intentionally start a new trajectory.  Reuse
+			 * the explicit restart machinery, and tell the user why preservation
+			 * was not possible. */
+			char restartNotice[1024];
+			snprintf(restartNotice, sizeof(restartNotice),
+				"Configuration applied by rebuilding the simulation at t = 0. "
+				"The previous particle state could not be preserved.%s%s",
+				message[0] != '\0' ? "\n\n" : "",
+				message[0] != '\0' ? message : "");
+			char error[512] = {0};
+			clearPendingParticlePress();
+			if (activeParticleDrag.active){
+				finishParticleDrag(screenState);
+			}
+			if (simulation_restart_core(&command->config, error, sizeof(error))){
+				if (structFactorActivated){
+					releaseStructureFactorPositions();
+					structFactorActivated = false;
+				}
+				clearParticleSelection(screenState);
+				free(screenState->colorFunctionArray);
+				screenState->colorFunctionArray = NULL;
+				screenState->colorFunctionCapacity = 0;
+				SimulationConfig effective;
+				simulation_config_capture_globals(&effective);
+				effective.rendering = command->config.rendering;
+				hostAppliedConfig = effective;
+				hostAppliedConfigValid = true;
+				gui_imgui_acknowledge_applied_config(
+					&effective, GUI_CONFIG_APPLY_RESTARTED, restartNotice);
+				screenState->running = command->config.rendering.start_running;
+				guiLive.running = screenState->running;
+				if (error[0] != '\0'){
+					TraceLog(LOG_WARNING, "%s", error);
+					graphicsReportRuntimeError(error);
+				}
+				if (simulationHasFault()){
+					graphicsPauseSimulation(screenState);
+					graphicsReportSimulationFault(simulationFaultMessage());
+				}
+				screenWindow->factor = sceneTargetHeight/Ly;
+				#if THREE_D
+				resetCamera3D(screenWindow);
+				#else
+				camera2DNeedsReset = true;
+				#endif
+				invalidateParticleColorCache();
+				lastMetricsWallTime = -1;
+			}
+			else{
+				char retainedMessage[1024];
+				snprintf(retainedMessage, sizeof(retainedMessage),
+					"Live update required a fresh initial state, but rebuilding "
+					"it failed. The previous valid configuration and simulation "
+					"state were retained; no partial changes were applied.%s%s",
+					error[0] != '\0' ? "\n\n" : "",
+					error[0] != '\0' ? error : "");
+				TraceLog(LOG_ERROR, "%s", retainedMessage);
+				gui_imgui_acknowledge_applied_config(
+					NULL, GUI_CONFIG_APPLY_REJECTED, retainedMessage);
+			}
+			break;
+		}
+		case GUI_COMMAND_RESTART_APPLIED: {
+			char error[512] = {0};
+			clearPendingParticlePress();
+			if (activeParticleDrag.active){
+				finishParticleDrag(screenState);
+			}
+			if (simulation_restart_core(&command->config, error, sizeof(error))){
+				if (structFactorActivated){
+					releaseStructureFactorPositions();
+					structFactorActivated = false;
+				}
+				clearParticleSelection(screenState);
+				free(screenState->colorFunctionArray);
+				screenState->colorFunctionArray = NULL;
+				screenState->colorFunctionCapacity = 0;
+				SimulationConfig effective;
+				simulation_config_capture_globals(&effective);
+				effective.rendering = command->config.rendering;
+				hostAppliedConfig = effective;
+				hostAppliedConfigValid = true;
+				gui_imgui_acknowledge_applied_config(
+					&effective, GUI_CONFIG_APPLY_RESTARTED, NULL);
+				screenState->running = command->config.rendering.start_running;
+				guiLive.running = screenState->running;
+				if (error[0] != '\0'){
+					TraceLog(LOG_WARNING, "%s", error);
+					graphicsReportRuntimeError(error);
+				}
+				if (simulationHasFault()){
+					graphicsPauseSimulation(screenState);
+					graphicsReportSimulationFault(simulationFaultMessage());
+				}
+				screenWindow->factor = sceneTargetHeight/Ly;
+				#if THREE_D
+				resetCamera3D(screenWindow);
+				#else
+				camera2DNeedsReset = true;
+				#endif
+				invalidateParticleColorCache();
+				lastMetricsWallTime = -1;
+			}
+			else{
+				TraceLog(LOG_ERROR, "Simulation restart failed: %s", error);
+				char retainedMessage[1024];
+				snprintf(retainedMessage, sizeof(retainedMessage),
+					"Restart failed. The previous valid configuration and simulation "
+					"state were retained; no partial changes were applied.%s%s",
+					error[0] != '\0' ? "\n\n" : "",
+					error[0] != '\0' ? error : "");
+				gui_imgui_acknowledge_applied_config(
+					NULL, GUI_CONFIG_APPLY_REJECTED, retainedMessage);
+			}
+			break;
+		}
+		case GUI_COMMAND_SAVE_SNAPSHOT:
+			saveSnapshotGraphics();
+			break;
+		case GUI_COMMAND_STEP_ONE_EVENT:
+			screenState->stepRequested = true;
+			break;
+		case GUI_COMMAND_UPDATE_PARTICLE:
+			updateSelectedParticle(&command->particle, screenState);
+			break;
+		case GUI_COMMAND_CLEAR_SELECTION:
+			clearParticleSelection(screenState);
+			break;
+		case GUI_COMMAND_RESET_VIEW:
+			#if THREE_D
+			resetCamera3D(screenWindow);
+			#else
+			resetCamera2D(screenWindow);
+			#endif
+			break;
+		case GUI_COMMAND_TOGGLE_FULLSCREEN:
+			toggleFullscreenWindow(screenWindow);
+			break;
+		case GUI_COMMAND_NONE:
+		default:
+			break;
+	}
+}
+
+
+void draw(int argc, char *argv[], window* screenWindow, state* screenState){
+	(void)argc;
+	(void)argv;
+	if (!imguiInitialized){
+		SimulationConfig applied;
+		simulation_config_capture_globals(&applied);
+		hostAppliedConfig = applied;
+		hostAppliedConfigValid = true;
+		imguiInitialized = gui_imgui_init(&applied);
+		guiLive.running = screenState->running;
+		if (imguiInitialized && pendingRuntimeError[0] != '\0'){
+			if (pendingRuntimeFault){
+				gui_imgui_report_fault(pendingRuntimeError);
+			}
+			else{
+				gui_imgui_report_error(pendingRuntimeError);
+			}
+			pendingRuntimeError[0] = '\0';
+			pendingRuntimeFault = false;
+		}
+	}
+	/* Match the headless stop condition without closing the interactive
+	 * workspace: reaching tmax pauses the event loop so the final state can be
+	 * inspected or restarted.  Apply this after first-frame GUI initialization,
+	 * which imports the pre-existing run state. */
+	if (tmax < never && t > tmax){
+		graphicsPauseSimulation(screenState);
+	}
+
+	updateAppearance(screenState);
+	updateGraphicalStructureFactor();
+	bool sceneReady = false;
+	if (guiLive.show_scene){
+		sceneReady = renderSimulationScene(screenWindow, screenState);
+	}
+	const GuiParticleSnapshot selected = selectedParticleSnapshot(screenState);
+	const GuiMetrics* metrics = refreshGuiMetrics();
+
+	BeginDrawing();
+	ClearBackground(colorFromRgba(guiLive.background_rgba));
+	GuiFrameResult frame = {0};
+	if (imguiInitialized){
+		frame = gui_imgui_frame(sceneReady ? &sceneTarget : NULL,
+			structFactorActivated ? &texture : NULL,
+			metrics, &selected, &guiLive);
+		if (frame.viewport.width > 0 && frame.viewport.height > 0){
+			guiViewport = frame.viewport;
+		}
+	}
+	else if (sceneReady){
+		DrawTexturePro(sceneTarget.texture,
+			(Rectangle){0, 0, (float)sceneTargetWidth, (float)-sceneTargetHeight},
+			(Rectangle){0, 0, (float)GetScreenWidth(), (float)GetScreenHeight()},
+			(Vector2){0, 0}, 0, WHITE);
+		guiViewport = (GuiViewport){0, 0, (float)GetScreenWidth(),
+			(float)GetScreenHeight(), true, true};
+	}
+	/* On the web, DOM callbacks update raylib's current input state between
+	 * frames and EndDrawing() advances it to "previous".  Consume scene input
+	 * first so clicks, releases and wheel motion are not erased.  This ordering
+	 * also gives native builds the viewport/capture state from this GUI frame. */
+	getInput(screenWindow, screenState);
+	EndDrawing();
+
+	screenState->running = guiLive.running;
+	synchronizeSimulationPacing(screenState->running, t);
+	#if !defined(PLATFORM_WEB)
+	if (guiLive.target_fps != appliedTargetFps && guiLive.target_fps > 0){
+		SetTargetFPS(guiLive.target_fps);
+		appliedTargetFps = guiLive.target_fps;
+	}
+	#else
+	/* The browser callback performs non-blocking frame capping.  Calling
+	 * SetTargetFPS() here would make raylib sleep on the JavaScript thread. */
+	#endif
+	handleGuiCommand(&frame.command, screenWindow, screenState);
+}
+
+int graphicsTargetFrameRate(void){
+	return guiLive.target_fps > 0 ? guiLive.target_fps : 0;
+}
+
+void graphicsPauseSimulation(state* screenState){
+	if (screenState != NULL){
+		screenState->running = false;
+		screenState->stepRequested = false;
+	}
+	guiLive.running = false;
+}
+
+void graphicsReportRuntimeError(const char* message){
+	if (message == NULL || message[0] == '\0'){
+		return;
+	}
+	if (imguiInitialized){
+		gui_imgui_report_error(message);
+		return;
+	}
+	snprintf(pendingRuntimeError, sizeof(pendingRuntimeError), "%s", message);
+	pendingRuntimeFault = false;
+}
+
+void graphicsReportSimulationFault(const char* message){
+	if (message == NULL || message[0] == '\0'){
+		return;
+	}
+	if (imguiInitialized){
+		gui_imgui_report_fault(message);
+		return;
+	}
+	snprintf(pendingRuntimeError, sizeof(pendingRuntimeError), "%s", message);
+	pendingRuntimeFault = true;
+}
+
+#if defined(PLATFORM_WEB)
+static void downloadBrowserFile(const char* path){
+	if (path == NULL || path[0] == '\0'){
+		return;
+	}
+	EM_ASM({
+		const path = UTF8ToString($0);
+		try {
+			const bytes = FS.readFile(path);
+			const blob = new Blob([bytes], {type: 'text/plain;charset=utf-8'});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = path.split('/').pop() || 'EDMD-snapshot.dump';
+			anchor.style.display = 'none';
+			document.body.appendChild(anchor);
+			anchor.click();
+			anchor.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 1000);
+		} catch (error) {
+			console.error('Unable to download EDMD snapshot', error);
+		}
+	}, path);
+}
+#endif
 
 void saveSnapshotGraphics(){
 	for (int i = 0; i < N; i++){
 		freeFly(particles + i);
 	}
-	customName();
-	fichier = fopen(fileName, "w");
+	char snapshotPath[350] = {0};
+	if (!customSnapshotName(snapshotPath, sizeof(snapshotPath))){
+		graphicsReportRuntimeError("Unable to construct a snapshot filename");
+		return;
+	}
+	FILE* periodicStream = fichier;
+	FILE* snapshotStream = fopen(snapshotPath, "w");
+	if (snapshotStream == NULL){
+		char message[512];
+		snprintf(message, sizeof(message),
+			"Unable to save snapshot '%s': %s", snapshotPath, strerror(errno));
+		TraceLog(LOG_ERROR, "%s", message);
+		graphicsReportRuntimeError(message);
+		return;
+	}
+	fichier = snapshotStream;
 	saveTXT();
-	fclose(fichier);
+	const bool snapshotClosed = fclose(snapshotStream) == 0;
+	if (!snapshotClosed){
+		char message[512];
+		snprintf(message, sizeof(message),
+			"Unable to finish writing snapshot '%s': %s",
+			snapshotPath, strerror(errno));
+		TraceLog(LOG_ERROR, "%s", message);
+		graphicsReportRuntimeError(message);
+	}
+	fichier = periodicStream;
+	#if defined(PLATFORM_WEB)
+	if (snapshotClosed){
+		downloadBrowserFile(snapshotPath);
+	}
+	#endif
 }
 
 double colorVelocity(particle* p){
@@ -2025,10 +2800,67 @@ Color colorSelect(double value, Color* colorArray){
 	return colorArray[(int)(value*color_size)];
 }
 
+#if !defined(PLATFORM_WEB)
+static bool structureFactorJobWasCancelled(unsigned long generation){
+	pthread_mutex_lock(&structMutex);
+	const bool cancelled = structThreadPoolStopping ||
+		structJobCancelRequested || generation != structJobGeneration;
+	pthread_mutex_unlock(&structMutex);
+	return cancelled;
+}
+#endif
+
+static bool computeStructureFactorRow(int row, unsigned long generation){
+	if (row < 0 || row >= qN || structSampleCount <= 0 || positions == NULL){
+		return false;
+	}
+	const double qStep = qxG[1] - qxG[0];
+	double rowReal[qN] = {0};
+	double rowImaginary[qN] = {0};
+	for (int n = 0; n < structSampleCount; n++){
+		#if !defined(PLATFORM_WEB)
+		if ((n & 63) == 0 && structureFactorJobWasCancelled(generation)){
+			return false;
+		}
+		#else
+		(void)generation;
+		#endif
+		const position* p = positions + n;
+		const double firstPhase = qxG[row]*p->x + qxG[0]*p->y;
+		const double phaseStep = qStep*p->y;
+		double phaseReal = cos(firstPhase);
+		double phaseImaginary = sin(firstPhase);
+		const double stepReal = cos(phaseStep);
+		const double stepImaginary = sin(phaseStep);
+
+		for (int column = 0; column < qN; column++){
+			rowReal[column] += phaseReal;
+			rowImaginary[column] += phaseImaginary;
+			const double nextReal = phaseReal*stepReal -
+				phaseImaginary*stepImaginary;
+			phaseImaginary = phaseReal*stepImaginary +
+				phaseImaginary*stepReal;
+			phaseReal = nextReal;
+		}
+	}
+
+	for (int column = 0; column < qN; column++){
+		const double magnitude = (rowReal[column]*rowReal[column] +
+			rowImaginary[column]*rowImaginary[column])/structSampleCount;
+		structFactorGraphics[row][column] =
+			(float)log(magnitude*magnitude + 1.0);
+		if ((row <= qN/2 + 3) && (row >= qN/2 - 3) &&
+			(column >= qN/2 - 3) && (column <= qN/2 + 3)){
+			structFactorGraphics[row][column] = 0;
+		}
+	}
+	return true;
+}
+
+#if !defined(PLATFORM_WEB)
 void* computeStructureFactorGraphic(void* arg){
 	threadArg* threadArgument = (threadArg*)arg;
 	unsigned long completedGeneration = 0;
-	const double qStep = qxG[1] - qxG[0];
 
 	for (;;){
 		pthread_mutex_lock(&structMutex);
@@ -2042,36 +2874,10 @@ void* computeStructureFactorGraphic(void* arg){
 		completedGeneration = structJobGeneration;
 		pthread_mutex_unlock(&structMutex);
 
-		for (int i = threadArgument->start; i < threadArgument->end; i++){
-			double rowReal[qN] = {0};
-			double rowImaginary[qN] = {0};
-			for (int n = 0; n < structSampleCount; n++){
-				const position* p = positions + n;
-				const double firstPhase = qxG[i]*p->x + qxG[0]*p->y;
-				const double phaseStep = qStep*p->y;
-				double phaseReal = cos(firstPhase);
-				double phaseImaginary = sin(firstPhase);
-				const double stepReal = cos(phaseStep);
-				const double stepImaginary = sin(phaseStep);
-
-				for (int j = 0; j < qN; j++){
-					rowReal[j] += phaseReal;
-					rowImaginary[j] += phaseImaginary;
-					const double nextReal = phaseReal*stepReal - phaseImaginary*stepImaginary;
-					phaseImaginary = phaseReal*stepImaginary + phaseImaginary*stepReal;
-					phaseReal = nextReal;
-				}
-			}
-
-			for (int j = 0; j < qN; j++){
-				const double magnitude = (rowReal[j]*rowReal[j] +
-					rowImaginary[j]*rowImaginary[j])/structSampleCount;
-				structFactorGraphics[i][j] = (float)log(magnitude*magnitude + 1.0);
-				if ((i <= qN/2 + 3) && (i >= qN/2 - 3) &&
-					(j >= qN/2 - 3) && (j <= qN/2 + 3)){
-					structFactorGraphics[i][j] = 0;
-				}
-			}
+		bool cancelled = false;
+		for (int i = threadArgument->start;
+			i < threadArgument->end && !cancelled; i++){
+			cancelled = !computeStructureFactorRow(i, completedGeneration);
 		}
 
 		pthread_mutex_lock(&structMutex);
@@ -2083,6 +2889,7 @@ void* computeStructureFactorGraphic(void* arg){
 	}
 	return NULL;
 }
+#endif
 
 void normalizeStruct(){
 	float max = 0;
@@ -2109,7 +2916,7 @@ void normalizeStruct(){
 	}
 }
 
-
+#if !defined(PLATFORM_WEB)
 void threadPoolInit(){
 	const int iterationsPerThread = qN/NUM_THREADS;
 	const int remainingIterations = qN%NUM_THREADS;
@@ -2142,6 +2949,7 @@ void asyncStructFactor(){
 	if (!structJobRunning){
 		structWorkersRemaining = NUM_THREADS;
 		structJobRunning = true;
+		structJobCancelRequested = false;
 		structJobGeneration++;
 		pthread_cond_broadcast(&structJobReady);
 	}
@@ -2164,130 +2972,93 @@ static void shutdownStructureFactorThreadPool(void){
 	if (!structThreadPoolStarted){
 		return;
 	}
-	awaitStructFactor();
 	pthread_mutex_lock(&structMutex);
 	structThreadPoolStopping = true;
+	structJobCancelRequested = true;
 	pthread_cond_broadcast(&structJobReady);
 	pthread_mutex_unlock(&structMutex);
+	awaitStructFactor();
 	for (int i = 0; i < NUM_THREADS; i++){
 		pthread_join(threads[i], NULL);
 	}
 	structThreadPoolStarted = false;
 }
+#else
+/* Static hosting should not require SharedArrayBuffer or COOP/COEP.  Spread
+ * structure-factor rows over animation frames instead of spawning pthreads;
+ * the numerical kernel and result are identical to the desktop workers. */
+void threadPoolInit(){
+	structWebNextRow = 0;
+	structJobRunning = false;
+	structJobCancelRequested = false;
+	structThreadPoolStopping = false;
+	structThreadPoolStarted = true;
+}
 
-void reset(int argc, char *argv[], double* factor, state* screenState){
-	invalidateParticleColorCache();
-	t = 0;
-	ncol = 0;
-	ncross = 0;
-	paulTime = 0;
-	actualPaulList = 0;
-	screenState->selected = 0;
-	screenState->leftClicked = 0;
-	screenState->particleUnderClick = NULL;
-	version = 1;
+bool finishedStructComputation(){
+	if (!structThreadPoolStarted || !structJobRunning){
+		return false;
+	}
+	if (structJobCancelRequested || structThreadPoolStopping){
+		structJobRunning = false;
+		structWebNextRow = 0;
+		return false;
+	}
 
-	
-	constantInit(argc, argv);
-	particlesInit();
-	cellListInit();
-	//stupid allocation to be able to change sig and sigtemp in the graphical mode even though we don't need it yet!
-	if (addWell)
-		pairsInit();
-	
-	eventListInit();
-	physicalQ();
-	format();
-	if (structFactorActivated){
-		if (!allocateStructureFactorPositions()){
-			structFactorActivated = false;
+	const double frameStart = GetTime();
+	do{
+		if (!computeStructureFactorRow(structWebNextRow, structJobGeneration)){
+			structJobRunning = false;
+			structWebNextRow = 0;
+			return false;
 		}
-	}
-	
-	*factor = GetScreenHeight()/Ly;
+		structWebNextRow++;
+	} while (structWebNextRow < qN && GetTime() - frameStart < 0.0025);
+
+	return structWebNextRow >= qN;
 }
 
-int doubleBox(double* ptr, char* text, bool* activate, Rectangle position){
-	char textBuffer[128] = {0};
-	char textBuffer2[128] = {0};
-	sprintf(textBuffer, "%lf", *ptr);
-	sprintf(textBuffer2, "%lf", *ptr);
-	if (GuiTextBox(position, textBuffer, sizeof(textBuffer), *activate)){
-		*activate = !(*activate);
+void asyncStructFactor(){
+	if (!structThreadPoolStarted || structJobRunning ||
+		structSampleCount <= 0 || positions == NULL){
+		return;
 	}
-	Rectangle textBounds = {0};
-	textBounds.width = (float)GetTextWidth(text);
-	textBounds.height = (float)GuiGetStyle(DEFAULT, TEXT_SIZE);
-	textBounds.x = position.x - textBounds.width - GuiGetStyle(SLIDER, TEXT_PADDING);
-	textBounds.y = position.y + position.height/2 - GuiGetStyle(DEFAULT, TEXT_SIZE)/2;
-
-	GuiDrawText(text, textBounds, TEXT_ALIGN_RIGHT, Fade(GetColor(GuiGetStyle(SLIDER, TEXT + (STATE_NORMAL*3))), guiAlpha));
-
-	if (strcmp(textBuffer, textBuffer2) == 0){
-		return 0;
-	}
-	int conversion = sscanf(textBuffer, "%lf", ptr);
-	//awful dumb trick because sscanf "says" that the conversion is successful even when the number is -0
-
-	if (*ptr == -0.0){
-			//for some reason *ptr = 0 doesn't work :) the compiler optimize it out with -Ofast
-            *ptr = 0.000000000000000001;
-    }
-
-	if (conversion == 1){
-		return 1;
-	}
-	else{
-		sscanf(textBuffer2, "%lf", ptr);
-		return 0;
-	}
+	structJobCancelRequested = false;
+	structJobGeneration++;
+	structWebNextRow = 0;
+	structJobRunning = true;
 }
+
+void awaitStructFactor(){
+	if (!structThreadPoolStarted){
+		return;
+	}
+	structJobRunning = false;
+	structJobCancelRequested = false;
+	structWebNextRow = 0;
+}
+
+static void shutdownStructureFactorThreadPool(void){
+	if (!structThreadPoolStarted){
+		return;
+	}
+	structThreadPoolStopping = true;
+	structJobCancelRequested = true;
+	awaitStructFactor();
+	structThreadPoolStarted = false;
+}
+#endif
+
+
 
 window graphicalInit(){
-
-	firstScreen = 0;
-	load = 0;
-	dtnoise = 1;
-	dtime = 1;
-	N = 10000;
-	phi = 0.5;
-	field = -0.001;
-	res = 0.6;
-	delta = 1;
-	gamm = 0.025;
-	sig = 1.5;
-	U = 0.15;
-	T = 0.01;
-	Einit = 0.01;
-
-	load = 0;
-	S1 = 0;
-	Hex = 0;
-	coexistenceOld = 0;
-	coexistence = 0;
-
-	interfaceThermo = 0;
-	interfaceThermoTemp = 0;
-
-	clusterThermo = 0;
-	dumpCluster = 0;
-	killCluster = 0;
-	strucThermo = 0;
-	areaThermo = 0;
-	boopThermo = 0;
-	pcfThermo = 0;
-	pcfBondOrderThermo = 0;
-	pcfg6Thermo = 0;
-	critical = 0;
-	snapshotCritical = 0;
-
-	aspectRatio = 1;
-	#if THREE_D
-	/* Start with optional confinement and fixed-axis tangent forcing disabled. */
-	addCircularWall = 0;
-	addDeltaTangent = false;
-	damping = false;
-	#endif
+	/* Keep the executable's initial engine state and the GUI's default
+	 * model sourced from one schema.  Command-line arguments are applied later
+	 * by constantInit(), before the GUI captures the effective configuration. */
+	SimulationConfig defaults;
+	const BuildCapabilities capabilities = simulation_build_capabilities();
+	simulation_config_set_defaults(&defaults, &capabilities);
+	simulation_config_apply_globals(&defaults);
 	Camera2D cam = {0};
     cam.zoom = 1;
 	#if THREE_D
@@ -2305,13 +3076,34 @@ window graphicalInit(){
 	}
 	
 	threadPoolInit();
-	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI);
+	/* Request a native-resolution framebuffer on Retina/HiDPI displays.
+	 * rlImGui uses GetWindowScaleDPI() for its framebuffer scale and the scene
+	 * has its own bounded supersampled target, so both UI text and 3D edges stay
+	 * sharp without changing their logical size. */
+	SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIGHDPI |
+		FLAG_MSAA_4X_HINT);
 	
 	#if THREE_D
 	InitWindow(1800, 900, "EDMD - 3D system");
 	#else
 	InitWindow(1800, 900, "EDMD");
 	#endif
+	{
+		#if defined(PLATFORM_WEB)
+		const float browserDpi = (float)emscripten_get_device_pixel_ratio();
+		const Vector2 startupDpi = {
+			(isfinite(browserDpi) && browserDpi > 0) ? browserDpi : 1.0f,
+			(isfinite(browserDpi) && browserDpi > 0) ? browserDpi : 1.0f,
+		};
+		#else
+		const Vector2 startupDpi = GetWindowScaleDPI();
+		#endif
+		TraceLog(LOG_INFO,
+			"EDMD: logical %dx%d, framebuffer %dx%d, DPI scale %.2fx%.2f",
+			GetScreenWidth(), GetScreenHeight(), GetRenderWidth(), GetRenderHeight(),
+			startupDpi.x, startupDpi.y);
+	}
+	#if !defined(PLATFORM_WEB)
 	SetWindowMinSize(800, 450);
 	const int display = GetCurrentMonitor();
 	const int monitorWidth = GetMonitorWidth(display);
@@ -2322,11 +3114,12 @@ window graphicalInit(){
 	const int initialHeight = (900 < availableHeight) ? 900 : availableHeight;
 	if ((initialWidth != GetScreenWidth()) || (initialHeight != GetScreenHeight())){
 		SetWindowSize(initialWidth, initialHeight);
-		const Vector2 monitorPosition = GetMonitorPosition(display);
-		SetWindowPosition((int)monitorPosition.x + (monitorWidth - initialWidth)/2,
-			(int)monitorPosition.y + (monitorHeight - initialHeight)/2);
 	}
+	const Vector2 monitorPosition = GetMonitorPosition(display);
+	SetWindowPosition((int)monitorPosition.x + (monitorWidth - initialWidth)/2,
+		(int)monitorPosition.y + (monitorHeight - initialHeight)/2);
 	SetTargetFPS(144);
+	#endif
 	image = (Image){
 		.data = structFactorGraphics,
 		.width = qN,
@@ -2336,25 +3129,18 @@ window graphicalInit(){
 	};
 	texture = LoadTextureFromImage(image);
 	
-	// Load circle texture from embedded data
-	Image circleImage = LoadImageFromMemory(".png", src_tex_png, src_tex_png_len);
-	circleTexture = LoadTextureFromImage(circleImage);
-	UnloadImage(circleImage);  
-
-	Image arrowImage = LoadImage("src/arrow.png");
-	arrowTexture = LoadTextureFromImage(arrowImage);
-	UnloadImage(arrowImage);  
-
-	spriteMaterial = LoadMaterialDefault();
-	defaultMaterialTexture = spriteMaterial.maps[MATERIAL_MAP_DIFFUSE].texture;
-	spriteMaterialLoaded = true;
+	#if !THREE_D
+	arrowMaterial = LoadMaterialDefault();
+	arrowMaterialLoaded = (arrowMaterial.maps != NULL);
+	loadProceduralCircleMaterial();
+	#endif
 
 	const int initialScreenWidth = GetScreenWidth();
 	const int initialScreenHeight = GetScreenHeight();
     return (window){
 		.screenWidth = initialScreenWidth,
 		.screenHeight = initialScreenHeight,
-		.factor = initialScreenHeight/Ly,
+		.factor = 1.0,
 		.start = initialScreenHeight,
 		.xGUI = initialScreenWidth/1800.0,
 		.yGUI = initialScreenHeight/900.0,
@@ -2373,7 +3159,7 @@ state GUIinit(){
 		.leftClicked = 0,
 		.selected = 0,
 		.particleUnderClick = NULL,
-		.particleArray = {GRAY, MAROON},
+		.particleArray = {{66, 150, 250, 255}, {242, 157, 73, 255}},
 		.particleColor = BLACK,
 		.colorEditing = false,
 		.colorParam = 0,
@@ -2385,6 +3171,7 @@ state GUIinit(){
 		.colorFunctionArray = NULL,
 		.colorFunctionCapacity = 0,
 		.running = true,
+		.stepRequested = false,
 		.wallMoving = false,
 		.spacePressed = false,
 		.editVx = false,
@@ -2404,25 +3191,34 @@ void graphicsFree(state* screenState){
 	shutdownStructureFactorThreadPool();
 	#if THREE_D
 	unloadSphereBatch(&particleSphereBatch);
+	#endif
 	if (sceneTarget.texture.id != 0){
 		UnloadRenderTexture(sceneTarget);
 		sceneTarget = (RenderTexture2D){0};
 		sceneTargetWidth = 0;
 		sceneTargetHeight = 0;
 	}
+	if (imguiInitialized){
+		gui_imgui_shutdown();
+		imguiInitialized = false;
+	}
+	#if !THREE_D
+	unloadCircleBatch(&particleCircleBatch);
+	unloadVelocityArrowBatch(&arrowBatch);
+	if (proceduralCircleMaterialLoaded){
+		UnloadMaterial(proceduralCircleMaterial);
+		proceduralCircleMaterial = (Material){0};
+		proceduralCircleMaterialLoaded = false;
+	}
+	if (arrowMaterialLoaded){
+		UnloadMaterial(arrowMaterial);
+		arrowMaterial = (Material){0};
+		arrowMaterialLoaded = false;
+	}
 	#endif
-	unloadSpriteBatch(&particleBatch);
-	unloadSpriteBatch(&arrowBatch);
 	free(renderPredictions);
 	renderPredictions = NULL;
 	renderPredictionCapacity = 0;
-	if (spriteMaterialLoaded){
-		spriteMaterial.maps[MATERIAL_MAP_DIFFUSE].texture = defaultMaterialTexture;
-		UnloadMaterial(spriteMaterial);
-		spriteMaterialLoaded = false;
-	}
-	UnloadTexture(circleTexture);
-	UnloadTexture(arrowTexture);
 	UnloadTexture(texture);
 	free(screenState->colorFunctionArray);
 	screenState->colorFunctionArray = NULL;

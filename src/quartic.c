@@ -141,18 +141,25 @@ void solve_quartic(double a, double b, double c, double d) {
 
 }
 
-double smallestRoot(double a, double b, double c, double d, double e){
+double smallestRootAfter(double a, double b, double c, double d, double e,
+    double minimumRoot){
+    if (a == 0.0 || !isfinite(a)) return HUGE_VAL;
     double A = b/a;
     double B = c/a;
     double C = d/a;
     double D = e/a;
     solve_quartic(A, B, C, D);
-    double toSend = 10000000000;
+    double toSend = HUGE_VAL;
     for (int i = 0; i < 4; i++){
-        if ((retval[i].imag == 0) && (retval[i].real > 0.000000001) && (retval[i].real < toSend)){
-            toSend = retval[i].real;//                 ^ magic number
+        const double imaginaryTolerance = 1e-10*(1.0 + fabs(retval[i].real));
+        if ((fabs(retval[i].imag) <= imaginaryTolerance) &&
+            (retval[i].real > minimumRoot) && (retval[i].real < toSend)){
+            toSend = retval[i].real;
         }
     }
     return toSend;
 }
 
+double smallestRoot(double a, double b, double c, double d, double e){
+    return smallestRootAfter(a, b, c, d, e, 0.0);
+}

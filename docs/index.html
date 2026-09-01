@@ -1,1 +1,159 @@
-<!doctypehtml><html lang=EN-us><head><meta charset=utf-8><meta content="text/html; charset=utf-8"http-equiv=Content-Type><title>raylib web game</title><meta content="raylib web game"name=title><meta content="New raylib web videogame, developed using raylib videogames library"name=description><meta content="raylib, games, html5, programming, C, C++, library, learn, videogames"name=keywords><meta content="width=device-width"name=viewport><meta content="raylib web game"property=og:title><meta content=image/png property=og:image:type><meta content=https://www.raylib.com/common/img/raylib_logo.png property=og:image><meta content=raylib.com property=og:site_name><meta content=https://www.raylib.com/games.html property=og:url><meta content="New raylib web videogame, developed using raylib videogames library"property=og:description><meta content=summary name=twitter:card><meta content=@raysan5 name=twitter:site><meta content="raylib web game"name=twitter:title><meta content=https://www.raylib.com/common/raylib_logo.png name=twitter:image><meta content=https://www.raylib.com/games.html name=twitter:url><meta content="New raylib web game, developed using raylib videogames library"name=twitter:description><link href=https://www.raylib.com/favicon.ico rel="shortcut icon"><style>body{font-family:arial;margin:0;padding:none}#header{width:100%;height:80px;background-color:#888}#logo{width:64px;height:64px;float:left;position:relative;margin:10px;background-image:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAadEVYdFNvZnR3YXJlAFBhaW50Lk5FVCB2My41LjExR/NCNwAAA7JJREFUaEPtk0FyWzEMQ+37X7fZhxX4YY3AD1OKF1nkzTRlSBCCLeVBnvl/AUdaELOunPno1kts1kixdtEZKVs+xIxebBkZsVknn/L5nFGDLR8T4zVC9fX19S/+tTFijrYK4jUjbPUtqBHpnEE6PkZD7jQZV8n5Recw1XQKciZuPaEtR6UjNs5ENVGMsBVqpPtER0ZMOhpyp8m4YL4OjD9yxsyZxnQycfMJETNSzsRE1+dihK3YMiJmpHTW3xpmXPC6BXlCHfqnBlsjY5hxf/6EVEOM2BTEi0fYCX4ONSI6Kq3Blg/prIOMq2CsRur4KQ0x64SdjOufEDEdHZGOhmz5RDHCVqhRuQ86YsVskbc+GXchLiHnFyYH+UigQDVGnImbT8hwFkgLg2qiM8JO6Ylx1FNLa3DmYwqCTsZd4BPqGJG7MwKzpeiWKTKxXkLMVE3MSOmsdwxLH6Rd/wCCLSNDx6djeKfJuArGeoYamRHpaEjnCBYZVy8hZqo2GI36qPjsiOiMsBXGcev4Mx9TLGTchbgEjN/uz6jGrBvDjg+LTNx8Qp2CbG2xMKgmOiPslJ4Yxx+eSnSkzlosZNwFPiHl7FRTkLNRJm4+IeVM0ymIH42wE/wcKalQI4MRl4EW3p6VcRWMua8F6WjIlqZDxvVPiHQ6CjVbYkV9ohhhp/Rk1wiYgpyJ78i4CsZbjkb8Qx+ihvzu3RPaKogZkY6GlEeMsKdPSOFIC8VoOusg44L5c+T8ouOoGhWbdWJ8tMi4egkxo4hoh2yNTGf3iIyr5Lyic4bRENXo+lvDjAt4C1Hk/OKtUaAj0+n4dMSZ2D+hrYJsaYh2SClG2jV9kJKKzhlGQ1SsW299Mq6C8dYZHTExo8fzieI5ivipYnYy7nwJqGKmOYyRwfiUBXITfh5qSHRGWEkfqJqURgvsdHyWYv7Ko8DnYYegk3EB00cxprdrJRzFd7YQzawu8L1GMTYS/KpPaAFTkIn1EmJmspJSs5xBzSyGhlkBmlxfNFiP5mw4wlbMh4F5Ddxp5jNINBdCEz9zPOC1zD7Q0HBdmXndwv0TMtydEdzlWJT4VZ8Qt9Qn4/onxMIwa5ZYGJU5yufBiCjwE50AGjLCVuS8Yt4H7OgZLKK5EKOsLviEWJSL/+0uMi7gLUSBseYwqEbXvSHCec1CJvZPyHCmYQffaBBfOTCGHM2aEbZi1+gO1XTWVXMnzrhAn5DSOZVsiQlHnSITKzGj6DeTcZWc/3oy7h9//PF4PL4BlvsWrb6RE+oAAAAASUVORK5CYII=')}.emscripten{padding-right:0;margin-left:auto;margin-right:auto;display:block}div.emscripten{text-align:center}div.emscripten_border{border:1px solid #000}canvas.emscripten{border:0 none;background:#000;width:100%}.spinner{height:30px;width:30px;margin:0;margin-top:20px;margin-left:20px;display:inline-block;vertical-align:top;-webkit-animation:rotation .8s linear infinite;-moz-animation:rotation .8s linear infinite;-o-animation:rotation .8s linear infinite;animation:rotation .8s linear infinite;border-left:5px solid #000;border-right:5px solid #000;border-bottom:5px solid #000;border-top:5px solid red;border-radius:100%;background-color:#f5f5f5}@-webkit-keyframes rotation{from{-webkit-transform:rotate(0)}to{-webkit-transform:rotate(360deg)}}@-moz-keyframes rotation{from{-moz-transform:rotate(0)}to{-moz-transform:rotate(360deg)}}@-o-keyframes rotation{from{-o-transform:rotate(0)}to{-o-transform:rotate(360deg)}}@keyframes rotation{from{transform:rotate(0)}to{transform:rotate(360deg)}}#status{display:inline-block;vertical-align:top;margin-top:30px;margin-left:20px;font-weight:700;color:#282828}#progress{height:0;width:0}#controls{display:inline-block;float:right;vertical-align:top;margin-top:15px;margin-right:20px}#output{width:100%;height:140px;margin:0 auto;margin-top:10px;display:block;background-color:#000;color:#25ae26;font-family:'Lucida Console',Monaco,monospace;outline:0}input[type=button]{background-color:#d3d3d3;border:4px solid #a9a9a9;color:#000;text-decoration:none;cursor:pointer;width:140px;height:50px}input[type=button]:hover{background-color:#f5f5f5ff;border-color:#000}</style></head><body><div id=header><a href=https://www.raylib.com id=logo></a><div class=spinner id=spinner></div><div class=emscripten id=status>Downloading...</div><span id=controls><span><input onclick=Module.requestFullscreen(!1,!1) type=button value="🖵 FULLSCREEN"></span><span><input onclick=toggleAudio() type=button value="🔇 SUSPEND"id=btn-audio></span></span><div class=emscripten><progress hidden id=progress max=100 value=0></progress></div></div><div class=emscripten_border><canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas></div><textarea id=output rows=8></textarea><script src=https://cdn.jsdelivr.net/gh/eligrey/FileSaver.js/dist/FileSaver.min.js></script><script>function saveFileFromMEMFSToDisk(e,a){var i,o=FS.readFile(e);i=new Blob([o.buffer],{type:"application/octet-binary"}),saveAs(i,a)}</script><script>var statusElement=document.querySelector("#status"),progressElement=document.querySelector("#progress"),spinnerElement=document.querySelector("#spinner"),Module={preRun:[],postRun:[],print:function(){var e=document.querySelector("#output");return e&&(e.value=""),function(t){arguments.length>1&&(t=Array.prototype.slice.call(arguments).join(" ")),console.log(t),e&&(e.value+=t+"\n",e.scrollTop=e.scrollHeight)}}(),printErr:function(e){arguments.length>1&&(e=Array.prototype.slice.call(arguments).join(" ")),console.error(e)},canvas:function(){var e=document.querySelector("#canvas");return e.addEventListener("webglcontextlost",(function(e){alert("WebGL context lost. You will need to reload the page."),e.preventDefault()}),!1),e}(),setStatus:function(e){if(Module.setStatus.last||(Module.setStatus.last={time:Date.now(),text:""}),e!==Module.setStatus.last.text){var t=e.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/),n=Date.now();t&&n-Module.setStatus.last.time<30||(Module.setStatus.last.time=n,Module.setStatus.last.text=e,t?(e=t[1],progressElement.value=100*parseInt(t[2]),progressElement.max=100*parseInt(t[4]),progressElement.hidden=!0,spinnerElement.hidden=!1):(progressElement.value=null,progressElement.max=null,progressElement.hidden=!0,e||(spinnerElement.style.display="none")),statusElement.innerHTML=e)}},totalDependencies:0,monitorRunDependencies:function(e){this.totalDependencies=Math.max(this.totalDependencies,e),Module.setStatus(e?"Preparing... ("+(this.totalDependencies-e)+"/"+this.totalDependencies+")":"All downloads complete.")}};Module.setStatus("Downloading..."),window.onerror=function(){Module.setStatus("Exception thrown, see JavaScript console"),spinnerElement.style.display="none",Module.setStatus=function(e){e&&Module.printErr("[post-exception status] "+e)}}</script><script>var audioBtn=document.querySelector("#btn-audio");const audioContexList=[];function toggleAudio(){var t=!1;audioContexList.forEach((e=>{"suspended"==e.state?(e.resume(),t=!0):"running"==e.state&&e.suspend()})),audioBtn.value=t?"🔇 SUSPEND":"🔈 RESUME"}self.AudioContext=new Proxy(self.AudioContext,{construct(t,e){const n=new t(...e);return audioContexList.push(n),"suspended"==n.state&&(audioBtn.value="🔈 RESUME"),n}})</script><script src=EDMD.js async></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1116">
+  <meta name="description" content="Interactive event-driven molecular dynamics simulation">
+  <title>EDMD</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      background: #0f1116;
+      color: #e6e8ec;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background:
+        radial-gradient(circle at 50% 36%, rgba(63, 104, 142, 0.2), transparent 38%),
+        #0f1116;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    main {
+      width: min(520px, 100%);
+      padding: 30px;
+      border: 1px solid #343841;
+      border-radius: 10px;
+      background: #1a1d23;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+      font-weight: 650;
+    }
+
+    p {
+      margin: 0 0 20px;
+      color: #aeb4bf;
+      font-size: 0.94rem;
+      line-height: 1.55;
+    }
+
+    .choices {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    a {
+      display: grid;
+      place-items: center;
+      min-height: 42px;
+      border: 1px solid #4b515d;
+      border-radius: 6px;
+      color: #e6e8ec;
+      font-weight: 650;
+      text-decoration: none;
+      background: #252930;
+    }
+
+    a:hover,
+    a:focus-visible {
+      border-color: #5d9cc9;
+      outline: none;
+      background: #303b46;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #dcecff;
+      background: #262b33;
+    }
+
+    #protocol-help[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>EDMD</h1>
+    <p id="launch-status">Opening the 2D simulation…</p>
+    <p id="protocol-help" hidden>
+      Browsers do not allow this WebAssembly application to fetch its files
+      from a <code>file://</code> page. Run <code>make web-serve</code> and open
+      the displayed HTTP address. A GitHub Pages deployment works directly
+      because it is served over HTTPS.
+    </p>
+    <nav class="choices" aria-label="Choose simulation dimension">
+      <a data-dimension="2d" href="./2d/">Open 2D</a>
+      <a data-dimension="3d" href="./3d/">Open 3D</a>
+    </nav>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var params = new URLSearchParams(window.location.search);
+      var requested = (params.get("dimension") || "").toLowerCase();
+      var remembered = "";
+      try {
+        remembered = window.localStorage.getItem("edmd-dimension") || "";
+      } catch (error) {
+        // Storage can be unavailable in privacy modes; the default is enough.
+      }
+
+      var dimension = requested === "3" || requested === "3d"
+        ? "3d"
+        : requested === "2" || requested === "2d"
+          ? "2d"
+          : remembered === "3d" ? "3d" : "2d";
+
+      params.delete("dimension");
+      document.querySelectorAll("[data-dimension]").forEach(function (link) {
+        var target = new URL("./" + link.dataset.dimension + "/", window.location.href);
+        target.search = params.toString();
+        target.hash = window.location.hash;
+        link.href = target.href;
+        link.addEventListener("click", function () {
+          try {
+            window.localStorage.setItem("edmd-dimension", link.dataset.dimension);
+          } catch (error) {
+            // Navigation does not depend on storage.
+          }
+        });
+      });
+
+      if (window.location.protocol === "file:") {
+        document.getElementById("launch-status").textContent =
+          "This build needs a small local web server.";
+        document.getElementById("protocol-help").hidden = false;
+        return;
+      }
+
+      var target = new URL("./" + dimension + "/", window.location.href);
+      target.search = params.toString();
+      target.hash = window.location.hash;
+      document.getElementById("launch-status").textContent =
+        "Opening the " + dimension.toUpperCase() + " simulation…";
+      window.location.replace(target.href);
+    }());
+  </script>
+</body>
+</html>

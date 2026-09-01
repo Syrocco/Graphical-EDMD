@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1116">
+  <meta name="description" content="Interactive event-driven molecular dynamics simulation">
+  <title>EDMD</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      background: #0f1116;
+      color: #e6e8ec;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background:
+        radial-gradient(circle at 50% 36%, rgba(63, 104, 142, 0.2), transparent 38%),
+        #0f1116;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    main {
+      width: min(520px, 100%);
+      padding: 30px;
+      border: 1px solid #343841;
+      border-radius: 10px;
+      background: #1a1d23;
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+      font-weight: 650;
+    }
+
+    p {
+      margin: 0 0 20px;
+      color: #aeb4bf;
+      font-size: 0.94rem;
+      line-height: 1.55;
+    }
+
+    .choices {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    a {
+      display: grid;
+      place-items: center;
+      min-height: 42px;
+      border: 1px solid #4b515d;
+      border-radius: 6px;
+      color: #e6e8ec;
+      font-weight: 650;
+      text-decoration: none;
+      background: #252930;
+    }
+
+    a:hover,
+    a:focus-visible {
+      border-color: #5d9cc9;
+      outline: none;
+      background: #303b46;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #dcecff;
+      background: #262b33;
+    }
+
+    #protocol-help[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>EDMD</h1>
+    <p id="launch-status">Opening the 2D simulation…</p>
+    <p id="protocol-help" hidden>
+      Browsers do not allow this WebAssembly application to fetch its files
+      from a <code>file://</code> page. Run <code>make web-serve</code> and open
+      the displayed HTTP address. A GitHub Pages deployment works directly
+      because it is served over HTTPS.
+    </p>
+    <nav class="choices" aria-label="Choose simulation dimension">
+      <a data-dimension="2d" href="./2d/">Open 2D</a>
+      <a data-dimension="3d" href="./3d/">Open 3D</a>
+    </nav>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var params = new URLSearchParams(window.location.search);
+      var requested = (params.get("dimension") || "").toLowerCase();
+      var remembered = "";
+      try {
+        remembered = window.localStorage.getItem("edmd-dimension") || "";
+      } catch (error) {
+        // Storage can be unavailable in privacy modes; the default is enough.
+      }
+
+      var dimension = requested === "3" || requested === "3d"
+        ? "3d"
+        : requested === "2" || requested === "2d"
+          ? "2d"
+          : remembered === "3d" ? "3d" : "2d";
+
+      params.delete("dimension");
+      document.querySelectorAll("[data-dimension]").forEach(function (link) {
+        var target = new URL("./" + link.dataset.dimension + "/", window.location.href);
+        target.search = params.toString();
+        target.hash = window.location.hash;
+        link.href = target.href;
+        link.addEventListener("click", function () {
+          try {
+            window.localStorage.setItem("edmd-dimension", link.dataset.dimension);
+          } catch (error) {
+            // Navigation does not depend on storage.
+          }
+        });
+      });
+
+      if (window.location.protocol === "file:") {
+        document.getElementById("launch-status").textContent =
+          "This build needs a small local web server.";
+        document.getElementById("protocol-help").hidden = false;
+        return;
+      }
+
+      var target = new URL("./" + dimension + "/", window.location.href);
+      target.search = params.toString();
+      target.hash = window.location.hash;
+      document.getElementById("launch-status").textContent =
+        "Opening the " + dimension.toUpperCase() + " simulation…";
+      window.location.replace(target.href);
+    }());
+  </script>
+</body>
+</html>

@@ -284,8 +284,9 @@ void free_g6corr_data(g6corr_data* data) {
     }
 }
 
-void save_pcf(const char* filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly) {
+int save_pcf(const char* filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly) {
     pcf_data* data = calculate_pcf(particles, N, dr, max_r, Lx, Ly);
+    if (data == NULL) return 0;
     
     // Check if the file already exists to determine if this is the first save
     FILE* check_file = fopen(filename, "r");
@@ -298,6 +299,10 @@ void save_pcf(const char* filename, particle* particles, int N, double dr, doubl
     if (first_save) {
         // First time saving - create new file with full data
         file = fopen(filename, "w");
+        if (file == NULL) {
+            free_pcf_data(data);
+            return 0;
+        }
         // Write both r and g(r) data
         for (int i = 0; i < data->num_bins; i++) {
             fprintf(file, "%lf ", data->r[i]);
@@ -310,6 +315,10 @@ void save_pcf(const char* filename, particle* particles, int N, double dr, doubl
     } else {
        
         file = fopen(filename, "a");
+        if (file == NULL) {
+            free_pcf_data(data);
+            return 0;
+        }
         
         // Write only g(r) values (not the r values)
         for (int i = 0; i < data->num_bins; i++) {
@@ -320,12 +329,14 @@ void save_pcf(const char* filename, particle* particles, int N, double dr, doubl
     
     fclose(file);
     free_pcf_data(data);
+    return 1;
 }
 
 
-void save_pcf_g6(const char* filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly) {
+int save_pcf_g6(const char* filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly) {
    
     g6corr_data* data = compute_g6_correlation(particles, N, dr, max_r, Lx, Ly);
+    if (data == NULL) return 0;
     
     FILE* check_file = fopen(filename, "r");
     int first_save = (check_file == NULL);
@@ -337,6 +348,10 @@ void save_pcf_g6(const char* filename, particle* particles, int N, double dr, do
     if (first_save) {
         // First time saving - create new file with full data
         file = fopen(filename, "w");
+        if (file == NULL) {
+            free_g6corr_data(data);
+            return 0;
+        }
         // Write both r and g(r) data
         for (int i = 0; i < data->num_bins; i++) {
             fprintf(file, "%lf ", data->r[i]);
@@ -349,6 +364,10 @@ void save_pcf_g6(const char* filename, particle* particles, int N, double dr, do
     } else {
        
         file = fopen(filename, "a");
+        if (file == NULL) {
+            free_g6corr_data(data);
+            return 0;
+        }
         
         // Write only g(r) values (not the r values)
         for (int i = 0; i < data->num_bins; i++) {
@@ -359,11 +378,12 @@ void save_pcf_g6(const char* filename, particle* particles, int N, double dr, do
     
     fclose(file);
     free_g6corr_data(data);
+    return 1;
 }
 
 
 // Save both PCF and boop (q6) in two separate files
-void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly, double phi) {
+int save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle* particles, int N, double dr, double max_r, double Lx, double Ly, double phi) {
 
     //double t0 = omp_get_wtime();
     double expected_bragg = sqrt(8*M_PI*phi/(sqrt(3)));
@@ -377,7 +397,7 @@ void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle
     //double t2 = omp_get_wtime();
     bond_order_pcf_data* data = calculate_bond_order_pcf(particles, N, dr, max_r, k_vector, Lx, Ly);
     //double t3 = omp_get_wtime();
-    if (data == NULL) return;
+    if (data == NULL) return 0;
     //double dt_bondorder = t3 - t2;
     //printf("Time to calculate bond order PCF: %.6f s\n", dt_bondorder);
 
@@ -392,6 +412,12 @@ void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle
         // First time saving - create new file with full data
         file_pcf = fopen(pcf_filename, "w");
         file_boop = fopen(boop_filename, "w");
+        if (file_pcf == NULL || file_boop == NULL) {
+            if (file_pcf != NULL) fclose(file_pcf);
+            if (file_boop != NULL) fclose(file_boop);
+            free_bond_order_pcf_data(data);
+            return 0;
+        }
 
         for (int i = 0; i < data->num_bins; i++) {
             fprintf(file_boop, "%lf ", data->r[i]);
@@ -408,6 +434,12 @@ void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle
     } else {
         file_pcf = fopen(pcf_filename, "a");
         file_boop = fopen(boop_filename, "a");
+        if (file_pcf == NULL || file_boop == NULL) {
+            if (file_pcf != NULL) fclose(file_pcf);
+            if (file_boop != NULL) fclose(file_boop);
+            free_bond_order_pcf_data(data);
+            return 0;
+        }
         // Write only g(r) values (not the r values)
         for (int i = 0; i < data->num_bins; i++) {
             fprintf(file_pcf, "%lf ", data->g_r[i]);
@@ -420,6 +452,7 @@ void save_pcf_boop(const char* pcf_filename, const char* boop_filename, particle
     fclose(file_pcf);
     fclose(file_boop);
     free_bond_order_pcf_data(data);
+    return 1;
 }
 
 int angle_not_between(double angle, double start, double end) {
@@ -493,4 +526,3 @@ void find_max_structure_factor_bragg(particle* particles, int N, double Lx, doub
     k[1] = best_k[1];
     //printf("Max structure factor S = %.6f at k = (%.6f, %.6f)\n", max_S, k[0], k[1]);
 }
-

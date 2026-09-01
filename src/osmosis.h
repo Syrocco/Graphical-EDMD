@@ -10,5 +10,6 @@ struct osmosisSlice {
     double temperatureSolvent;
 };
 
-void init_osmosis(double lx, double ly, double sigma, FILE* inter);
+int init_osmosis(double lx, double ly, double sigma, FILE* inter);
 void save_osmosis(particle* particles, int N);
+void free_osmosis(void);

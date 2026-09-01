@@ -2,7 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <complex.h>
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -67,26 +69,81 @@ static FILE *tvacfFile;
 static char *tvacfFileName;
 static double tvacfLx;
 static double tvacfLy;
+static int tvacfEnabled = TVACF_ENABLED;
+static int tvacfModeM = TVACF_MODE_M;
+static int tvacfModeN = TVACF_MODE_N;
+static int tvacfSampleCapacity = TVACF_N_P;
+static double tvacfTimeSpan = TVACF_T_P;
+static int tvacfCheckpointInterval = TVACF_CHECKPOINT_INTERVAL;
+
+static void freeTransverseVelocityCorrelationStorage(void){
+    if (tvacfFile != NULL){
+        fclose(tvacfFile);
+        tvacfFile = NULL;
+    }
+    free(tvacfFileName);
+    free(tvacfOriginCount);
+    free(tvacfCorrelationM2);
+    free(tvacfCorrelationSum);
+    free(tvacfHistory);
+    free(tvacfModes);
+    tvacfFileName = NULL;
+    tvacfOriginCount = NULL;
+    tvacfCorrelationM2 = NULL;
+    tvacfCorrelationSum = NULL;
+    tvacfHistory = NULL;
+    tvacfModes = NULL;
+    tvacfModeCount = 0;
+    tvacfParticleCount = 0;
+    tvacfSampleCount = 0;
+    tvacfNextSlot = 0;
+    tvacfLx = 0.0;
+    tvacfLy = 0.0;
+}
+
+void setTransverseVelocityCorrelationConfig(int enabled, int modeM, int modeN,
+                                             int samples, double timeSpan,
+                                             int checkpointInterval){
+    tvacfEnabled = enabled != 0;
+    tvacfModeM = modeM;
+    tvacfModeN = modeN;
+    tvacfSampleCapacity = samples;
+    tvacfTimeSpan = timeSpan;
+    tvacfCheckpointInterval = checkpointInterval;
+}
+
+void getTransverseVelocityCorrelationConfig(int *enabled, int *modeM,
+                                             int *modeN, int *samples,
+                                             double *timeSpan,
+                                             int *checkpointInterval){
+    if (enabled != NULL) *enabled = tvacfEnabled;
+    if (modeM != NULL) *modeM = tvacfModeM;
+    if (modeN != NULL) *modeN = tvacfModeN;
+    if (samples != NULL) *samples = tvacfSampleCapacity;
+    if (timeSpan != NULL) *timeSpan = tvacfTimeSpan;
+    if (checkpointInterval != NULL)
+        *checkpointInterval = tvacfCheckpointInterval;
+}
 
 int transverseVelocityCorrelationIsEnabled(void){
-    return TVACF_ENABLED;
+    return tvacfEnabled;
 }
 
 double transverseVelocityCorrelationSampleInterval(void){
-    if (TVACF_N_P < 2 || TVACF_T_P <= 0.0)
+    if (tvacfSampleCapacity < 2 || tvacfTimeSpan <= 0.0)
         return 0.0;
-    return TVACF_T_P/(TVACF_N_P - 1);
+    return tvacfTimeSpan/(tvacfSampleCapacity - 1);
 }
 
 void configureTransverseVelocityCorrelationSampling(double *thermoInterval,
                                                      int *useLogSpacing){
-    if (!TVACF_ENABLED)
+    if (!tvacfEnabled)
         return;
 
     double sampleInterval = transverseVelocityCorrelationSampleInterval();
     if (sampleInterval <= 0.0){
         fprintf(stderr,
-                "ERROR: TVACF_N_P must be at least 2 and TVACF_T_P must be positive.\n");
+                "ERROR: TVACF sample count must be at least 2 and its time span must be positive.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -99,7 +156,7 @@ void configureTransverseVelocityCorrelationSampling(double *thermoInterval,
         1e-12*fmax(1.0, sampleInterval)){
         fprintf(stderr,
                 "TVACF: setting dtimeThermo to %.17g so %d points span %.17g.\n",
-                sampleInterval, TVACF_N_P, (double)TVACF_T_P);
+                sampleInterval, tvacfSampleCapacity, tvacfTimeSpan);
         *thermoInterval = sampleInterval;
     }
 }
@@ -112,9 +169,9 @@ static int transverseModeIsOnTargetShell(int m, int n, double targetK2,
     return fabs(k2 - targetK2) <= 1e-10*targetK2;
 }
 
-static void writeTransverseVelocityCorrelation(void){
+static int writeTransverseVelocityCorrelation(void){
     if (tvacfFileName == NULL)
-        return;
+        return 1;
 
     if (tvacfFile == NULL){
         tvacfFile = fopen(tvacfFileName, "w");
@@ -124,19 +181,19 @@ static void writeTransverseVelocityCorrelation(void){
     }
     if (tvacfFile == NULL){
         fprintf(stderr, "WARNING: could not write TVACF file %s.\n", tvacfFileName);
-        return;
+        return 0;
     }
 
-    double targetKx = 2.0*M_PI*TVACF_MODE_M/tvacfLx;
-    double targetKy = 2.0*M_PI*TVACF_MODE_N/tvacfLy;
+    double targetKx = 2.0*M_PI*tvacfModeM/tvacfLx;
+    double targetKy = 2.0*M_PI*tvacfModeN/tvacfLy;
     double targetK2 = targetKx*targetKx + targetKy*targetKy;
     fprintf(tvacfFile, "# Transverse velocity autocorrelation\n");
     fprintf(tvacfFile, "# target_mode_m %d target_mode_n %d\n",
-            TVACF_MODE_M, TVACF_MODE_N);
+            tvacfModeM, tvacfModeN);
     fprintf(tvacfFile, "# target_kx %.4lf target_ky %.4lf k_squared %.4lf\n",
             targetKx, targetKy, targetK2);
     fprintf(tvacfFile, "# sample_interval %.4lf requested_span %.4lf samples_seen %llu\n",
-            transverseVelocityCorrelationSampleInterval(), (double)TVACF_T_P,
+            transverseVelocityCorrelationSampleInterval(), tvacfTimeSpan,
             tvacfSampleCount);
     fprintf(tvacfFile, "# isotropic_mode_count %d\n", tvacfModeCount);
     for (int q = 0; q < tvacfModeCount; q++){
@@ -150,8 +207,8 @@ static void writeTransverseVelocityCorrelation(void){
             "# variance is the sample variance across time origins after isotropic averaging\n");
     fprintf(tvacfFile, "# columns: lag_time C_T_real variance\n");
 
-    int lagCount = (tvacfSampleCount < (unsigned long long)TVACF_N_P)
-                 ? (int)tvacfSampleCount : TVACF_N_P;
+    int lagCount = (tvacfSampleCount < (unsigned long long)tvacfSampleCapacity)
+                 ? (int)tvacfSampleCount : tvacfSampleCapacity;
     double dt = transverseVelocityCorrelationSampleInterval();
     for (int lag = 0; lag < lagCount; lag++){
         double correlation = 0.0;
@@ -167,26 +224,27 @@ static void writeTransverseVelocityCorrelation(void){
                 lag*dt, correlation, variance);
     }
     fflush(tvacfFile);
+    return ferror(tvacfFile) == 0;
 }
 
-void initTransverseVelocityCorrelation(double Lx, double Ly, int numParticles,
-                                       const char *outputName){
-    if (!TVACF_ENABLED)
-        return;
-    if (TVACF_MODE_M == 0 && TVACF_MODE_N == 0){
+int initTransverseVelocityCorrelation(double Lx, double Ly, int numParticles,
+                                      const char *outputName){
+    if (!tvacfEnabled)
+        return 1;
+    if (tvacfModeM == 0 && tvacfModeN == 0){
         fprintf(stderr, "ERROR: the TVACF wavevector cannot be k=(0,0).\n");
-        exit(EXIT_FAILURE);
+        return 0;
     }
     if (Lx <= 0.0 || Ly <= 0.0 || numParticles <= 0 || outputName == NULL){
         fprintf(stderr, "ERROR: invalid TVACF initialization parameters.\n");
-        exit(EXIT_FAILURE);
+        return 0;
     }
 
     tvacfLx = Lx;
     tvacfLy = Ly;
     tvacfParticleCount = numParticles;
-    double targetKx = 2.0*M_PI*TVACF_MODE_M/Lx;
-    double targetKy = 2.0*M_PI*TVACF_MODE_N/Ly;
+    double targetKx = 2.0*M_PI*tvacfModeM/Lx;
+    double targetKy = 2.0*M_PI*tvacfModeN/Ly;
     double targetK2 = targetKx*targetKx + targetKy*targetKy;
     double targetK = sqrt(targetK2);
     int maxM = (int)ceil(targetK*Lx/(2.0*M_PI) + 1e-12);
@@ -202,23 +260,25 @@ void initTransverseVelocityCorrelation(double Lx, double Ly, int numParticles,
     }
     if (tvacfModeCount == 0){
         fprintf(stderr, "ERROR: no reciprocal-lattice vectors found for the TVACF shell.\n");
-        exit(EXIT_FAILURE);
+        return 0;
     }
 
     tvacfModes = calloc((size_t)tvacfModeCount, sizeof(*tvacfModes));
-    tvacfHistory = calloc((size_t)TVACF_N_P*tvacfModeCount,
+    tvacfHistory = calloc((size_t)tvacfSampleCapacity*tvacfModeCount,
                           sizeof(*tvacfHistory));
-    tvacfCorrelationSum = calloc((size_t)TVACF_N_P,
+    tvacfCorrelationSum = calloc((size_t)tvacfSampleCapacity,
                                  sizeof(*tvacfCorrelationSum));
-    tvacfCorrelationM2 = calloc((size_t)TVACF_N_P,
+    tvacfCorrelationM2 = calloc((size_t)tvacfSampleCapacity,
                                 sizeof(*tvacfCorrelationM2));
-    tvacfOriginCount = calloc((size_t)TVACF_N_P, sizeof(*tvacfOriginCount));
+    tvacfOriginCount = calloc((size_t)tvacfSampleCapacity,
+                              sizeof(*tvacfOriginCount));
     tvacfFileName = malloc(strlen(outputName) + 1);
     if (tvacfModes == NULL || tvacfHistory == NULL ||
         tvacfCorrelationSum == NULL || tvacfCorrelationM2 == NULL ||
         tvacfOriginCount == NULL || tvacfFileName == NULL){
         fprintf(stderr, "ERROR: unable to allocate TVACF storage.\n");
-        exit(EXIT_FAILURE);
+        freeTransverseVelocityCorrelationStorage();
+        return 0;
     }
     strcpy(tvacfFileName, outputName);
 
@@ -242,13 +302,17 @@ void initTransverseVelocityCorrelation(double Lx, double Ly, int numParticles,
         }
     }
 
-    writeTransverseVelocityCorrelation();
+    if (!writeTransverseVelocityCorrelation()){
+        freeTransverseVelocityCorrelationStorage();
+        return 0;
+    }
+    return 1;
 }
 
 void updateTransverseVelocityCorrelation(const particle *particles,
                                          double sampleTime){
     (void)sampleTime;
-    if (!TVACF_ENABLED || tvacfHistory == NULL)
+    if (!tvacfEnabled || tvacfHistory == NULL)
         return;
 
     int currentSlot = tvacfNextSlot;
@@ -268,12 +332,13 @@ void updateTransverseVelocityCorrelation(const particle *particles,
             normalization*(re + I*im);
     }
 
-    int available = (tvacfSampleCount + 1 < (unsigned long long)TVACF_N_P)
-                  ? (int)(tvacfSampleCount + 1) : TVACF_N_P;
+    int available = (tvacfSampleCount + 1 <
+                     (unsigned long long)tvacfSampleCapacity)
+                  ? (int)(tvacfSampleCount + 1) : tvacfSampleCapacity;
     for (int lag = 0; lag < available; lag++){
         int pastSlot = currentSlot - lag;
         if (pastSlot < 0)
-            pastSlot += TVACF_N_P;
+            pastSlot += tvacfSampleCapacity;
         double complex shellCorrelation = 0.0;
         for (int q = 0; q < tvacfModeCount; q++){
             double complex current =
@@ -296,44 +361,66 @@ void updateTransverseVelocityCorrelation(const particle *particles,
     }
 
     tvacfSampleCount++;
-    tvacfNextSlot = (currentSlot + 1) % TVACF_N_P;
-    if (TVACF_CHECKPOINT_INTERVAL > 0 &&
-        tvacfSampleCount % TVACF_CHECKPOINT_INTERVAL == 0){
+    tvacfNextSlot = (currentSlot + 1) % tvacfSampleCapacity;
+    if (tvacfCheckpointInterval > 0 &&
+        tvacfSampleCount % tvacfCheckpointInterval == 0){
         writeTransverseVelocityCorrelation();
     }
 }
 
 void finalizeTransverseVelocityCorrelation(void){
-    if (!TVACF_ENABLED)
-        return;
-    writeTransverseVelocityCorrelation();
-    if (tvacfFile != NULL){
-        fclose(tvacfFile);
-        tvacfFile = NULL;
+    if (tvacfFileName != NULL && tvacfModes != NULL &&
+        tvacfHistory != NULL && tvacfCorrelationSum != NULL &&
+        tvacfCorrelationM2 != NULL && tvacfOriginCount != NULL){
+        writeTransverseVelocityCorrelation();
     }
-    free(tvacfFileName);
-    free(tvacfOriginCount);
-    free(tvacfCorrelationM2);
-    free(tvacfCorrelationSum);
-    free(tvacfHistory);
-    free(tvacfModes);
-    tvacfFileName = NULL;
-    tvacfOriginCount = NULL;
-    tvacfCorrelationM2 = NULL;
-    tvacfCorrelationSum = NULL;
-    tvacfHistory = NULL;
-    tvacfModes = NULL;
-    tvacfModeCount = 0;
+    freeTransverseVelocityCorrelationStorage();
 }
 
 
-void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,  double doFQT){
+void freeStructureFactor(void){
+    free(qx);
+    free(qy);
+    free(structFactor);
+    free(structFactorComplex);
+    qx = NULL;
+    qy = NULL;
+    structFactor = NULL;
+    structFactorComplex = NULL;
+    nqx = 0;
+    nqy = 0;
+    fileout = NULL;
+}
+
+int initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
+                        double doFQT){
+    freeStructureFactor();
+    if (!isfinite(qmax) || !isfinite(Lx) || !isfinite(Ly) ||
+        qmax <= 0.0 || Lx <= 0.0 || Ly <= 0.0 || num <= 0 || file == NULL){
+        return 0;
+    }
     double xx = 2*M_PI/Lx;
     double yy = 2*M_PI/Ly;
-    nqx = 2*qmax/xx + 1;
-    nqy = 2*qmax/yy + 1;
+    double requestedNqx = 2*qmax/xx + 1;
+    double requestedNqy = 2*qmax/yy + 1;
+    if (!isfinite(requestedNqx) || !isfinite(requestedNqy) ||
+        requestedNqx < 1.0 || requestedNqy < 1.0 ||
+        requestedNqx > INT_MAX || requestedNqy > INT_MAX){
+        return 0;
+    }
+    nqx = (int)requestedNqx;
+    nqy = (int)requestedNqy;
+    if ((size_t)nqy > SIZE_MAX/(size_t)nqx ||
+        (size_t)nqx*(size_t)nqy > SIZE_MAX/sizeof(double complex)){
+        freeStructureFactor();
+        return 0;
+    }
     qx = calloc(nqx, sizeof(double));
     qy = calloc(nqy, sizeof(double));
+    if (nqx <= 0 || nqy <= 0 || qx == NULL || qy == NULL){
+        freeStructureFactor();
+        return 0;
+    }
     
     N = num;
     for (int i = 0; i < nqx; ++i){
@@ -359,6 +446,12 @@ void initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
         structFactorComplex = calloc(nqy*nqx, sizeof(double complex));
     else
         structFactor = calloc(nqy*nqx, sizeof(double));
+    if ((doFQT && structFactorComplex == NULL) ||
+        (!doFQT && structFactor == NULL)){
+        freeStructureFactor();
+        return 0;
+    }
+    return 1;
 }
 
 void computeStructureFactor(particle* particles){
@@ -405,7 +498,7 @@ void computeVelocityStructureFactor(particle* particles){
     }
 }
 void saveStructureFactor(particle* particles, int mode){
-    if (mode == 0)
+    if (mode == 2)
         computeVelocityStructureFactor(particles);
     else
         computeStructureFactor(particles);

@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090d12">
+  <meta name="description" content="Interactive event-driven molecular dynamics simulation">
+  <title>EDMD</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      background: #090d12;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #090d12;
+    }
+
+    #canvas {
+      position: fixed;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      outline: none;
+      background: #090d12;
+      touch-action: none;
+    }
+
+    .dimension-switch {
+      position: fixed;
+      right: max(10px, env(safe-area-inset-right));
+      bottom: max(10px, env(safe-area-inset-bottom));
+      z-index: 9;
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid rgba(154, 164, 177, 0.35);
+      border-radius: 7px;
+      background: rgba(24, 27, 32, 0.78);
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+      opacity: 0.42;
+      transition: opacity 180ms ease, border-color 180ms ease;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    .dimension-switch:hover,
+    .dimension-switch:focus-within {
+      border-color: rgba(112, 167, 207, 0.72);
+      opacity: 1;
+    }
+
+    .dimension-switch[hidden] {
+      display: none;
+    }
+
+    .dimension-switch a {
+      display: grid;
+      place-items: center;
+      min-width: 34px;
+      height: 25px;
+      border-radius: 4px;
+      color: #aeb4bf;
+      font-size: 0.75rem;
+      font-weight: 700;
+      line-height: 1;
+      text-decoration: none;
+    }
+
+    .dimension-switch a:hover,
+    .dimension-switch a:focus-visible {
+      color: #edf6ff;
+      outline: 1px solid #6aa6cf;
+      outline-offset: -1px;
+      background: #303943;
+    }
+
+    .dimension-switch a[aria-current="page"] {
+      color: #f3f7fb;
+      background: #365d7b;
+    }
+
+    #runtime-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      padding: max(24px, env(safe-area-inset-top))
+        max(24px, env(safe-area-inset-right))
+        max(24px, env(safe-area-inset-bottom))
+        max(24px, env(safe-area-inset-left));
+      background:
+        radial-gradient(circle at 50% 42%, rgba(54, 120, 166, 0.18), transparent 38%),
+        rgba(9, 13, 18, 0.96);
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 220ms ease, visibility 220ms ease;
+    }
+
+    #runtime-overlay.is-hidden {
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .loader {
+      width: min(420px, 100%);
+      padding: 30px 32px 28px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 18px;
+      background: rgba(18, 25, 34, 0.78);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .loader-heading {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .spinner {
+      flex: 0 0 auto;
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(255, 255, 255, 0.14);
+      border-top-color: #67c1f5;
+      border-radius: 50%;
+      animation: spin 800ms linear infinite;
+    }
+
+    .title {
+      margin: 0;
+      color: #f3f7fb;
+      font-size: 1.12rem;
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: #91a2b4;
+      font-size: 0.78rem;
+      font-weight: 650;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    #runtime-status {
+      min-height: 1.35em;
+      margin: 24px 0 11px;
+      color: #bcc8d4;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    .progress-track {
+      position: relative;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    #runtime-progress {
+      width: 28%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #3b88b9, #72d3f5);
+      box-shadow: 0 0 14px rgba(103, 193, 245, 0.35);
+      transform-origin: left center;
+      animation: indeterminate 1.25s ease-in-out infinite;
+    }
+
+    #runtime-progress.is-determinate {
+      width: 0;
+      animation: none;
+      transition: width 120ms ease;
+    }
+
+    #runtime-overlay.is-error {
+      background:
+        radial-gradient(circle at 50% 42%, rgba(177, 67, 67, 0.18), transparent 38%),
+        rgba(9, 13, 18, 0.97);
+    }
+
+    #runtime-overlay.is-error .spinner {
+      position: relative;
+      border-color: rgba(255, 129, 129, 0.72);
+      animation: none;
+    }
+
+    #runtime-overlay.is-error .spinner::before,
+    #runtime-overlay.is-error .spinner::after {
+      position: absolute;
+      top: 16px;
+      left: 7px;
+      width: 18px;
+      height: 2px;
+      border-radius: 2px;
+      background: #ff9292;
+      content: "";
+    }
+
+    #runtime-overlay.is-error .spinner::before {
+      transform: rotate(45deg);
+    }
+
+    #runtime-overlay.is-error .spinner::after {
+      transform: rotate(-45deg);
+    }
+
+    #runtime-overlay.is-error #runtime-status {
+      color: #ffc1c1;
+    }
+
+    #runtime-overlay.is-error .progress-track {
+      display: none;
+    }
+
+    .noscript {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: #f3f7fb;
+      text-align: center;
+      background: #090d12;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes indeterminate {
+      0% { transform: translateX(-115%); }
+      55% { transform: translateX(190%); }
+      100% { transform: translateX(360%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #runtime-overlay,
+      #runtime-progress,
+      .spinner {
+        animation-duration: 1ms;
+        transition-duration: 1ms;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" aria-label="EDMD simulation canvas"
+    oncontextmenu="event.preventDefault()"></canvas>
+
+  <nav class="dimension-switch" aria-label="Simulation dimension" hidden>
+    <a data-dimension="2d" href="../2d/">2D</a>
+    <a data-dimension="3d" href="../3d/">3D</a>
+  </nav>
+
+  <div id="runtime-overlay" role="status" aria-live="polite" aria-atomic="true">
+    <div class="loader">
+      <div class="loader-heading">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <p class="title" id="runtime-title">Preparing simulation</p>
+          <p class="subtitle">Event-driven molecular dynamics</p>
+        </div>
+      </div>
+      <p id="runtime-status">Downloading application…</p>
+      <div class="progress-track" role="progressbar" aria-label="Loading progress"
+        aria-valuemin="0" aria-valuemax="100" aria-valuetext="Starting">
+        <div id="runtime-progress"></div>
+      </div>
+    </div>
+  </div>
+
+  <noscript>
+    <div class="noscript">EDMD requires JavaScript and WebAssembly to run.</div>
+  </noscript>
+
+  <script>
+    var Module = (function () {
+      "use strict";
+
+      var canvas = document.getElementById("canvas");
+      var overlay = document.getElementById("runtime-overlay");
+      var title = document.getElementById("runtime-title");
+      var status = document.getElementById("runtime-status");
+      var progress = document.getElementById("runtime-progress");
+      var progressTrack = document.querySelector(".progress-track");
+      var dependencyTotal = 0;
+      var failed = false;
+
+      function hideOverlay() {
+        if (failed) return;
+        overlay.classList.add("is-hidden");
+        overlay.setAttribute("aria-hidden", "true");
+        canvas.focus({ preventScroll: true });
+      }
+
+      function showError(message) {
+        if (failed) return;
+        failed = true;
+        overlay.classList.remove("is-hidden");
+        overlay.classList.add("is-error");
+        overlay.removeAttribute("aria-hidden");
+        title.textContent = "Unable to start EDMD";
+        status.textContent = message || "An unexpected browser error occurred.";
+        progressTrack.setAttribute("aria-valuetext", "Failed");
+      }
+
+      function setStatus(message) {
+        if (failed) return;
+        if (!message) {
+          hideOverlay();
+          return;
+        }
+
+        var text = String(message);
+        var match = text.match(/^(.*?)\s*\((\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\)\s*$/);
+        status.textContent = match ? match[1].trim() : text;
+
+        if (match) {
+          var completed = Number(match[2]);
+          var total = Number(match[3]);
+          var percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
+          progress.classList.add("is-determinate");
+          progress.style.width = percent + "%";
+          progressTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
+          progressTrack.setAttribute("aria-valuetext", Math.round(percent) + "%");
+        } else {
+          progress.classList.remove("is-determinate");
+          progress.style.removeProperty("width");
+          progressTrack.removeAttribute("aria-valuenow");
+          progressTrack.setAttribute("aria-valuetext", text);
+        }
+      }
+
+      canvas.addEventListener("pointerdown", function () {
+        canvas.focus({ preventScroll: true });
+      });
+
+      canvas.addEventListener("webglcontextlost", function (event) {
+        event.preventDefault();
+        showError("The WebGL context was lost. Reload the page to restart the simulation.");
+      });
+
+      window.addEventListener("error", function (event) {
+        showError(event.message || "The application could not be loaded.");
+      });
+
+      window.addEventListener("unhandledrejection", function (event) {
+        var reason = event.reason;
+        showError(reason && reason.message ? reason.message : String(reason || "The application could not be loaded."));
+      });
+
+      return {
+        canvas: canvas,
+        preRun: [],
+        postRun: [hideOverlay],
+        print: function () {
+          console.log(Array.prototype.slice.call(arguments).join(" "));
+        },
+        printErr: function () {
+          console.error(Array.prototype.slice.call(arguments).join(" "));
+        },
+        showError: showError,
+        setStatus: setStatus,
+        onRuntimeInitialized: function () {
+          window.requestAnimationFrame(hideOverlay);
+        },
+        monitorRunDependencies: function (remaining) {
+          dependencyTotal = Math.max(dependencyTotal, remaining);
+          if (remaining) {
+            setStatus("Preparing files… (" + (dependencyTotal - remaining) + "/" + dependencyTotal + ")");
+          } else {
+            setStatus("Starting simulation…");
+          }
+        }
+      };
+    }());
+
+    (function configureDimensionSwitch() {
+      "use strict";
+
+      var segments = window.location.pathname.split("/").filter(Boolean);
+      var folder = (segments[segments.length - 1] || "").toLowerCase();
+      if (folder === "index.html") {
+        folder = (segments[segments.length - 2] || "").toLowerCase();
+      }
+      if (folder !== "2d" && folder !== "3d") {
+        return;
+      }
+      document.querySelector(".dimension-switch").hidden = false;
+      var current = folder === "3d" ? "3d" : "2d";
+      var params = new URLSearchParams(window.location.search);
+      params.delete("dimension");
+
+      document.querySelectorAll(".dimension-switch [data-dimension]").forEach(function (link) {
+        var dimension = link.dataset.dimension;
+        var target = new URL("../" + dimension + "/", window.location.href);
+        target.search = params.toString();
+        target.hash = window.location.hash;
+        link.href = target.href;
+        if (dimension === current) {
+          link.setAttribute("aria-current", "page");
+          link.setAttribute("title", dimension.toUpperCase() + " simulation (current)");
+        } else {
+          link.setAttribute("title", "Open the " + dimension.toUpperCase() + " simulation");
+        }
+        link.addEventListener("click", function () {
+          try {
+            window.localStorage.setItem("edmd-dimension", dimension);
+          } catch (error) {
+            // Navigation does not depend on storage.
+          }
+        });
+      });
+    }());
+
+    if (window.location.protocol === "file:") {
+      Module.showError(
+        "This WebAssembly application cannot run from a file:// page. " +
+        "Run make web-serve and open the displayed HTTP address; GitHub Pages works over HTTPS."
+      );
+    } else {
+      Module.setStatus("Downloading application…");
+    }
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

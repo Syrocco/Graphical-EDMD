@@ -7,6 +7,10 @@
 #    define M_PI 3.14159265358979323846
 #endif
 
+#if THREE_D
+extern double Lz;
+#endif
+
 double getCOMx(particle* particles, double N, double Lx);
 void countConditions(particle* particles, int N, double Lx, double Ly, int* counts, double* energyCounts, double dfrac);
 
@@ -72,9 +76,9 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
         int seconx = ( (X > (right - dfrac)) && (X < (right + dfrac)) );
         int firsty = (particles[i].y < (Ly/2));
         int secony = (particles[i].y > (Ly/2));
-        #if THREE_D //Warming Ly and not Lz here!!
-        int firstz = (particles[i].z < (Ly/2));
-        int seconz = (particles[i].z > (Ly/2));
+        #if THREE_D
+        int firstz = (particles[i].z < (Lz/2));
+        int seconz = (particles[i].z > (Lz/2));
         int type = (firstx && firsty && firstz) ? 0 :
                    (firstx && secony && firstz) ? 1 :
                    (firstx && firsty && seconz) ? 2 :
@@ -100,6 +104,6 @@ void countConditions(particle* particles, int N, double Lx, double Ly, int* coun
         }
     }
     for (int i = 0; i < size; i++){
-        energyCounts[i] /= counts[i];
+        energyCounts[i] = counts[i] > 0 ? energyCounts[i]/counts[i] : 0;
     }
 }

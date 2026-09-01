@@ -39,20 +39,24 @@ double Ly;
 #endif
 int N;
 FILE* interface;
+static int localDensityAllocated = 0;
 
 #if THREE_D
 void initLocalDensity(double lx, double ly, double lz, int Dx, int Dy, int Dz, int n, FILE* inter, int liquidliquid, int temperature){
 #else
 void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, int liquidliquid, int temperature){
 #endif
-    Nx = lx / Dx; 
-    Ny = ly / Dy;
+	if (localDensityAllocated){
+		freeInterface();
+	}
+    Nx = fmax(1, lx / Dx);
+    Ny = fmax(1, ly / Dy);
     dx = lx/Nx;
     dy = ly/Ny; 
     Lx = lx;
     Ly = ly;
     #if THREE_D
-        Nz = lz/Dz;    
+        Nz = fmax(1, lz/Dz);
         dz = lz/Nz;
         Lz = lz;
     #endif
@@ -109,6 +113,7 @@ void initLocalDensity(double lx, double ly, int Dx, int Dy, int n, FILE* inter, 
     #endif
     
     interface = inter;
+    localDensityAllocated = 1;
 
     #if THREE_D
         for (int i = 0; i < Nx; i++) {
@@ -407,6 +412,9 @@ void computeInterfacesPos(particle *particles, double tresh){
 }
 
 void freeInterface(){
+    if (!localDensityAllocated){
+        return;
+    }
     #if THREE_D
     for (int i = 0; i < Nx; i++) {
         for (int j = 0; j < Ny; j++) {
@@ -438,10 +446,14 @@ void freeInterface(){
     }
     #endif
     free(d);
+    d = NULL;
     if (dbis != NULL) {
         free(dbis);
+        dbis = NULL;
     }
     if (tp != NULL) {
         free(tp);
+        tp = NULL;
     }
+    localDensityAllocated = 0;
 }

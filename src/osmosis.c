@@ -11,13 +11,33 @@ int sliceNum;
 osmosisSlice* data;
 FILE* osmosis_file;
 
-void init_osmosis(double lx, double ly, double sigma, FILE* inter){
+void free_osmosis(void){
+    free(data);
+    data = NULL;
+    osmosis_file = NULL;
+    sliceNum = 0;
+    DX = 0.0;
+    areaSlice = 0.0;
+}
+
+int init_osmosis(double lx, double ly, double sigma, FILE* inter){
+    free_osmosis();
+    if (lx <= 0.0 || ly <= 0.0 || sigma <= 0.0 || inter == NULL){
+        return 0;
+    }
     sliceNum = (int)(lx / sigma);
+    if (sliceNum < 1){
+        return 0;
+    }
     DX = lx / sliceNum;
 
 
     areaSlice = ly*DX;
     data = calloc(sliceNum, sizeof(osmosisSlice));
+    if (data == NULL){
+        free_osmosis();
+        return 0;
+    }
     for (int i = 0; i < sliceNum; i++){
         data[i].x = (i + 0.5)*DX;
         data[i].densitySolvent = 0;
@@ -32,6 +52,7 @@ void init_osmosis(double lx, double ly, double sigma, FILE* inter){
     }
     fprintf(osmosis_file, "\n");
     fflush(osmosis_file);
+    return ferror(osmosis_file) == 0;
 }
 
 void save_osmosis(particle* particles, int N){

@@ -19,9 +19,13 @@
 #    define THREE_D 0
 #endif
 
-#define TANGENTIAL 0
+#ifndef TANGENTIAL
+#    define TANGENTIAL 0
+#endif
 
-#define INTRUDER 0
+#ifndef INTRUDER
+#    define INTRUDER 0
+#endif
 
 enum event{
 	CELLCROSS,
@@ -30,11 +34,8 @@ enum event{
 	THERMO,
 	ADDINGNOISE,
 	WALL, 
-	UPDATE,
 	OUT, IN,
 	GROWSTOP,
-	UMBRELLA,
-	MULLER_PLATHE,
 	#if INTRUDER
 	INTRUDER_COLLISION,
 	#endif
@@ -97,6 +98,14 @@ struct node{
 	enum event type;
 };
 
+/* A graphical run keeps a damaged state available for inspection instead of
+ * terminating the process.  Event processing remains locked until a fresh
+ * simulation is constructed.  Headless builds retain their fail-fast exit
+ * behavior. */
+void simulationClearFault(void);
+bool simulationHasFault(void);
+const char* simulationFaultMessage(void);
+
 
 
 void doOut();
@@ -108,11 +117,38 @@ void doTheWallNormal();
 
 void constantInit(int argc, char *argv[]);
 void particlesInit();
+void adaptCellGridToParticles();
 void cellListInit();
 void boxConstantHelper();
+/* Derive complete periodic triangular/HCP lattice counts.  In 2D nz is set
+ * to one; in 3D ny and nz are even so the row and AB-layer offsets close
+ * exactly through the periodic boundaries. */
+bool hexagonalLatticeDimensions(int requestedCount, double requestedAspect,
+	int* nx, int* ny, int* nz);
 void eventListInit();
+/* Incremental graphical reconfiguration helpers.  They preserve particles,
+ * simulation time, physical counters, output streams, and unrelated
+ * auxiliary events. */
+void synchronizeParticlesAtCurrentTime(void);
+void rescheduleParticleEventsAtCurrentTime(void);
+void rescheduleThermostatEventAtCurrentTime(void);
+void rebuildPotentialMembershipsAtCurrentTime(void);
+void rebuildSpatialIndexAtCurrentTime(void);
+void rebaseRuntimeShear(bool wasActive, double oldRate,
+	bool isActive, double newRate);
+void resetRuntimeShearPhase(void);
 void freeArrays();
 void initThermo();
+bool outputLifecycleOpen(char* error, size_t errorCapacity);
+void outputLifecycleClose(void);
+void resetOutputSamplingState(void);
+bool outputThermoSamplingRequested(void);
+
+/* Total normal impulse delivered by physical wall events in the current run.
+ * Unlike the legacy `dp` sampling accumulator, this value is never cleared by
+ * thermodynamic output.  Consumers can therefore form independent intervals
+ * without racing the file-output cadence. */
+extern double cumulativeWallImpulse;
 
 void addToCell(int i);
 void removeFromCell(int i);
@@ -140,6 +176,12 @@ void doTheCrossing();
 
 EDMD_PURE double collisionTimeNormal(const particle* p1, const particle* p2);
 EDMD_PURE double collisionTimeGrow(const particle* p1, const particle* p2);
+double circularWallTimeNormal(const particle* p);
+double circularWallTimeGrow(const particle* p);
+/* Normal velocity after impact with a confining boundary moving inward at
+ * `inwardSpeed`.  Positive input points out of the accessible region. */
+EDMD_PURE double confiningWallNormalVelocityAfter(double normalVelocity,
+	double inwardSpeed, double restitution);
 EDMD_NOINLINE void collisionEventGrow(int i);
 EDMD_NOINLINE void collisionEventNormal(int i);
 void addCollisionEvent(int i, int j, double tColl);
@@ -153,7 +195,6 @@ void addEventScreenshot(double tscreen);
 void takeAScreenshot();
 
 void addEventThermo(double tscreen);
-void addEventMullerPlathe(double tswap);
 void takeAThermo();
 
 void addEventGrow(double time);
@@ -161,15 +202,28 @@ void stopGrow();
 
 void addEventNoise(double tnoise);
 void addNoise();
+/* Computes the multiplicative factor used by the global velocity-rescale
+ * thermostat.  A false result means that rescaling would divide by zero or
+ * introduce a non-finite velocity. */
+bool velocityRescaleFactor(double kineticEnergy, int particleCount,
+	double targetTemperature, double* factor);
 
-void addEventUpdate(double tupdate);
-void updateT();
-
-void addEventUmbrella(double tscreen);
-void doUmbrella();
-
-void initMullerPlathe();
-void doMullerPlatheSwap();
+void setTransverseVelocityCorrelationConfig(int enabled, int modeM, int modeN,
+	int samples, double timeSpan, int checkpointInterval);
+void getTransverseVelocityCorrelationConfig(int* enabled, int* modeM,
+	int* modeN, int* samples, double* timeSpan, int* checkpointInterval);
+int transverseVelocityCorrelationIsEnabled(void);
+double transverseVelocityCorrelationSampleInterval(void);
+void configureTransverseVelocityCorrelationSampling(double* thermoInterval,
+	int* useLogSpacing);
+int initTransverseVelocityCorrelation(double Lx, double Ly, int numParticles,
+	const char* outputName);
+void updateTransverseVelocityCorrelation(const particle* particles,
+	double sampleTime);
+void finalizeTransverseVelocityCorrelation(void);
+int initStructureFactor(double qmax, double Lx, double Ly, int num, FILE* file,
+	double doFQT);
+void freeStructureFactor(void);
 
 EDMD_NOINLINE void freeFlyGrow(particle* p);
 EDMD_NOINLINE void freeFlyNormal(particle* p);
@@ -198,10 +252,21 @@ double PBCinsideCellX(double dx);
 double PBCinsideCellY(double dy);
 double PBCinsideCellZ(double dz);
 void physicalQ();
+/* Rebuilds time-integrated stress/heat state after particle initialization. */
+#if (STRESS || HEAT)
+void initializeTransportAccumulators(void);
+void rebaseTransportAccumulatorsAfterModelChange(void);
+/* Bracket a discrete velocity update which is external to a pair/wall
+ * collision (thermostats, swaps, or a paused GUI edit).  They are no-ops in
+ * builds without STRESS/HEAT, so callers do not need preprocessor branches. */
+void beginTransportVelocityBatch(void);
+void recordTransportVelocityChange(const particle* p,
+	double oldVx, double oldVy, double oldVz);
+#endif
 int cmpDouble(const void * a, const void * b);
 void normalizePhysicalQ();
 void customName();
-int mygetline(char* str, FILE* f);
+bool customSnapshotName(char* destination, size_t capacity);
 double resCoeff(double v);
 void format();
 void printInfo();
@@ -210,6 +275,12 @@ void runningCheck();
 
 EDMD_PURE double separateTime(const particle* p1, const particle* p2);
 EDMD_PURE double sphereTime(const particle* p1, const particle* p2);
+/* Solve one radial square-step crossing. deltaPotential is the potential
+ * energy after the crossing minus the value before it. The return value is
+ * true for transmission and false for an elastic reflection. */
+bool potentialStepNormalVelocities(double firstMass, double secondMass,
+	double firstVelocity, double secondVelocity, double deltaPotential,
+	double* firstVelocityAfter, double* secondVelocityAfter);
 
 void addOutEvent(int i, int j, double tColl);
 void addInEvent(int i, int j, double tColl);
@@ -221,4 +292,8 @@ void removeParticleInWellList(particle* p1, int num);
 int isParticleInWellList(const particle* p1, int num);
 
 void collisionEventIntruder();
+#if INTRUDER
+double getIntruderKineticModelBurnTime(void);
+void setIntruderKineticModelBurnTime(double burnTime);
+#endif
 #endif

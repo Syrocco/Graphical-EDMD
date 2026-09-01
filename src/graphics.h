@@ -11,12 +11,18 @@ extern particle* particles;
 extern node** eventList;
 extern int addWallx;
 extern int addWally;
+extern int addWallz;
+extern int addMidWall;
 extern int addCircularWall;
 extern int noise;
 extern double delta;
 extern bool addDelta;
 extern bool addDoubleDelta;
 extern bool addDeltaTangent;
+extern bool addDoubleDeltaTangent;
+extern int addEvolvingDelta;
+extern int addEnergy;
+extern int addActiveDelta;
 extern double ts;
 extern double deltaM;
 extern bool damping;
@@ -25,6 +31,7 @@ extern bool addField;
 extern bool polydispersity;
 extern bool thermoWall;
 extern double vr;
+extern int automaticGrowthRate;
 extern double dtnoise;
 extern double t;
 extern double gamm;
@@ -61,8 +68,6 @@ extern void (*crossingEvent)(int);
 
 extern int S1;
 extern int Hex;
-extern int coexistenceOld;
-extern int coexistence;
 extern int interfaceThermo;
 extern int interfaceThermoTemp;
 extern int clusterThermo;
@@ -78,6 +83,9 @@ extern int pcfg6Thermo;
 extern int critical;
 extern int snapshotCritical;
 extern int version;
+extern int outputVersion;
+extern int periodicDumps;
+extern int ther;
 
 extern char fileName[350];
 extern FILE* fichier;
@@ -116,6 +124,7 @@ struct state{
     double* colorFunctionArray;
     int colorFunctionCapacity;
     bool running;
+    bool stepRequested;
     bool wallMoving;
     bool spacePressed;
     bool editVx;
@@ -142,8 +151,9 @@ struct threadArg{
 void getInput(window* screenWindow, state* screenState);
 void draw(int argc, char *argv[], window* screenWindow, state* screenState);
 
+#if !THREE_D
 void drawParticlesAndBox(double factor, state* screenState, float zoom, Rectangle viewport);
-void GuiSliderBarDouble(Rectangle bounds, const char *textLeft, const char *textRight, double *value, double minValue, double maxValue);
+#endif
 int getWhatsUnderClick(window* screenWindow, state* screenState);
 void addEventInput(double tin);
 Color colorSelect(double value, Color* colorArray);
@@ -160,9 +170,18 @@ void awaitStructFactor();
 void asyncStructFactor();
 void threadPoolInit();
 bool finishedStructComputation();
-void reset(int argc, char* argv[], double* factor, state* screenState);
-int doubleBox(double* ptr, char* text, bool* activate, Rectangle position);
 window graphicalInit();
 state GUIinit();
 void graphicsFree(state* screenState);
+/* Keeps the event-loop run flag and ImGui toolbar state in sync. */
+void graphicsPauseSimulation(state* screenState);
+/* Upper simulation time reachable at the current wall-clock instant.  An
+ * unpaced run returns +infinity.  The event loop may advance the global clock
+ * up to this limit when the next discrete event lies later. */
+double graphicsSimulationTimeLimit(double currentSimulationTime);
+/* Requested render cap.  Browser hosts use it to skip animation callbacks
+ * without blocking the JavaScript thread. */
+int graphicsTargetFrameRate(void);
+void graphicsReportRuntimeError(const char* message);
+void graphicsReportSimulationFault(const char* message);
 void saveSnapshotGraphics();

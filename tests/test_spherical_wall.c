@@ -5,12 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef EDMD_ADD_FIELD
-#define EDMD_ADD_FIELD 0
+#ifndef EDMD_TEST_SPHERICAL_FIELD
+#error "define EDMD_TEST_SPHERICAL_FIELD as 0 or 1"
 #endif
 
 extern int N, load, S1, Hex;
 extern int periodicDumps, ther;
+extern int addCircularWall;
+extern bool addField;
 extern int Nxcells, Nycells;
 #if THREE_D
 extern int Nzcells;
@@ -111,7 +113,15 @@ static void process_immediate_wall(void)
     doTheWallNormal();
 }
 
-#if !EDMD_ADD_FIELD
+#if !EDMD_TEST_SPHERICAL_FIELD
+static int no_particle_event_remains(void)
+{
+    node *following = findNextEvent();
+    /* Headless dissipative runs retain a THERMO event solely to perform the
+       low-energy stop check.  It is not a rescheduled trajectory event. */
+    return following == NULL || following->type == THERMO;
+}
+
 static void test_fully_dissipative_contact_stops_cleanly(void)
 {
     particle *value = configure_single_particle();
@@ -130,7 +140,7 @@ static void test_fully_dissipative_contact_stops_cleanly(void)
 #endif
     expect_close(circularWallTimeNormal(value), never,
                  "stationary contact rescheduled a zero-time wall event");
-    expect_true(findNextEvent() == NULL,
+    expect_true(no_particle_event_remains(),
                 "stationary contact retained a bogus crossing/wall event");
     expect_true(ncol == 1, "stationary contact processed more than one impact");
     expect_close(cumulativeWallImpulse, 3.0,
@@ -156,7 +166,7 @@ static void test_zero_tangent_restitution_stops_cleanly(void)
 #endif
     expect_close(circularWallTimeNormal(value), never,
                  "zero-resT tangent contact rescheduled at zero time");
-    expect_true(findNextEvent() == NULL,
+    expect_true(no_particle_event_remains(),
                 "zero-resT tangent contact retained a bogus event");
     expect_close(cumulativeWallImpulse, 0.0,
                  "pure tangent damping recorded a normal wall impulse");
@@ -164,7 +174,7 @@ static void test_zero_tangent_restitution_stops_cleanly(void)
 }
 #endif
 
-#if EDMD_ADD_FIELD
+#if EDMD_TEST_SPHERICAL_FIELD
 static void test_tangent_field_contact_advances_in_time(void)
 {
     particle *value = configure_single_particle();
@@ -343,7 +353,9 @@ static void test_off_axis_specular_response(void)
 
 int main(void)
 {
-#if EDMD_ADD_FIELD
+    addCircularWall = 1;
+    addField = EDMD_TEST_SPHERICAL_FIELD != 0;
+#if EDMD_TEST_SPHERICAL_FIELD
     test_tangent_field_contact_advances_in_time();
 #else
     test_fully_dissipative_contact_stops_cleanly();

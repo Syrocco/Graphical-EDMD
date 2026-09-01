@@ -29,6 +29,10 @@
 #include "osmosis.h"
 #include "field.h"
 
+#if POLYGON_PARTICLES && !THREE_D
+#include "polygon_particles.h"
+#endif
+
 #include "intruder.h"
 
 
@@ -55,6 +59,7 @@
 #if G
 #include "graphics.h"
 #include "gui_imgui.h"
+#include "live_analysis.h"
 #include "raylib.h"
 #if !defined(PLATFORM_WEB)
 #include <pthread.h>
@@ -129,6 +134,9 @@ int Nlx, Nly;
 int Nxcells, Nycells;
 int collisionCellNeighborRange = 1;
 static double collisionGridMaxRadius = 1.0;
+#if POLYGON_PARTICLES && !THREE_D
+int polygonCollisionCellNeighborRange = 1;
+#endif
 double halfLx, halfLy; 
 double cellxSize, cellySize; 
 double halfxC, halfyC; 
@@ -146,36 +154,6 @@ double cellxFac, cellyFac;
 const int suppSizeEvent = 10;
 
 double t = 0;
-
-static bool simulationFaultActive = false;
-static char simulationFaultDescription[512] = {0};
-
-void simulationClearFault(void){
-	simulationFaultActive = false;
-	simulationFaultDescription[0] = '\0';
-}
-
-bool simulationHasFault(void){
-	return simulationFaultActive;
-}
-
-const char* simulationFaultMessage(void){
-	return simulationFaultDescription;
-}
-
-#if G
-static void simulationSetFault(const char* format, ...){
-	if (simulationFaultActive)
-		return;
-	va_list arguments;
-	va_start(arguments, format);
-	vsnprintf(simulationFaultDescription, sizeof(simulationFaultDescription),
-		format, arguments);
-	va_end(arguments);
-	simulationFaultDescription[sizeof(simulationFaultDescription) - 1] = '\0';
-	simulationFaultActive = true;
-}
-#endif
 
 double collTermX = 0;
 double collTermY = 0;
@@ -342,7 +320,7 @@ double nextScreen = -1;
 
 
 
-#if G
+#if G || defined(EDMD_TEST_MUTABLE_CONFIG)
 bool addWell = false;
 bool addField = false;
 int noise = 0;
@@ -367,52 +345,30 @@ int addEnergy = 0;
 int addActiveDelta = 0;
 int liquidliquid = 0;
 #else
-#ifndef EDMD_ADD_WELL
-#define EDMD_ADD_WELL 0
-#endif
-#ifndef EDMD_ADD_CIRCULAR_WALL
-#define EDMD_ADD_CIRCULAR_WALL 0
-#endif
-#ifndef EDMD_ADD_WALL_X
-#define EDMD_ADD_WALL_X 0
-#endif
-#ifndef EDMD_ADD_WALL_Y
-#define EDMD_ADD_WALL_Y 0
-#endif
-#ifndef EDMD_ADD_WALL_Z
-#define EDMD_ADD_WALL_Z 0
-#endif
-#ifndef EDMD_ADD_SHEAR
-#define EDMD_ADD_SHEAR 0
-#endif
-#ifndef EDMD_ADD_FIELD
-#define EDMD_ADD_FIELD 0
-#endif
-#ifndef EDMD_ADD_DELTA_TANGENT
-#define EDMD_ADD_DELTA_TANGENT 0
-#endif
-const int addWell = EDMD_ADD_WELL;
-const int addField = EDMD_ADD_FIELD;
+/* Headless physics is configured here, not by make.  Keeping these values
+ * const lets the compiler erase branches belonging to disabled models. */
+const bool addWell = false;
+const bool addField = false;
 const int noise = 0;
-const int addWally = EDMD_ADD_WALL_Y;
-const int addWallx = EDMD_ADD_WALL_X;
-const int addWallz = THREE_D ? EDMD_ADD_WALL_Z : 0;
+const int addWally = 0;
+const int addWallx = 0;
+const int addWallz = 0;
 const int addMidWall = 0;
-const int addCircularWall = EDMD_ADD_CIRCULAR_WALL;
-const int damping = 0;
-const int addDelta = 0;
-const int addDeltaTangent = EDMD_ADD_DELTA_TANGENT;
-const int addDoubleDeltaTangent = 0;
-const int addActiveDelta = 0;
-const int addEnergy = 0;
-const int addDoubleDelta = 0;
+const int addCircularWall = 0;
+const bool damping = false;
+const bool addDelta = false;
+const bool addDeltaTangent = false;
+const bool addDoubleDelta = false;
+const bool addDoubleDeltaTangent = false;
+const bool polydispersity = false;
+const bool thermoWall = false;
+const bool charged = false;
+const bool addShear = false;
+const bool addShearWall = false;
 const int addEvolvingDelta = 0;
 const int addExpo = 0;
-const int polydispersity = 0;
-const int thermoWall = 0;
-const int charged = 0;
-const int addShear = EDMD_ADD_SHEAR;
-const int addShearWall = 0;
+const int addEnergy = 0;
+const int addActiveDelta = 0;
 const int liquidliquid = 0;
 #endif
 
@@ -682,11 +638,92 @@ struct outputSamplingState{
 static outputSamplingState outputSamples = {0};
 static bool periodicDumpStreamOpen = false;
 
+#if G && POLYGON_PARTICLES && !THREE_D
+enum {
+	GRAPHICAL_RECOVERY_SNAPSHOT_COUNT = 4,
+	GRAPHICAL_RECOVERY_AUXILIARY_COUNT = 9
+};
+
+typedef struct graphicalRecoverySnapshot graphicalRecoverySnapshot;
+struct graphicalRecoverySnapshot{
+	bool valid;
+	unsigned long generation;
+	particle* particleIdentity;
+	int particleCount;
+	double boxLx, boxLy;
+	int wallX, wallY, middleWall, circularWall;
+	int thermostatMode;
+	double thermostatInterval;
+	double time;
+	double lastOutputTime;
+	double lastCollisionCount;
+	unsigned long collisions;
+	unsigned long crossings;
+	double virialX, virialY, virialXY, virialYX;
+	double wallImpulse;
+	double sampledWallImpulse;
+	double sampledLeftImpulse;
+	double sampledRightImpulse;
+	double sampledMiddleImpulse;
+	#if STRESS
+	double kineticX, kineticY, kineticXY, kineticYX;
+	double runningKineticX, runningKineticY;
+	double runningKineticXY, runningKineticYX;
+	#endif
+	#if HEAT
+	double heatX, heatY, runningHeatX, runningHeatY;
+	double collisionHeatX, collisionHeatY;
+	double shearCx2Vy, shearVy3, shearVyVz2;
+	double shearCxVy2, shearVy2Vz, shearCxVyVz;
+	#endif
+	#if STRESS || HEAT
+	double lastTransportTime;
+	#endif
+	outputSamplingState samples;
+	unsigned long randomState[NMT];
+	int randomIndex;
+	particle* particleState;
+	void* polygonState;
+	size_t polygonStateBytes;
+	node auxiliary[GRAPHICAL_RECOVERY_AUXILIARY_COUNT];
+	bool auxiliaryQueued[GRAPHICAL_RECOVERY_AUXILIARY_COUNT];
+};
+
+static graphicalRecoverySnapshot graphicalRecovery[
+	GRAPHICAL_RECOVERY_SNAPSHOT_COUNT] = {{0}};
+static int graphicalRecoveryNext = 0;
+static int graphicalRecoveryCount = 0;
+static unsigned long graphicalRecoveryGeneration = 0;
+static double graphicalRecoveryLastWallTime = -DBL_MAX;
+static double graphicalRecoveryLastSimulationTime = -DBL_MAX;
+static unsigned long graphicalRecoveryLastCollisionCount = 0;
+
+static void captureGraphicalRecoveryCheckpoint(const state* screenState);
+static bool tryGraphicalPolygonRecovery(state* screenState);
+static void releaseGraphicalRecoveryCheckpoints(void);
+#endif
+
 #if (STRESS || HEAT)
 void initializeTransportAccumulators(void);
 #endif
 
+#if EDMD_VERIFY_OVERLAPS
+static void verifyNoOverlaps(void);
+#endif
+
 #if G
+static void simulationSetFault(const char* format, ...){
+	if (simulationHasFault())
+		return;
+	char message[512];
+	va_list arguments;
+	va_start(arguments, format);
+	(void)vsnprintf(message, sizeof(message), format, arguments);
+	va_end(arguments);
+	message[sizeof(message) - 1] = '\0';
+	simulationReportFault(message);
+}
+
 /* Execute exactly one interactive frame.  Native builds call this from their
  * ordinary loop; the browser registers the same function with Emscripten so
  * control returns to the browser between frames. */
@@ -697,6 +734,9 @@ static bool graphicalFrame(int argc, char** argv, window* screenWindow,
 		return false;
 	}
 	#endif
+	#if POLYGON_PARTICLES && !THREE_D
+	captureGraphicalRecoveryCheckpoint(screenState);
+	#endif
 
 	if ((screenState->running || screenState->stepRequested) &&
 		!simulationHasFault() && !screenState->wallMoving){
@@ -705,6 +745,32 @@ static bool graphicalFrame(int argc, char** argv, window* screenWindow,
 		const bool singleStep = screenState->stepRequested;
 		screenState->stepRequested = false;
 		const double simulationFrameStart = GetTime();
+		/* A fixed 1/180 s budget is appropriate for a native 144 Hz window,
+		 * but leaves two thirds of a browser's ordinary 60 Hz frame idle.  Use
+		 * the measured presentation interval when it is slower, while retaining
+		 * a hard 1/90 s ceiling so input and rendering cannot be starved. */
+		const bool configurationGrowth = freeFly == &freeFlyGrow
+			#if POLYGON_PARTICLES && !THREE_D
+			|| polygon_particles_growing()
+			#endif
+			;
+		double simulationFrameBudget = 1.0/180.0;
+		const double previousFrameDuration = GetFrameTime();
+		if (isfinite(previousFrameDuration) &&
+			previousFrameDuration > 1.0/120.0){
+			simulationFrameBudget = fmin(1.0/90.0,
+				fmax(1.0/180.0, 0.70*previousFrameDuration));
+		}
+		if (configurationGrowth){
+			/* Preparation is a transient computation, not the simulation being
+			 * observed.  Spend a larger slice on it while retaining enough render
+			 * cadence for progress, input, and browser event handling. */
+			#if defined(PLATFORM_WEB)
+			simulationFrameBudget = fmax(simulationFrameBudget, 1.0/75.0);
+			#else
+			simulationFrameBudget = fmax(simulationFrameBudget, 1.0/45.0);
+			#endif
+		}
 		do{
 			nextEvent = findNextEvent();
 			if (nextEvent == NULL){
@@ -717,12 +783,34 @@ static bool graphicalFrame(int argc, char** argv, window* screenWindow,
 				graphicsReportSimulationFault(simulationFaultMessage());
 				break;
 			}
-			if (!singleStep){
+			const bool preparingConfiguration = freeFly == &freeFlyGrow
+				#if POLYGON_PARTICLES && !THREE_D
+				|| polygon_particles_growing()
+				#endif
+				;
+			if (!singleStep && !preparingConfiguration){
 				const double pacedTimeLimit = graphicsSimulationTimeLimit(t);
 				if (nextEvent->t > pacedTimeLimit){
 					/* Particle state is evaluated lazily, so advancing only the
 					 * clock to the real-time pacing target is exact. */
 					t = pacedTimeLimit;
+					#if EDMD_VERIFY_OVERLAPS && POLYGON_PARTICLES && !THREE_D
+					if (polygon_particles_active()){
+						verifyNoOverlaps();
+						if (simulationHasFault()){
+							if (tryGraphicalPolygonRecovery(screenState)){
+								graphicsReportTransientNotice(
+									"A small polygon overlap was rolled back; "
+									"collision search is temporarily using finer precision.");
+							}
+							else{
+								graphicsPauseSimulation(screenState);
+								graphicsReportSimulationFault(
+									simulationFaultMessage());
+							}
+						}
+					}
+					#endif
 					break;
 				}
 			}
@@ -736,6 +824,12 @@ static bool graphicalFrame(int argc, char** argv, window* screenWindow,
 					ncross++;
 					doTheCrossing();
 					break;
+				#if POLYGON_PARTICLES && !THREE_D
+				case POLYGON_CELLCROSS:
+					ncross++;
+					doTheCrossingPolygon();
+					break;
+				#endif
 				case ADDINGNOISE: addNoise(); break;
 				case SCREENSHOT: takeAScreenshot(); break;
 				case THERMO:
@@ -744,18 +838,46 @@ static bool graphicalFrame(int argc, char** argv, window* screenWindow,
 					break;
 				case IN: doIn(); break;
 				case OUT: doOut(); break;
-				case GROWSTOP: stopGrow(); break;
+				case GROWSTOP:
+					stopGrow();
+					/* Growth is deliberately unpaced. Production starts a new
+					 * physical-time epoch at this completed configuration. */
+					graphicsRebaseSimulationPacing(t);
+					#if POLYGON_PARTICLES && !THREE_D
+					/* Random-growth runs enter polygon dynamics at this event.
+					 * Capture the freshly valid production state before another
+					 * event in the same render frame can require recovery. */
+					captureGraphicalRecoveryCheckpoint(screenState);
+					#endif
+					break;
 				#if INTRUDER
 				case INTRUDER_COLLISION: doTheCollisionIntruder(); break;
 				#endif
+				#if POLYGON_PARTICLES && !THREE_D
+					case POLYGON_RECHECK: polygon_particles_do_recheck(); break;
+				#endif
 			}
+			#if EDMD_VERIFY_OVERLAPS && POLYGON_PARTICLES && !THREE_D
+				if (!simulationHasFault() && polygon_particles_active())
+					verifyNoOverlaps();
+			#endif
 			if (simulationHasFault()){
+				#if POLYGON_PARTICLES && !THREE_D
+				if (tryGraphicalPolygonRecovery(screenState)){
+					graphicsReportTransientNotice(
+						"A small polygon overlap was rolled back; collision "
+						"search is temporarily using finer precision.");
+					if (singleStep)
+						break;
+					continue;
+				}
+				#endif
 				graphicsPauseSimulation(screenState);
 				graphicsReportSimulationFault(simulationFaultMessage());
 				break;
 			}
 		} while (!singleStep && !simulationHasFault() && t <= tmax &&
-			GetTime() - simulationFrameStart < 1.0/180.0);
+			GetTime() - simulationFrameStart < simulationFrameBudget);
 	}
 
 	draw(argc, argv, screenWindow, screenState);
@@ -768,6 +890,9 @@ static void graphicalShutdown(state* screenState){
 	#endif
 	printClose();
 	outputLifecycleClose();
+	#if POLYGON_PARTICLES && !THREE_D
+	releaseGraphicalRecoveryCheckpoints();
+	#endif
 	graphicsFree(screenState);
 	CloseWindow();
 	freeArrays();
@@ -818,6 +943,36 @@ static void browserGraphicalFrame(void* opaque){
 	}
 }
 #endif
+#endif
+
+static const double headlessKineticEnergyCutoff = 1e-10;
+
+/* A low kinetic-energy state is terminal only when no enabled mechanism can
+ * replenish it.  In particular, a driven Delta system must not be stopped
+ * merely because it passes through a cold transient. */
+static bool unforcedDissipationActive(void){
+	const bool dissipativeBoundary =
+		(addWallx || addWally || addWallz || addMidWall || addCircularWall) &&
+		(resW < 1 || resT < 1);
+	const bool dissipationActive = damping || res < 1 || dissipativeBoundary;
+	const bool kineticEnergyCanRecover = noise || addDelta || addDeltaTangent ||
+		addDoubleDelta || addDoubleDeltaTangent || addEvolvingDelta ||
+		addExpo || addEnergy || addActiveDelta || thermoWall || addShear ||
+		addShearWall || addField || charged || addWell;
+	return dissipationActive && !kineticEnergyCanRecover;
+}
+
+#if !G
+static bool headlessKineticEnergyDepleted(void){
+	return unforcedDissipationActive() && isfinite(E) &&
+		E < headlessKineticEnergyCutoff;
+}
+
+static void reportHeadlessKineticEnergyStop(void){
+	printf("\nTotal kinetic energy %.9g fell below %.1e at t=%.9g; "
+		"stopping the freely cooling headless simulation.\n",
+		E, headlessKineticEnergyCutoff, t);
+}
 #endif
 
 
@@ -903,16 +1058,26 @@ int main(int argc, char *argv[]){
 				ncross++;
 				doTheCrossing();
 				break;
+			#if POLYGON_PARTICLES && !THREE_D
+			case POLYGON_CELLCROSS:
+				ncross++;
+				doTheCrossingPolygon();
+				break;
+			#endif
 			case ADDINGNOISE: addNoise(); break;
 			case SCREENSHOT:
 				takeAScreenshot();
-				if (noise == 0 && E < 1e-10) goto exiting;
+				if (headlessKineticEnergyDepleted()){
+					reportHeadlessKineticEnergyStop();
+					goto exiting;
+				}
 				break;
 			case THERMO:
 				takeAThermo();
 				fflush(stdout);
-				if (noise == 0 && E < 1e-10){
+				if (headlessKineticEnergyDepleted()){
 					saveTXT();
+					reportHeadlessKineticEnergyStop();
 					goto exiting;
 				}
 				break;
@@ -922,7 +1087,14 @@ int main(int argc, char *argv[]){
 			#if INTRUDER
 			case INTRUDER_COLLISION: doTheCollisionIntruder(); break;
 			#endif
+			#if POLYGON_PARTICLES && !THREE_D
+			case POLYGON_RECHECK: polygon_particles_do_recheck(); break;
+			#endif
 		}
+		#if EDMD_VERIFY_OVERLAPS && POLYGON_PARTICLES && !THREE_D
+			if (polygon_particles_active())
+				verifyNoOverlaps();
+		#endif
 	}
 
 exiting:
@@ -944,6 +1116,22 @@ exiting:
 /	INITIALISATION OF ARRAYS AND CONSTANTS 	 /
 /											 /
 /-------------------------------------------*/
+
+#if !THREE_D
+/* `particle.rad` remains the polygon circumradius so the linked-cell stencil
+ * stays conservative. Box sizing and native polygon preparation use the area
+ * and boundary of the body that is actually simulated and rendered. */
+static double unitParticleArea2D(void){
+	#if POLYGON_PARTICLES
+	if (polygon_particles_requested()){
+		const double area = polygon_particles_unit_area();
+		if (isfinite(area) && area > 0.0)
+			return area;
+	}
+	#endif
+	return M_PI;
+}
+#endif
 
 /* --------------------------------------------
 	Initializes the number of particles N
@@ -1092,12 +1280,90 @@ static bool hexagonalLatticeSiteInsideHole(double x, double y, double z){
 	return radiusSquared < (double)hexRadius*hexRadius;
 }
 
+#if POLYGON_PARTICLES && !THREE_D
+enum { POLYGON_CELL_HEADS_PER_PARTICLE_LIMIT = 128 };
+#ifndef EDMD_POLYGON_ABSOLUTE_CELL_HEAD_LIMIT
+#define EDMD_POLYGON_ABSOLUTE_CELL_HEAD_LIMIT 4194304UL
+#endif
+
+static bool polygonCellHeadCountForRange(int range, size_t* count){
+	if (count == NULL || range < 1 ||
+		!(collisionGridMaxRadius > 0.0) ||
+		!isfinite(collisionGridMaxRadius) ||
+		!(Lx > 0.0) || !(Ly > 0.0) ||
+		!isfinite(Lx) || !isfinite(Ly)){
+		return false;
+	}
+	const double targetCellSize = 2*collisionGridMaxRadius/range;
+	double nxValue = floor(Lx/targetCellSize);
+	double nyValue = floor(Ly/targetCellSize);
+	if (nxValue < 1.0) nxValue = 1.0;
+	if (nyValue < 1.0) nyValue = 1.0;
+	if (nxValue > INT_MAX || nyValue > INT_MAX)
+		return false;
+	const size_t nx = (size_t)nxValue;
+	const size_t ny = (size_t)nyValue;
+	if (ny > SIZE_MAX/nx)
+		return false;
+	*count = nx*ny;
+	return true;
+}
+
+/* Empirical dense-CCD tuning: range 2 is best near phi=.1, range 6 near
+   phi=.375, and range 12 near phi=.8.  Bound cell-head memory independently
+   of particle count, but never below the range-1 grid required for exactness
+   in a very dilute/large box. */
+static int polygonCellNeighborRangeForBox(void){
+	if (!polygon_particles_requested())
+		return 1;
+	int range = 2;
+	if (isfinite(phi) && phi > 0.0){
+		const double rounded = floor(16.0*phi + 0.5);
+		if (rounded >= 2.0 && rounded <=
+			POLYGON_PARTICLES_MAX_CELL_NEIGHBOR_RANGE){
+			range = (int)rounded;
+		}
+		else if (rounded > POLYGON_PARTICLES_MAX_CELL_NEIGHBOR_RANGE){
+			range = POLYGON_PARTICLES_MAX_CELL_NEIGHBOR_RANGE;
+		}
+	}
+
+	size_t rangeOneHeads = 0;
+	if (!polygonCellHeadCountForRange(1, &rangeOneHeads))
+		return 1;
+	size_t proportionalLimit = SIZE_MAX;
+	if (N > 0 && (size_t)N <=
+		SIZE_MAX/POLYGON_CELL_HEADS_PER_PARTICLE_LIMIT){
+		proportionalLimit =
+			(size_t)N*POLYGON_CELL_HEADS_PER_PARTICLE_LIMIT;
+	}
+	size_t headLimit = proportionalLimit;
+	if (headLimit > (size_t)EDMD_POLYGON_ABSOLUTE_CELL_HEAD_LIMIT)
+		headLimit = (size_t)EDMD_POLYGON_ABSOLUTE_CELL_HEAD_LIMIT;
+	if (headLimit < rangeOneHeads)
+		headLimit = rangeOneHeads;
+
+	while (range > 1){
+		size_t heads = 0;
+		if (polygonCellHeadCountForRange(range, &heads) &&
+			heads <= headLimit){
+			return range;
+		}
+		range--;
+	}
+	return 1;
+}
+#endif
+
 // Convenient function for graphical part of the program
 void boxConstantHelper(){
 	halfLx = Lx/2;
 	halfLy = Ly/2;
 	#if THREE_D
 	halfLz = Lz/2;
+	#endif
+	#if POLYGON_PARTICLES && !THREE_D
+	polygonCollisionCellNeighborRange = 1;
 	#endif
 	if (addWell && U != 0.0){
 		/* A finer potential grid reduces the large 3^d candidate-cell volume.
@@ -1116,12 +1382,21 @@ void boxConstantHelper(){
 		#endif
 	}
 	else{
+		/* Keep the disk stencil and its hot stack frames unchanged. Polygon CCD
+		   uses a separately bounded, density-adaptive fine grid. */
 		collisionCellNeighborRange = 1;
-		
-		Nycells = (int)(halfLy/collisionGridMaxRadius);
-		Nxcells = (int)(halfLx/collisionGridMaxRadius);
+		int gridNeighborRange = 1;
+		#if POLYGON_PARTICLES && !THREE_D
+		polygonCollisionCellNeighborRange =
+			polygonCellNeighborRangeForBox();
+		gridNeighborRange = polygonCollisionCellNeighborRange;
+		#endif
+		double targetCellSize = 2*collisionGridMaxRadius/
+			gridNeighborRange;
+		Nycells = (int)(Ly/targetCellSize);
+		Nxcells = (int)(Lx/targetCellSize);
 		#if THREE_D
-		Nzcells = (int)(halfLz/collisionGridMaxRadius);
+		Nzcells = (int)(Lz/targetCellSize);
 		#endif
 	}
 	if (Nxcells < 1) Nxcells = 1;
@@ -1158,7 +1433,7 @@ void adaptCellGridToParticles(){
 			maxRadius = particles[i].rad;
 		}
 		if (isfinite(vr) && vr != 0 && isfinite(particles[i].vr)){
-			double targetRadius = fabs(particles[i].vr/vr);
+			double targetRadius = particles[i].rad + fabs(particles[i].vr/vr);
 			if (targetRadius > maxRadius)
 				maxRadius = targetRadius;
 		}
@@ -1265,7 +1540,7 @@ void constantInit(int argc, char *argv[]){
 				sscanf(optarg, "%lf", &delta);
 				break;
 			case 'g':
-				if ((damping != 1) || (noise != 1))
+				if (!damping && !noise)
 					printf("WARNING:\033[0;31m Changing gamma while noise or damping is not enabled!\033[0m\n");
 				sscanf(optarg, "%lf", &gamm);
 				break;
@@ -1414,7 +1689,10 @@ void constantInit(int argc, char *argv[]){
 		}
 	}
 
-	
+	#if !THREE_D
+	const double unitParticleArea = unitParticleArea2D();
+	#endif
+
 	if (load == 2){
 		file = fopen(initialFilePath, "r");
 		if (file == NULL){
@@ -1439,7 +1717,13 @@ void constantInit(int argc, char *argv[]){
 		Nsmall = Nlx*Nly;
 		Nbig = Nsmall;
 		N = Nbig + Nsmall;
-        Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/(phi*aspectRatio));
+		#if THREE_D
+		Lx = sqrt(Nsmall*M_PI*(sizeratio*sizeratio + 1)/
+			(phi*aspectRatio));
+		#else
+		Lx = sqrt(Nsmall*unitParticleArea*(sizeratio*sizeratio + 1)/
+			(phi*aspectRatio));
+		#endif
 		Ly = Lx*aspectRatio;
 	}
 	else if (Hex){
@@ -1463,7 +1747,8 @@ void constantInit(int argc, char *argv[]){
 		Lz = Nz*sqrt(2.0/3.0)*spacing;
 		#else
 		N = Nx*Ny;
-		Ly = sqrt((sqrt(3.0)/2.0)*((double)Ny/Nx)*M_PI*N/phi);
+		Ly = sqrt((sqrt(3.0)/2.0)*((double)Ny/Nx)*
+			unitParticleArea*N/phi);
 		Lx = (2.0/sqrt(3.0))*((double)Nx/Ny)*Ly;
 		#endif
 		Nbig = N;
@@ -1494,11 +1779,21 @@ void constantInit(int argc, char *argv[]){
 	else if (addMidWall){
 		double val = (phig/phil)*2/(sizeratio*sizeratio);
 		fractionSmallN = val/(1 + val);
+		#if THREE_D
 		Lx = sqrt(M_PI*N*(1-fractionSmallN)/(0.5*aspectRatio*phil));
+		#else
+		Lx = sqrt(unitParticleArea*N*(1-fractionSmallN)/
+			(0.5*aspectRatio*phil));
+		#endif
 		Ly = Lx*aspectRatio;
 		Nsmall = N*fractionSmallN;
 		Nbig = N - Nsmall;
+		#if THREE_D
 		phi = (Nbig + Nsmall*(sizeratio*sizeratio))/(Lx*Ly)*M_PI;
+		#else
+		phi = (Nbig + Nsmall*(sizeratio*sizeratio))/(Lx*Ly)*
+			unitParticleArea;
+		#endif
 	}
 	else{
 		#if THREE_D
@@ -1522,7 +1817,7 @@ void constantInit(int argc, char *argv[]){
 			Ly = Lx;
 			Lz = Lx;
 			#else
-			Lx = sqrt(4*N/phi*r2);
+			Lx = sqrt((4.0/M_PI)*unitParticleArea*N/phi*r2);
 			Ly = Lx;
 			#endif
 		}
@@ -1532,7 +1827,7 @@ void constantInit(int argc, char *argv[]){
 				Lx = pow((4./3.)*M_PI*N/(phi*aspectRatio*aspectRatio)*r2, 1./3.);
 				Lz = Lx*aspectRatio;
 				#else
-				Lx = sqrt(M_PI*N/(phi*aspectRatio)*r2);
+				Lx = sqrt(unitParticleArea*N/(phi*aspectRatio)*r2);
 				#endif
 				Ly = Lx*aspectRatio;
 				
@@ -1544,8 +1839,13 @@ void constantInit(int argc, char *argv[]){
 			}
 			else{
 				Ly = Lx*aspectRatio;
+				#if THREE_D
 				N = (int)(phi*Lx*Ly/(M_PI*r2));
 				phi = M_PI*N*r2/(Lx*Ly);
+				#else
+				N = (int)(phi*Lx*Ly/(unitParticleArea*r2));
+				phi = unitParticleArea*N*r2/(Lx*Ly);
+				#endif
 				Lz = Ly;
 			}
 
@@ -1623,7 +1923,10 @@ bool outputThermoSamplingRequested(void){
 		(clusterThermo && (ther || dumpCluster || killCluster > 0)) ||
 		pcfThermo || pcfBondOrderThermo || pcfg6Thermo ||
 		velocityDistributionThermo || bubbleStop ||
-		(ther && (critical || boopThermo || msd));
+		(ther && (critical || boopThermo || msd)) ||
+		/* Preserve the headless low-energy termination even when ordinary
+		 * thermodynamic output and periodic snapshots are disabled. */
+		(!G && unforcedDissipationActive());
 }
 
 static bool outputSamplingNeedsSynchronizedParticles(void){
@@ -2375,6 +2678,17 @@ void particlesInit(){
 			#if INTRUDER
 				p->vr = vr*bathRad;
 			#endif
+			#if POLYGON_PARTICLES && !THREE_D
+			if (polygon_particles_requested()){
+				/* SAT requires a strictly positive scale. Start the actual body
+				 * almost point-like and reduce its rate so t=1/vr still lands
+				 * exactly on the configured species radius. */
+				const double targetRadius = p->vr/vr;
+				const double initialFraction = 1.0e-6;
+				p->rad = targetRadius*initialFraction;
+				p->vr = vr*(targetRadius - p->rad);
+			}
+			#endif
 			
 		}
 		if (polydispersity){
@@ -2389,7 +2703,9 @@ void particlesInit(){
 			phi = (sizeratio*sizeratio*sizeratio*Nsmall + Nbig)/
 				(halfLx*halfLx*halfLx);
 			#else
-			phi = (sizeratio*sizeratio*Nsmall + Nbig)/(halfLx*halfLx);
+			phi = unitParticleArea2D()*
+				(sizeratio*sizeratio*Nsmall + Nbig)/
+				(M_PI*halfLx*halfLx);
 			#endif
 		}
 		else{
@@ -2397,7 +2713,8 @@ void particlesInit(){
 			phi = (4./3.)*M_PI*(sizeratio*sizeratio*sizeratio*Nsmall + Nbig)/
 				(Lx*Ly*Lz);
 			#else
-			phi = M_PI*(sizeratio*sizeratio*Nsmall + Nbig)/(Lx*Ly);
+			phi = unitParticleArea2D()*
+				(sizeratio*sizeratio*Nsmall + Nbig)/(Lx*Ly);
 			#endif
 		}
 	}
@@ -2416,6 +2733,24 @@ static double potentialPairStepEnergy(const particle* first,
    Keeping this list unique matters when a short box has only one or two cells:
    the old loops visited the same linked list as many as 27 times in 3D. */
 static int neighboringCellCoordinates(int center, int count, int coordinates[5]){
+	/* The ordinary hard-disk grid always uses the +/-1 stencil.  Keep its
+	 * overwhelmingly common case branch-only: building the same three entries
+	 * through wrapping and duplicate-search loops is paid for every collision
+	 * reschedule.  The one- and two-cell cases retain the distinct-coordinate
+	 * guarantee needed by very small periodic boxes. */
+	if (collisionCellNeighborRange == 1){
+		if (count <= 1){
+			coordinates[0] = 0;
+			return 1;
+		}
+		coordinates[0] = center == 0 ? count - 1 : center - 1;
+		coordinates[1] = center;
+		if (count == 2)
+			return 2;
+		coordinates[2] = center + 1 == count ? 0 : center + 1;
+		return 3;
+	}
+
 	int number = 0;
 	for (int offset = -collisionCellNeighborRange;
 		offset <= collisionCellNeighborRange; offset++){
@@ -2575,10 +2910,34 @@ static double postGrowthDynamicsStartTime(void){
 	return initializationNeedsGrowthPhase() ? 1/vr : 0;
 }
 
+static void selectNormalDynamicsHandlers(void){
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_requested()){
+		polygon_particles_activate();
+		collisionEvent = &polygon_particles_collision_event;
+		doTheCollision = &polygon_particles_do_collision;
+		freeFly = &polygon_particles_free_fly;
+		doTheWall = &polygon_particles_do_wall;
+		crossingEvent = &polygon_particles_crossing_event;
+		return;
+	}
+	#endif
+	collisionEvent = &collisionEventNormal;
+	doTheCollision = &doTheCollisionNormal;
+	freeFly = &freeFlyNormal;
+	doTheWall = &doTheWallNormal;
+	crossingEvent = &crossingEventNormal;
+}
+
 void eventListInit(){
 	/* A newly constructed run always begins from the configured zero-strain
 	 * reference.  Incremental updates do not call this initializer. */
 	shearStrainPhase = 0.0;
+	#if G && POLYGON_PARTICLES && !THREE_D
+	graphicalRecoveryGeneration++;
+	if (graphicalRecoveryGeneration == 0)
+		graphicalRecoveryGeneration = 1;
+	#endif
 
 	if ((N <= 0) || (suppSizeEvent < 0) ||
 		(N > (INT_MAX - suppSizeEvent)/2)){
@@ -2591,6 +2950,12 @@ void eventListInit(){
 	 * Lattice initializers are already at their final radii. */
 	const bool initializationNeedsGrowth = initializationNeedsGrowthPhase();
 	const double growthDuration = postGrowthDynamicsStartTime();
+	#if POLYGON_PARTICLES && !THREE_D
+	if (!polygon_particles_prepare()){
+		fprintf(stderr, "Polygon-particle state allocation failed\n");
+		exit(EXIT_FAILURE);
+	}
+	#endif
 	eventList = calloc(totalSize, sizeof(node*));
 	eventPaul = calloc(paulListN + 1, sizeof(node*));
 	eventStorage = calloc(totalSize, sizeof(node));
@@ -2634,19 +2999,28 @@ void eventListInit(){
 		tmax += growthDuration;
 		#endif
 		addEventGrow(growthDuration);
-		collisionEvent = &collisionEventGrow;
-		doTheCollision = &doTheCollisionGrow;
-		freeFly = &freeFlyGrow;
-		doTheWall = &doTheWallGrow;
-		crossingEvent = &crossingEventGrow;
+		#if POLYGON_PARTICLES && !THREE_D
+		if (polygon_particles_requested()){
+			polygon_particles_begin_growth();
+			collisionEvent = &polygon_particles_collision_event;
+			doTheCollision = &polygon_particles_do_collision;
+			freeFly = &polygon_particles_free_fly;
+			doTheWall = &polygon_particles_do_wall;
+			crossingEvent = &polygon_particles_crossing_event;
+		}
+		else
+		#endif
+		{
+			collisionEvent = &collisionEventGrow;
+			doTheCollision = &doTheCollisionGrow;
+			freeFly = &freeFlyGrow;
+			doTheWall = &doTheWallGrow;
+			crossingEvent = &crossingEventGrow;
+		}
 
 	}
 	else{
-		collisionEvent = &collisionEventNormal;
-		doTheCollision = &doTheCollisionNormal;
-		freeFly = &freeFlyNormal;
-		doTheWall = &doTheWallNormal;
-		crossingEvent = &crossingEventNormal;
+		selectNormalDynamicsHandlers();
 	}
 	/* The interactive renderer has its own wall-clock frame loop. Periodic
 	 * simulation-time snapshots are opt-in because each one synchronizes all
@@ -2655,7 +3029,15 @@ void eventListInit(){
 		addEventScreenshot(firstDumpEvent);
 	}
 	if (noise){
-		addEventNoise(dtnoise);
+		/* Preparation velocities are deliberately discarded at GROWSTOP.
+		 * Deferring the thermostat avoids injecting unrelated noise into the
+		 * homothetic polygon packing stage. */
+		double firstNoiseTime = dtnoise;
+		#if POLYGON_PARTICLES && !THREE_D
+		if (polygon_particles_growing())
+			firstNoiseTime = growthDuration + dtnoise;
+		#endif
+		addEventNoise(firstNoiseTime);
 	}
 	for (int i = 0; i < N; i++){
 		EVENT_NODE(i)->i = i;
@@ -2710,8 +3092,17 @@ void rescheduleThermostatEventAtCurrentTime(void){
 	if (eventList == NULL || eventStorage == NULL)
 		return;
 	removeEventFromQueue(EVENT_NODE(2*N + 2));
-	if (noise)
-		addEventNoise(t + dtnoise);
+	if (noise){
+		double nextNoiseTime = t + dtnoise;
+		#if POLYGON_PARTICLES && !THREE_D
+		if (polygon_particles_growing()){
+			const double growthStopTime = EVENT_NODE(2*N + 5)->t;
+			if (isfinite(growthStopTime) && growthStopTime >= t)
+				nextNoiseTime = growthStopTime + dtnoise;
+		}
+		#endif
+		addEventNoise(nextNoiseTime);
+	}
 	nextEvent = NULL;
 }
 
@@ -2789,6 +3180,9 @@ void rebuildSpatialIndexAtCurrentTime(void){
 
 
 void freeArrays(){
+	#if POLYGON_PARTICLES && !THREE_D
+	polygon_particles_release();
+	#endif
 	/* Ownership, rather than the currently selected model, decides what is
 	 * released. This keeps potential -> hard-particle restarts safe. */
 	if (particles != NULL){
@@ -3232,6 +3626,343 @@ node* findNextEvent(){
 	return treeMin;
 }
 
+#if G && POLYGON_PARTICLES && !THREE_D
+static bool graphicalRecoveryConfigurationMatches(
+	const graphicalRecoverySnapshot* snapshot){
+	return snapshot != NULL && snapshot->valid &&
+		snapshot->generation == graphicalRecoveryGeneration &&
+		snapshot->particleIdentity == particles &&
+		snapshot->particleCount == N &&
+		snapshot->boxLx == Lx && snapshot->boxLy == Ly &&
+		snapshot->wallX == addWallx && snapshot->wallY == addWally &&
+		snapshot->middleWall == addMidWall &&
+		snapshot->circularWall == addCircularWall &&
+		snapshot->thermostatMode == noise &&
+		snapshot->thermostatInterval == dtnoise;
+}
+
+static bool reserveGraphicalRecoveryStorage(
+	graphicalRecoverySnapshot* snapshot, size_t polygonBytes){
+	if (snapshot == NULL || N <= 0 || polygonBytes == 0)
+		return false;
+	if (snapshot->particleCount != N || snapshot->particleState == NULL){
+		particle* resized = realloc(snapshot->particleState,
+			(size_t)N*sizeof(*resized));
+		if (resized == NULL)
+			return false;
+		snapshot->particleState = resized;
+	}
+	if (snapshot->polygonStateBytes != polygonBytes ||
+		snapshot->polygonState == NULL){
+		void* resized = realloc(snapshot->polygonState, polygonBytes);
+		if (resized == NULL)
+			return false;
+		snapshot->polygonState = resized;
+		snapshot->polygonStateBytes = polygonBytes;
+	}
+	return true;
+}
+
+static void captureGraphicalRecoveryCheckpoint(const state* screenState){
+	/* Growth checkpoints require phase flags and preparation progress baselines
+	 * in addition to the ordinary rigid state. Keep recovery production-only;
+	 * GROWSTOP clears this ring and immediately seeds a fresh valid snapshot. */
+	if (!polygon_particles_active() || polygon_particles_growing() ||
+		particles == NULL || eventStorage == NULL ||
+		eventList == NULL || eventPaul == NULL || simulationHasFault() ||
+		(screenState != NULL && screenState->wallMoving))
+		return;
+	const double wallTime = GetTime();
+	bool configurationChanged = true;
+	if (graphicalRecoveryCount > 0){
+		const int latest = (graphicalRecoveryNext +
+			GRAPHICAL_RECOVERY_SNAPSHOT_COUNT - 1) %
+			GRAPHICAL_RECOVERY_SNAPSHOT_COUNT;
+		configurationChanged =
+			!graphicalRecoveryConfigurationMatches(&graphicalRecovery[latest]);
+	}
+	if (!configurationChanged &&
+		wallTime - graphicalRecoveryLastWallTime < 0.10)
+		return;
+	if (!configurationChanged &&
+		wallTime - graphicalRecoveryLastWallTime < 0.25 &&
+		ncol >= graphicalRecoveryLastCollisionCount &&
+		ncol - graphicalRecoveryLastCollisionCount < 256)
+		return;
+	if (!configurationChanged && t == graphicalRecoveryLastSimulationTime &&
+		ncol == graphicalRecoveryLastCollisionCount)
+		return;
+
+	graphicalRecoverySnapshot* snapshot =
+		&graphicalRecovery[graphicalRecoveryNext];
+	snapshot->valid = false;
+	const size_t polygonBytes = polygon_particles_checkpoint_bytes();
+	if (!reserveGraphicalRecoveryStorage(snapshot, polygonBytes))
+		return;
+
+	/* Keep the engine's lazy trajectories lazy in the common path.  The
+	 * particle record includes its trajectory origin (`lastColl`), while the
+	 * polygon sidecar includes the corresponding angular origin.  Together
+	 * they are an exact snapshot at snapshot->time without advancing every
+	 * particle on each render-frame checkpoint.  The rare restore path
+	 * synchronizes the copied values once before rebuilding cell ownership. */
+	memcpy(snapshot->particleState, particles,
+		(size_t)N*sizeof(*snapshot->particleState));
+	if (!polygon_particles_capture_checkpoint(snapshot->polygonState,
+		polygonBytes))
+		return;
+
+	snapshot->generation = graphicalRecoveryGeneration;
+	snapshot->particleIdentity = particles;
+	snapshot->particleCount = N;
+	snapshot->boxLx = Lx;
+	snapshot->boxLy = Ly;
+	snapshot->wallX = addWallx;
+	snapshot->wallY = addWally;
+	snapshot->middleWall = addMidWall;
+	snapshot->circularWall = addCircularWall;
+	snapshot->thermostatMode = noise;
+	snapshot->thermostatInterval = dtnoise;
+	snapshot->time = t;
+	snapshot->lastOutputTime = lastScreen;
+	snapshot->lastCollisionCount = lastCollNum;
+	snapshot->collisions = ncol;
+	snapshot->crossings = ncross;
+	snapshot->virialX = collTermX;
+	snapshot->virialY = collTermY;
+	snapshot->virialXY = collTermXY;
+	snapshot->virialYX = collTermYX;
+	snapshot->wallImpulse = cumulativeWallImpulse;
+	snapshot->sampledWallImpulse = dp;
+	snapshot->sampledLeftImpulse = dpLeft;
+	snapshot->sampledRightImpulse = dpRight;
+	snapshot->sampledMiddleImpulse = dpMid;
+	#if STRESS
+	snapshot->kineticX = sumKineticX;
+	snapshot->kineticY = sumKineticY;
+	snapshot->kineticXY = sumKineticXY;
+	snapshot->kineticYX = sumKineticYX;
+	snapshot->runningKineticX = runningKineticX;
+	snapshot->runningKineticY = runningKineticY;
+	snapshot->runningKineticXY = runningKineticXY;
+	snapshot->runningKineticYX = runningKineticYX;
+	#endif
+	#if HEAT
+	snapshot->heatX = sumHeatX;
+	snapshot->heatY = sumHeatY;
+	snapshot->runningHeatX = runningHeatX;
+	snapshot->runningHeatY = runningHeatY;
+	snapshot->collisionHeatX = collHeatX;
+	snapshot->collisionHeatY = collHeatY;
+	snapshot->shearCx2Vy = shearHeatCx2Vy;
+	snapshot->shearVy3 = shearHeatVy3;
+	snapshot->shearVyVz2 = shearHeatVyVz2;
+	snapshot->shearCxVy2 = shearHeatCxVy2;
+	snapshot->shearVy2Vz = shearHeatVy2Vz;
+	snapshot->shearCxVyVz = shearHeatCxVyVz;
+	#endif
+	#if STRESS || HEAT
+	snapshot->lastTransportTime = lastCollTime;
+	#endif
+	snapshot->samples = outputSamples;
+	memcpy(snapshot->randomState, mt, sizeof(snapshot->randomState));
+	snapshot->randomIndex = mti;
+	for (int offset = 1; offset <= GRAPHICAL_RECOVERY_AUXILIARY_COUNT;
+		offset++){
+		const node* source = EVENT_NODE(2*N + offset);
+		snapshot->auxiliary[offset - 1] = *source;
+		snapshot->auxiliaryQueued[offset - 1] = source->q >= 0;
+	}
+	snapshot->valid = true;
+	graphicalRecoveryNext = (graphicalRecoveryNext + 1) %
+		GRAPHICAL_RECOVERY_SNAPSHOT_COUNT;
+	if (graphicalRecoveryCount < GRAPHICAL_RECOVERY_SNAPSHOT_COUNT)
+		graphicalRecoveryCount++;
+	graphicalRecoveryLastWallTime = wallTime;
+	graphicalRecoveryLastSimulationTime = t;
+	graphicalRecoveryLastCollisionCount = ncol;
+}
+
+static void restoreGraphicalRecoveryCalendar(
+	const graphicalRecoverySnapshot* snapshot){
+	const int totalSize = 2*N + suppSizeEvent;
+	memset(eventPaul, 0, (size_t)(paulListN + 1)*sizeof(*eventPaul));
+	for (int index = 0; index < totalSize; ++index){
+		eventList[index] = EVENT_NODE(index);
+		memset(EVENT_NODE(index), 0, sizeof(*EVENT_NODE(index)));
+		EVENT_NODE(index)->q = -1;
+	}
+	root = EVENT_NODE(2*N);
+	root->t = never + 1.0;
+	root->q = -1;
+	treeMin = NULL;
+	scheduledEventCount = 0;
+	actualPaulList = 0;
+	paulTime = t;
+	nextEvent = NULL;
+	for (int offset = 1; offset <= GRAPHICAL_RECOVERY_AUXILIARY_COUNT;
+		offset++){
+		if (!snapshot->auxiliaryQueued[offset - 1])
+			continue;
+		const node* saved = &snapshot->auxiliary[offset - 1];
+		node* restored = EVENT_NODE(2*N + offset);
+		restored->t = saved->t;
+		restored->collActual = saved->collActual;
+		restored->i = saved->i;
+		restored->j = saved->j;
+		restored->type = saved->type;
+		addEventToQueue(restored);
+	}
+	for (int index = 0; index < N; ++index){
+		EVENT_NODE(index)->i = index;
+		EVENT_NODE(N + index)->i = index;
+		crossingEvent(index);
+		collisionEvent(index);
+		if (simulationHasFault())
+			break;
+	}
+	nextEvent = NULL;
+}
+
+static bool restoreGraphicalRecoverySnapshot(
+	const graphicalRecoverySnapshot* snapshot){
+	if (!graphicalRecoveryConfigurationMatches(snapshot) ||
+		snapshot->particleState == NULL || snapshot->polygonState == NULL ||
+		snapshot->polygonStateBytes != polygon_particles_checkpoint_bytes() ||
+		snapshot->randomIndex < 0 || snapshot->randomIndex > NMT + 1)
+		return false;
+	if (!polygon_particles_restore_checkpoint(snapshot->polygonState,
+		snapshot->polygonStateBytes))
+		return false;
+	t = snapshot->time;
+	for (int index = 0; index < N; ++index){
+		free(particles[index].particlesInWell);
+		particles[index] = snapshot->particleState[index];
+		particles[index].nxt = NULL;
+		particles[index].prv = NULL;
+		particles[index].particlesInWell = NULL;
+		particles[index].numberOfParticlesInWell = 0;
+		particles[index].particlesInWellCapacity = 0;
+	}
+	/* Convert the restored lazy trajectories to snapshot->time only on this
+	 * exceptional path.  Their saved cell links describe the later failed
+	 * state, so discard those links and force an unconditional ownership
+	 * rebuild after synchronization. */
+	synchronizeParticlesAtCurrentTime();
+	for (int index = 0; index < N; ++index){
+		particles[index].cell[0] = -1;
+		particles[index].cell[1] = -1;
+	}
+	simulationClearFault();
+	polygon_particles_enable_recovery_precision(1.0);
+	rebuildSpatialIndexAtCurrentTime();
+	restoreGraphicalRecoveryCalendar(snapshot);
+	if (simulationHasFault())
+		return false;
+
+	char verification[512];
+	const double tolerance = 1.0e-10*(1.0 + fabs(Lx) + fabs(Ly));
+	if (!polygon_particles_verify_local_no_overlaps(t, tolerance, verification,
+		sizeof(verification)))
+		return false;
+
+	ncol = snapshot->collisions;
+	ncross = snapshot->crossings;
+	collTermX = snapshot->virialX;
+	collTermY = snapshot->virialY;
+	collTermXY = snapshot->virialXY;
+	collTermYX = snapshot->virialYX;
+	cumulativeWallImpulse = snapshot->wallImpulse;
+	dp = snapshot->sampledWallImpulse;
+	dpLeft = snapshot->sampledLeftImpulse;
+	dpRight = snapshot->sampledRightImpulse;
+	dpMid = snapshot->sampledMiddleImpulse;
+	lastScreen = snapshot->lastOutputTime;
+	lastCollNum = snapshot->lastCollisionCount;
+	#if STRESS
+	sumKineticX = snapshot->kineticX;
+	sumKineticY = snapshot->kineticY;
+	sumKineticXY = snapshot->kineticXY;
+	sumKineticYX = snapshot->kineticYX;
+	runningKineticX = snapshot->runningKineticX;
+	runningKineticY = snapshot->runningKineticY;
+	runningKineticXY = snapshot->runningKineticXY;
+	runningKineticYX = snapshot->runningKineticYX;
+	#endif
+	#if HEAT
+	sumHeatX = snapshot->heatX;
+	sumHeatY = snapshot->heatY;
+	runningHeatX = snapshot->runningHeatX;
+	runningHeatY = snapshot->runningHeatY;
+	collHeatX = snapshot->collisionHeatX;
+	collHeatY = snapshot->collisionHeatY;
+	shearHeatCx2Vy = snapshot->shearCx2Vy;
+	shearHeatVy3 = snapshot->shearVy3;
+	shearHeatVyVz2 = snapshot->shearVyVz2;
+	shearHeatCxVy2 = snapshot->shearCxVy2;
+	shearHeatVy2Vz = snapshot->shearVy2Vz;
+	shearHeatCxVyVz = snapshot->shearCxVyVz;
+	#endif
+	#if STRESS || HEAT
+	lastCollTime = snapshot->lastTransportTime;
+	#endif
+	outputSamples = snapshot->samples;
+	memcpy(mt, snapshot->randomState, sizeof(snapshot->randomState));
+	mti = snapshot->randomIndex;
+	physicalQ();
+	nextEvent = NULL;
+	return true;
+}
+
+static bool tryGraphicalPolygonRecovery(state* screenState){
+	(void)screenState;
+	if (!simulationFaultIsRecoverableOverlap() ||
+		!polygon_particles_active() || polygon_particles_growing() ||
+		graphicalRecoveryCount <= 0)
+		return false;
+	char originalFault[512];
+	(void)snprintf(originalFault, sizeof(originalFault), "%s",
+		simulationFaultMessage());
+	for (int age = 0; age < graphicalRecoveryCount; ++age){
+		const int index = (graphicalRecoveryNext +
+			GRAPHICAL_RECOVERY_SNAPSHOT_COUNT - 1 - age) %
+			GRAPHICAL_RECOVERY_SNAPSHOT_COUNT;
+		graphicalRecoverySnapshot* snapshot = &graphicalRecovery[index];
+		if (!graphicalRecoveryConfigurationMatches(snapshot))
+			continue;
+		/* Never replay the same failed checkpoint indefinitely. Older ring
+		 * entries remain available if the first replay also proves unsafe. */
+		const bool restored = restoreGraphicalRecoverySnapshot(snapshot);
+		snapshot->valid = false;
+		if (restored){
+			simulationClearFault();
+			live_analysis_reset_generation();
+			graphicalRecoveryLastWallTime = -DBL_MAX;
+			graphicalRecoveryLastSimulationTime = -DBL_MAX;
+			graphicalRecoveryLastCollisionCount = ncol;
+			return true;
+		}
+	}
+	simulationClearFault();
+	simulationReportRecoverableOverlapFault(originalFault);
+	return false;
+}
+
+static void releaseGraphicalRecoveryCheckpoints(void){
+	for (int index = 0; index < GRAPHICAL_RECOVERY_SNAPSHOT_COUNT; ++index){
+		free(graphicalRecovery[index].particleState);
+		free(graphicalRecovery[index].polygonState);
+		memset(&graphicalRecovery[index], 0,
+			sizeof(graphicalRecovery[index]));
+	}
+	graphicalRecoveryNext = 0;
+	graphicalRecoveryCount = 0;
+	graphicalRecoveryLastWallTime = -DBL_MAX;
+	graphicalRecoveryLastSimulationTime = -DBL_MAX;
+	graphicalRecoveryLastCollisionCount = 0;
+}
+#endif
+
 /* -------------------------------/
 /								  /
 /	Event handling utilitaries 	  /
@@ -3395,7 +4126,7 @@ void crossingEventNormal(int i){
 				(1 + p->cell[2])*cellzSize - p->z)/p->vz);
 	}
 	if (travelTimeX <= travelTimeY && travelTimeX <= travelTimeZ) {
-   		addCrossingEvent(i, xx, t + travelTimeX);
+		addCrossingEvent(i, xx, t + travelTimeX);
 	} 
 	else if (travelTimeY <= travelTimeX && travelTimeY <= travelTimeZ) {
 		addCrossingEvent(i, yy, t + travelTimeY);
@@ -3430,14 +4161,11 @@ void addCrossingEvent(int i, int info, double tCross){
 /* -----------------------------------
 	Performs the crossing event
 ----------------------------------- */
-void doTheCrossing(){
-	int i = nextEvent->i;
-	particle* p = particles + i;
-	const int normalPhase = (freeFly == &freeFlyNormal);
-	if (normalPhase)
-		freeFlyNormal(p);
-	else
-		freeFlyGrow(p);
+static inline
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((always_inline))
+#endif
+void relocateParticleAfterCrossing(int i, particle* p){
 	//updates the cell in which the particle is in after the cellcrossing
 	removeFromCell(i);
 	int newCell;
@@ -3527,6 +4255,18 @@ void doTheCrossing(){
 	#endif
 	if (p->nxt != NULL)
 		p->nxt->prv = p;
+}
+
+void doTheCrossing(){
+	int i = nextEvent->i;
+	particle* p = particles + i;
+	const int normalPhase = (freeFly == &freeFlyNormal);
+	if (normalPhase)
+		freeFlyNormal(p);
+	else
+		freeFlyGrow(p);
+
+	relocateParticleAfterCrossing(i, p);
 
 	if (normalPhase){
 		crossingEventNormal(i);
@@ -3539,6 +4279,18 @@ void doTheCrossing(){
 		collisionEventGrow(i);
 	}
 }
+
+#if POLYGON_PARTICLES && !THREE_D
+void doTheCrossingPolygon(void){
+	const int i = nextEvent->i;
+	particle* p = particles + i;
+	polygon_particles_free_fly(p);
+	relocateParticleAfterCrossing(i, p);
+	polygon_particles_crossing_event(i);
+	removeEventFromQueue(EVENT_NODE(N + i));
+	polygon_particles_collision_event(i);
+}
+#endif
 
 
 
@@ -3611,6 +4363,58 @@ particlePrediction predictFreeFlyNormal(const particle* p, double targetTime){
 
 particlePrediction predictFreeFlyGrow(const particle* p, double targetTime){
 	return predictParticle(p, targetTime, GROWTH_FLIGHT, 0);
+}
+
+double simulationCurrentPackingFraction(double queryTime){
+	if (particles == NULL || N <= 0 || !isfinite(queryTime))
+		return NAN;
+	const bool growing = freeFly == &freeFlyGrow
+		#if POLYGON_PARTICLES && !THREE_D
+		|| polygon_particles_growing()
+		#endif
+		;
+	double radiusPowerSum = 0.0;
+	double compensation = 0.0;
+	for (int index = 0; index < N; index++){
+		double radius = particles[index].rad;
+		if (growing)
+			radius = predictFreeFlyGrow(particles + index, queryTime).rad;
+		if (!isfinite(radius) || radius < 0.0)
+			return NAN;
+		#if THREE_D
+		const double contribution = radius*radius*radius;
+		#else
+		const double contribution = radius*radius;
+		#endif
+		/* Compensated accumulation keeps the displayed value stable for broad
+		 * polydispersity and large graphical populations. */
+		const double adjusted = contribution - compensation;
+		const double updated = radiusPowerSum + adjusted;
+		compensation = (updated - radiusPowerSum) - adjusted;
+		radiusPowerSum = updated;
+	}
+
+	#if THREE_D
+	if (addCircularWall){
+		if (!(halfLx > 0.0) || !isfinite(halfLx)) return NAN;
+		return radiusPowerSum/(halfLx*halfLx*halfLx);
+	}
+	const double boxVolume = Lx*Ly*Lz;
+	if (!(boxVolume > 0.0) || !isfinite(boxVolume)) return NAN;
+	return ((4.0/3.0)*M_PI)*radiusPowerSum/boxVolume;
+	#else
+	const double containerArea = addCircularWall
+		? M_PI*halfLx*halfLx : Lx*Ly;
+	#if POLYGON_PARTICLES
+	SimParticleShapeConfig particleShape;
+	polygon_particles_get_config(&particleShape);
+	return simulation_particle_shape_packing_fraction_2d(
+		&particleShape, radiusPowerSum, containerArea);
+	#else
+	if (!(containerArea > 0.0) || !isfinite(containerArea)) return NAN;
+	return M_PI*radiusPowerSum/containerArea;
+	#endif
+	#endif
 }
 
 double collisionTimeGrow(const particle* p1, const particle* p2){
@@ -3778,8 +4582,60 @@ static double wellExitTimeFromPairState(const normalPairState* state,
 }
 
 double collisionTimeNormal(const particle* p1, const particle* p2){
-	const normalPairState state = normalPairStateAtCurrentTime(p1, p2);
-	return collisionTimeFromPairState(&state, DIST2(p1->rad, p2->rad));
+	/* Hard-particle scheduling dominates dense disk runs.  Build only the
+	 * quantities needed by each rejection stage: more than half of ordinary
+	 * linked-cell candidates are already moving apart, so calculating their
+	 * relative-speed norm and discriminant eagerly is wasted work.  Keep the
+	 * overlap check before the radial rejection so a separating invalid state
+	 * is still reported exactly as it was by collisionTimeFromPairState(). */
+	const particlePrediction p2Now = predictFreeFlyNormal(p2, t);
+	double dx = p2Now.x - p1->x;
+	double dy = p2Now.y - p1->y;
+	double dvx = p2Now.vx - p1->vx;
+	double dvy = p2Now.vy - p1->vy;
+	#if THREE_D
+	double dz = p2Now.z - p1->z;
+	double dvz = p2Now.vz - p1->vz;
+	#endif
+
+	if (addShear){
+		correctDistances(p1, p2, p2Now.x, p2Now.vx, &dx, &dvx);
+	}
+
+	#if THREE_D
+	PBC(&dx, &dy, &dz);
+	const double distanceSquared = dx*dx + dy*dy + dz*dz;
+	const double radialVelocity = dx*dvx + dy*dvy + dz*dvz;
+	#else
+	PBC(&dx, &dy);
+	const double distanceSquared = dx*dx + dy*dy;
+	const double radialVelocity = dx*dvx + dy*dvy;
+	#endif
+	const double gapSquared = distanceSquared - DIST2(p1->rad, p2->rad);
+	if (gapSquared < -0.01)
+		return -never;
+	if (radialVelocity > 0)
+		return never;
+
+	#if THREE_D
+	const double relativeSpeedSquared =
+		dvx*dvx + dvy*dvy + dvz*dvz;
+	#else
+	const double relativeSpeedSquared = dvx*dvx + dvy*dvy;
+	#endif
+	if (relativeSpeedSquared <= 1e-30)
+		return never;
+	if (gapSquared <= 0)
+		return 0;
+	const double det = radialVelocity*radialVelocity -
+		relativeSpeedSquared*gapSquared;
+	if (det < 0)
+		return never;
+	double displacementTime = gapSquared/
+		(sqrt(det) - radialVelocity);
+	if (displacementTime < 0 && displacementTime > -1e-12)
+		displacementTime = 0;
+	return displacementTime >= 0 ? logTime(displacementTime) : never;
 
 }
 
@@ -3832,6 +4688,30 @@ static double scheduledCollisionTimeGrow(const particle* p1, const particle* p2)
 	exit(3);
 	#endif
 }
+
+#if !THREE_D
+/* Scan one linked-cell head for the narrow, no-potential 2D disk path.  Keeping
+ * this helper inline lets collisionEventNormal spell out its fixed 3x3
+ * stencil without rebuilding coordinate arrays or carrying variable trip
+ * counts through the hottest scheduler loop. */
+static inline int scanHardDiskCellNormal(const particle* p1, particle* p2,
+	double* bestTime, int* bestPartner){
+	int improved = 0;
+	while (p2 != NULL){
+		if (p1 != p2){
+			const double candidateTime =
+				scheduledCollisionTimeNormal(p1, p2);
+			if (*bestTime > candidateTime){
+				*bestTime = candidateTime;
+				*bestPartner = p2->num;
+				improved = 1;
+			}
+		}
+		p2 = p2->nxt;
+	}
+	return improved;
+}
+#endif
 
 //time to enter in the square well: https://faculty.biu.ac.il/~rapaport/papers/09b-ptp.pdf
 double sphereTime(const particle* p1, const particle* p2){
@@ -4149,42 +5029,80 @@ void collisionEventNormal(int i){
 		type = WALL;
 		xy = 2;
 	}
-	int neighboringX[5];
-	int neighboringY[5];
-	int numberX = neighboringCellCoordinates(X, Nxcells, neighboringX);
-	int numberY = neighboringCellCoordinates(Y, Nycells, neighboringY);
 	#if THREE_D
 	int neighboringZ[5];
 	int numberZ = neighboringCellCoordinates(Z, Nzcells, neighboringZ);
 	#else
 	int numberZ = 1;
 	#endif
-	for (int zi = 0; zi < numberZ; zi++){
-		for (int yi = 0; yi < numberY; yi++){
-			for (int xi = 0; xi < numberX; xi++){
-			#if THREE_D
-				particle* p2 = cellList[neighboringZ[zi]*Nycells*Nxcells +
-					neighboringY[yi]*Nxcells + neighboringX[xi]];
-			#else
-				particle* p2 = cellList[neighboringY[yi]*Nxcells + neighboringX[xi]];
-			#endif
-				while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
-					if (p1 != p2){
-						if (addWell){
-							dtTemp = scheduledPotentialEventTime(p1, p2,
-								isParticleInWellList(p1, p2->num), &typeTemp);
+	int usedFixedDiskStencil = 0;
+	#if !THREE_D
+	if (!addWell && !addShear && !addField && !addWallx && !addWally &&
+		!addWallz &&
+		!addMidWall && !addCircularWall && collisionCellNeighborRange == 1 &&
+		Nxcells > 2 && Nycells > 2){
+		const int left = X == 0 ? Nxcells - 1 : X - 1;
+		const int right = X + 1 == Nxcells ? 0 : X + 1;
+		const int lowerRow = (Y == 0 ? Nycells - 1 : Y - 1)*Nxcells;
+		const int middleRow = Y*Nxcells;
+		const int upperRow = (Y + 1 == Nycells ? 0 : Y + 1)*Nxcells;
+		int foundCollision = 0;
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[lowerRow + left], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[lowerRow + X], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[lowerRow + right], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[middleRow + left], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[middleRow + X], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[middleRow + right], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[upperRow + left], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[upperRow + X], &dt, &finalPartner);
+		foundCollision |= scanHardDiskCellNormal(p1,
+			cellList[upperRow + right], &dt, &finalPartner);
+		if (foundCollision){
+			type = COLLISION;
+		}
+		usedFixedDiskStencil = 1;
+	}
+	#endif
+	if (!usedFixedDiskStencil){
+		int neighboringX[5];
+		int neighboringY[5];
+		int numberX = neighboringCellCoordinates(X, Nxcells, neighboringX);
+		int numberY = neighboringCellCoordinates(Y, Nycells, neighboringY);
+		for (int zi = 0; zi < numberZ; zi++){
+			for (int yi = 0; yi < numberY; yi++){
+				for (int xi = 0; xi < numberX; xi++){
+				#if THREE_D
+					particle* p2 = cellList[neighboringZ[zi]*Nycells*Nxcells +
+						neighboringY[yi]*Nxcells + neighboringX[xi]];
+				#else
+					particle* p2 = cellList[neighboringY[yi]*Nxcells + neighboringX[xi]];
+				#endif
+					while (p2 != NULL){ //while there is a particle in the doubly linked list of the cellList do...
+						if (p1 != p2){
+							if (addWell){
+								dtTemp = scheduledPotentialEventTime(p1, p2,
+									isParticleInWellList(p1, p2->num), &typeTemp);
+							}
+							else{
+								dtTemp = scheduledCollisionTimeNormal(p1, p2);
+								typeTemp = COLLISION;
+							}
+							if (dt > dtTemp){ //get min
+								finalPartner = p2->num;
+								dt = dtTemp;
+								type = typeTemp;
+							}
 						}
-						else{
-							dtTemp = scheduledCollisionTimeNormal(p1, p2);
-							typeTemp = COLLISION;
-						}
-						if (dt > dtTemp){ //get min
-							finalPartner = p2->num;
-							dt = dtTemp;
-							type = typeTemp;
-						}
+						p2 = p2->nxt;
 					}
-					p2 = p2->nxt;
 				}
 			}
 		}
@@ -5671,15 +6589,15 @@ void doTheCollisionNormal(){
 			collisionDelta = deltaMax*pow((2 - (exp(-dtj/tau) + exp(-dti/tau)))/2, 3);
 		}
 
-		dist = sqrt(dx*dx + dy*dy
-			#if THREE_D
-			+ dz*dz
-			#endif
-		);
-		double nx = dx/dist;
-		double ny = dy/dist;
+		/* This event was predicted on the hard contact surface, whose distance
+		 * is already known from the two radii.  Recomputing hypot(dx,dy[,dz])
+		 * here adds a square root to every Delta collision and only re-measures
+		 * accumulated flight roundoff. */
+		const double inverseContactDistance = 1.0/DIST(pi->rad, pj->rad);
+		double nx = dx*inverseContactDistance;
+		double ny = dy*inverseContactDistance;
 		#if THREE_D
-		double nz = dz/dist;
+		double nz = dz*inverseContactDistance;
 		#endif
 		double deltaDirectionX = nx;
 		double deltaDirectionY = ny;
@@ -6643,6 +7561,24 @@ void addEventThermo(double tscreen){
 --------------------------------------------- */
 #if EDMD_VERIFY_OVERLAPS
 static void verifyNoOverlaps(void){
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_active()){
+		char message[512];
+		const double tolerance = 1.0e-10*
+			(1.0 + fabs(Lx) + fabs(Ly));
+		if (!polygon_particles_verify_no_overlaps(
+				t, tolerance, message, sizeof(message))){
+			#if G
+				simulationReportRecoverableOverlapFault(message);
+				return;
+			#else
+				fprintf(stderr, "%s\n", message);
+				exit(3);
+			#endif
+		}
+		return;
+	}
+	#endif
 	for (int i = 0; i < N; i++){
 		if (addCircularWall){
 			double dxWall = particles[i].x - halfLx;
@@ -6835,11 +7771,25 @@ void stopGrow(){
 		#endif
 		//#p->rad = 0.001;
 	}
-	collisionEvent = &collisionEventNormal;
-	doTheCollision = &doTheCollisionNormal;
-	freeFly = &freeFlyNormal;
-	doTheWall = &doTheWallNormal;
-	crossingEvent = &crossingEventNormal;
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_growing()){
+		/* Growth CCD intentionally stops at a small conservative pre-contact
+		 * tolerance.  Pay for one exact local SAT pass at handoff, rather than
+		 * machine-precision bisection at every preparation collision. */
+		char verification[512];
+		if (!polygon_particles_verify_local_no_overlaps(t, 1.0e-10,
+			verification, sizeof(verification))){
+			simulationReportFault(verification[0] != '\0' ? verification :
+				"Polygon preparation failed its final overlap check because the final linked-cell state is invalid.");
+			return;
+		}
+		polygon_particles_finish_growth();
+		#if G
+		releaseGraphicalRecoveryCheckpoints();
+		#endif
+	}
+	#endif
+	selectNormalDynamicsHandlers();
 	normalizePhysicalQ();
 	
 	if (addWell && U != 0.0){
@@ -6867,6 +7817,11 @@ void stopGrow(){
 	initializeTransportAccumulators();
 	#endif
 	resetOutputSamplingState();
+	#if G && POLYGON_PARTICLES && !THREE_D
+	/* Discard preparation-era pressure/energy histories and wall-impulse
+	 * baselines. The first production sample establishes fresh observables. */
+	live_analysis_reset_generation();
+	#endif
 }
 
 void addEventGrow(double time){
@@ -6988,6 +7943,15 @@ void addNoise(){
 			//adds the kick
 			if (noise == 1){
 				randomGaussian(p, T);
+				#if POLYGON_PARTICLES && !THREE_D
+				if (polygon_particles_active() &&
+					!polygon_particles_apply_angular_langevin(
+						i, T, gamm, dtnoise, euler)) {
+					simulationReportFault(
+						"The polygon Langevin thermostat could not produce a finite angular update. Use the analytical OU integrator and finite positive gamma/interval values, then restart.");
+					return;
+				}
+				#endif
 			}
 			else{
 				p->vx *= velocityRescale;
@@ -8081,6 +9045,25 @@ void normalizePhysicalQ(){
 
 
 	physicalQ();
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_active()){
+		/* Polygon spin is initialized from its own angular-temperature
+		   setting.  Preserve the historical meaning of Einit as the target
+		   translational energy instead of counting rotation in a scale factor
+		   that is applied only to vx/vy. */
+		const double translationalEnergy =
+			E - polygon_particles_rotational_energy();
+		if (translationalEnergy > 0 && Einit > 0){
+			const double velocityScale =
+				sqrt(translationalEnergy/N/Einit);
+			for (int i = 0; i < N; i++){
+				particles[i].vx /= velocityScale;
+				particles[i].vy /= velocityScale;
+			}
+		}
+		return;
+	}
+	#endif
 	for (int i = 0; i < N; i++){
 		particles[i].vx /= sqrt(E/N/Einit);
 		particles[i].vy /= sqrt(E/N/Einit);
@@ -8103,6 +9086,16 @@ void optimizeGrowConstant(){
 	else{
 		baseGrow = 0.1;
 	}
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_requested()){
+		/* The legacy density slowdown was tuned for disks close to their
+		 * envelope jamming point. Actual polygons need enough expansion-driven
+		 * contact motion to rotate and unjam; slowing by 8x instead creates
+		 * resolution-level chatter. */
+		vr = baseGrow;
+		return;
+	}
+	#endif
 	if (polydispersity != 0){
 		if ((sizeratio > 0.5) && (fractionSmallN < 0.9) && (phi > 0.82)){
 			baseGrow *= 0.1;
@@ -8347,6 +9340,9 @@ void physicalQ(){
 			active += 1.;
 		}
 	}
+	#if POLYGON_PARTICLES && !THREE_D
+	E += polygon_particles_rotational_energy();
+	#endif
 	active /= N;
 	if (msd != 0 && posxInitial != NULL && posyInitial != NULL &&
 		#if THREE_D
@@ -8641,7 +9637,7 @@ void format(){
 	CWHITE;
 	printf("\nDISSIPATION: ");
 	CGREEN;
-	if ((res < 1) || (addExpo))
+	if ((res < 1) || addExpo || damping)
 		printf("ON");
 	else
 		printf("OFF");
@@ -8710,9 +9706,15 @@ void runningCheck(){
 		printf("ERROR:\033[1;31m Coefficient of restitution greater than 1!\033[0m\n");
 		stop = 1;
 	}
-	if (( ( ((addWally) || (addWallx) || (addWallz) || (addCircularWall) || (addMidWall)) && (resW < 1) ) || (res < 1) || (damping == 1)) && (((addDelta == 0) && (addDeltaTangent == 0) && (addDoubleDelta == 0) && (addDoubleDeltaTangent == 0) && (addEvolvingDelta == 0)) && (addExpo == 0) && (noise == 0))){
-		printf("ERROR:\033[1;31m Dissipative system without energy input!\033[0m\n");
-		stop = 1;
+	if (unforcedDissipationActive()){
+		if (G){
+			printf("WARNING:\033[0;31m Dissipative system without energy input; it will cool freely.\033[0m\n");
+		}
+		else{
+			printf("WARNING:\033[0;31m Dissipative system without energy input; "
+				"the headless run will stop below total kinetic energy %.1e.\033[0m\n",
+				headlessKineticEnergyCutoff);
+		}
 	}
 
 	if (field > 0){

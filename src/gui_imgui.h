@@ -75,6 +75,7 @@ typedef struct GuiMetrics {
     double box_ly;
     double box_lz;
     double packing_fraction;
+    double target_packing_fraction;
     double total_energy;
     double energy_per_particle;
     double pressure;
@@ -181,6 +182,9 @@ void gui_imgui_set_applied_config(const SimulationConfig *applied_config);
 /* Display a host/lifecycle failure in the workspace instead of only logging
  * it to the launching terminal. */
 void gui_imgui_report_error(const char *message);
+
+/* Show a brief, non-modal acknowledgement in the existing fading toast. */
+void gui_imgui_report_notice(const char *message);
 
 /* Report an engine state which requires a restart.  Unlike an ordinary
  * runtime warning, a fault keeps Run and Step disabled until a successful

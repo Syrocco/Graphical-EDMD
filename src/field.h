@@ -1,7 +1,10 @@
 #ifndef FIELD_H
 #define FIELD_H
 
+#ifndef EDMD_PARTICLE_TYPEDEF
+#define EDMD_PARTICLE_TYPEDEF
 typedef struct particle particle;
+#endif
 
 int pressure_field_init(double Lx, double Ly, double dr_pressure, const char* output_path);
 void pressure_field_close_file(void);

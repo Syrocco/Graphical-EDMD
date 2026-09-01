@@ -6,6 +6,7 @@
 
 extern int N;
 extern int Nthermo;
+extern int addWallx;
 extern unsigned long int ncol;
 extern particle *particles;
 extern FILE *thermo;
@@ -57,6 +58,7 @@ static void configure_state(void)
     value.rad = 1.0;
     particles = &value;
     N = 1;
+    addWallx = 1;
     ncol = 0;
     Lx = 20.0;
     Ly = 10.0;

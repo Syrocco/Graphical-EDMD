@@ -26,6 +26,12 @@ tests/*
 !tests/test_lees_edwards_3d.c
 !tests/test_reconfigure.c
 !tests/test_camera_frustum.c
+!tests/test_convex_polygon.c
+!tests/test_polygon_particles.c
+!tests/test_polygon_stability.c
+!tests/test_polygon_dense_growth.c
+!tests/benchmark_polygon_dense.c
+!tests/benchmark_headless_disks.c
 !src/
 !src/**
 src/EDMD_chiral.c

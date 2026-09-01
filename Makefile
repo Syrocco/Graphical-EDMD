@@ -43,10 +43,11 @@ endif
 
 
 SRC_DIR = src
-SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c $(SRC_DIR)/intruder.c $(SRC_DIR)/field.c
+SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c $(SRC_DIR)/intruder.c $(SRC_DIR)/field.c $(SRC_DIR)/simulation_fault.c
 GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c \
 	$(SRC_DIR)/sim_config.c $(SRC_DIR)/sim_lifecycle.c \
-	$(SRC_DIR)/live_analysis.c $(SRC_DIR)/camera_frustum.c
+	$(SRC_DIR)/live_analysis.c $(SRC_DIR)/camera_frustum.c \
+	$(POLYGON_GRAPHICS_SOURCES)
 
 IMGUI_DIR = $(SRC_DIR)/vendor/imgui
 RLIMGUI_DIR = $(SRC_DIR)/vendor/rlimgui
@@ -59,14 +60,22 @@ GRAPHICS_VENDOR_CXX_SOURCES = $(IMGUI_SOURCES) $(RLIMGUI_SOURCES)
 # Add project-owned C++ GUI modules here.  Unlike vendored sources, these are
 # compiled with the EDMD dimension and graphics feature macros.
 GRAPHICS_APPLICATION_CXX_SOURCES = $(SRC_DIR)/gui_imgui.cpp \
-	$(SRC_DIR)/gui_panels.cpp $(SRC_DIR)/gui_analysis.cpp
+	$(SRC_DIR)/gui_panels.cpp $(SRC_DIR)/gui_analysis.cpp \
+	$(POLYGON_GRAPHICS_CXX_SOURCES)
 
 # Select the simulation dimension at build time, e.g. `make graphics THREE_D=1`.
 # When omitted, EDMD.h supplies the default so source-level configurations keep
 # working as before.
 THREE_D ?=
-ifneq ($(strip $(THREE_D)),)
-DIMENSION_FLAGS = -DTHREE_D=$(THREE_D)
+EDMD_DIMENSION = $(strip $(THREE_D))
+ifneq ($(EDMD_DIMENSION),)
+ifneq ($(words $(EDMD_DIMENSION)),1)
+$(error THREE_D must be 0 or 1)
+endif
+ifneq ($(filter 0 1,$(EDMD_DIMENSION)),$(EDMD_DIMENSION))
+$(error THREE_D must be 0 or 1)
+endif
+DIMENSION_FLAGS = -DTHREE_D=$(EDMD_DIMENSION)
 endif
 
 # Compile-time EDMD capabilities.  Keep these definitions identical across
@@ -81,12 +90,33 @@ EDMD_VERIFY_COLLISION_ACCOUNTING ?= 0
 EDMD_VERIFY_QUEUE ?= 0
 EDMD_VERIFY_OVERLAPS ?= 0
 NONADDITIVE ?= 1
-EDMD_FEATURE_FLAGS = -DSTRESS=$(STRESS) -DHEAT=$(HEAT) \
+POLYGON_PARTICLES ?=
+
+# Convex polygons are a graphical 2D feature.  They are enabled by default
+# for desktop/web 2D builds, can be removed completely with
+# POLYGON_PARTICLES=0, and are compiled out of both 3D and batch executables.
+POLYGON_PARTICLES_REQUESTED = $(if $(strip $(POLYGON_PARTICLES)),$(strip $(POLYGON_PARTICLES)),1)
+GRAPHICS_POLYGON_PARTICLES = $(if $(filter 1,$(EDMD_DIMENSION)),0,$(POLYGON_PARTICLES_REQUESTED))
+ifneq ($(words $(POLYGON_PARTICLES_REQUESTED)),1)
+$(error POLYGON_PARTICLES must be 0 or 1)
+endif
+ifneq ($(filter 0 1,$(POLYGON_PARTICLES_REQUESTED)),$(POLYGON_PARTICLES_REQUESTED))
+$(error POLYGON_PARTICLES must be 0 or 1)
+endif
+POLYGON_GRAPHICS_SOURCES = $(if $(filter 1,$(GRAPHICS_POLYGON_PARTICLES)),\
+	$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c)
+POLYGON_GRAPHICS_CXX_SOURCES = $(if $(filter 1,$(GRAPHICS_POLYGON_PARTICLES)),\
+	$(SRC_DIR)/gui_polygon_editor.cpp)
+
+EDMD_BASE_FEATURE_FLAGS = -DSTRESS=$(STRESS) -DHEAT=$(HEAT) \
 	-DTANGENTIAL=$(TANGENTIAL) -DINTRUDER=$(INTRUDER) \
 	-DNONADDITIVE=$(NONADDITIVE) \
 	-DEDMD_VERIFY_COLLISION_ACCOUNTING=$(EDMD_VERIFY_COLLISION_ACCOUNTING) \
 	-DEDMD_VERIFY_QUEUE=$(EDMD_VERIFY_QUEUE) \
 	-DEDMD_VERIFY_OVERLAPS=$(EDMD_VERIFY_OVERLAPS)
+EDMD_FEATURE_FLAGS = $(EDMD_BASE_FEATURE_FLAGS) -DPOLYGON_PARTICLES=0
+GRAPHICS_PROJECT_FEATURE_FLAGS = $(EDMD_BASE_FEATURE_FLAGS) \
+	-DPOLYGON_PARTICLES=$(GRAPHICS_POLYGON_PARTICLES)
 
 # Reject combinations whose source models are intrinsically incompatible.
 # Fixed-axis tangential *delta* remains available in 3D with TANGENTIAL=0;
@@ -113,10 +143,13 @@ endif
 # Compiler flags are not part of Make's dependency graph.  Isolating each
 # dimension and feature combination prevents incompatible objects from being
 # reused in a subsequent graphics build.
-GRAPHICS_DIMENSION = $(if $(strip $(THREE_D)),$(THREE_D),default)
-GRAPHICS_FEATURE_SET = stress$(STRESS)-heat$(HEAT)-tangent$(TANGENTIAL)-intruder$(INTRUDER)-contacts$(NONADDITIVE)-verify$(EDMD_VERIFY_COLLISION_ACCOUNTING)-queue$(EDMD_VERIFY_QUEUE)-overlap$(EDMD_VERIFY_OVERLAPS)
+GRAPHICS_DIMENSION = $(if $(EDMD_DIMENSION),$(EDMD_DIMENSION),default)
+GRAPHICS_FEATURE_SET = stress$(STRESS)-heat$(HEAT)-tangent$(TANGENTIAL)-intruder$(INTRUDER)-contacts$(NONADDITIVE)-polygon$(GRAPHICS_POLYGON_PARTICLES)-verify$(EDMD_VERIFY_COLLISION_ACCOUNTING)-queue$(EDMD_VERIFY_QUEUE)-overlap$(EDMD_VERIFY_OVERLAPS)
+CORE_TEST_FEATURE_SET = stress$(STRESS)-heat$(HEAT)-tangent$(TANGENTIAL)-intruder$(INTRUDER)-contacts$(NONADDITIVE)-polygon0-verify$(EDMD_VERIFY_COLLISION_ACCOUNTING)-queue$(EDMD_VERIFY_QUEUE)-overlap$(EDMD_VERIFY_OVERLAPS)
+GRAPHICS_RELEASE_MODE = $(if $(strip $(NATIVE_OPT_FLAGS)),native,portable)
+WEB_RELEASE_MODE = $(if $(strip $(WEB_LTO_FLAGS)),lto,portable)
 GRAPHICS_BUILD_ROOT = build/graphics
-GRAPHICS_BUILD_DIR = $(GRAPHICS_BUILD_ROOT)/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+GRAPHICS_BUILD_DIR = $(GRAPHICS_BUILD_ROOT)/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)-$(GRAPHICS_RELEASE_MODE)
 GRAPHICS_C_OBJECTS = $(patsubst %.c,$(GRAPHICS_BUILD_DIR)/%.o,$(GRAPHICS_SOURCES))
 GRAPHICS_APPLICATION_CXX_OBJECTS = $(patsubst %.cpp,$(GRAPHICS_BUILD_DIR)/%.o,$(GRAPHICS_APPLICATION_CXX_SOURCES))
 # ImGui and rlImGui are dimension-independent and can be reused by 2D and 3D
@@ -126,30 +159,30 @@ GRAPHICS_VENDOR_OBJECTS = $(patsubst $(SRC_DIR)/vendor/%.cpp,$(GRAPHICS_BUILD_RO
 GRAPHICS_OBJECTS = $(GRAPHICS_C_OBJECTS) $(GRAPHICS_APPLICATION_CXX_OBJECTS) $(GRAPHICS_VENDOR_OBJECTS)
 GRAPHICS_DEPENDENCIES = $(GRAPHICS_OBJECTS:.o=.d)
 
-# Core-test artifacts use the same build-configuration key as project graphics
-# objects. Separate paths prevent concurrent 2D/3D matrix jobs from racing on
-# an ABI-incompatible EDMD object or executable.
-PREDICTION_TEST_BUILD_DIR = build/tests/prediction/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+# Core-test artifacts use a feature key matching their circle-only compile
+# flags. Separate paths prevent concurrent 2D/3D matrix jobs from racing on an
+# ABI-incompatible EDMD object or executable.
+PREDICTION_TEST_BUILD_DIR = build/tests/prediction/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 PREDICTION_TEST_CORE_OBJECT = $(PREDICTION_TEST_BUILD_DIR)/EDMD_prediction_test.o
 PREDICTION_TEST_BINARY = $(PREDICTION_TEST_BUILD_DIR)/test_prediction
-CALENDAR_TEST_BUILD_DIR = build/tests/calendar/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+CALENDAR_TEST_BUILD_DIR = build/tests/calendar/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 CALENDAR_TEST_CORE_OBJECT = $(CALENDAR_TEST_BUILD_DIR)/EDMD_calendar_test.o
 CALENDAR_TEST_BINARY = $(CALENDAR_TEST_BUILD_DIR)/test_event_calendar
-LIVE_ANALYSIS_TEST_BUILD_DIR = build/tests/live-analysis/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+LIVE_ANALYSIS_TEST_BUILD_DIR = build/tests/live-analysis/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 LIVE_ANALYSIS_TEST_BINARY = $(LIVE_ANALYSIS_TEST_BUILD_DIR)/test_live_analysis
-WALL_PRESSURE_TEST_BUILD_DIR = build/tests/wall-pressure/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+WALL_PRESSURE_TEST_BUILD_DIR = build/tests/wall-pressure/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 WALL_PRESSURE_TEST_CORE_OBJECT = $(WALL_PRESSURE_TEST_BUILD_DIR)/EDMD_wall_pressure_test.o
 WALL_PRESSURE_TEST_BINARY = $(WALL_PRESSURE_TEST_BUILD_DIR)/test_wall_pressure
-SPHERICAL_WALL_TEST_BUILD_DIR = build/tests/spherical-wall/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+SPHERICAL_WALL_TEST_BUILD_DIR = build/tests/spherical-wall/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 SPHERICAL_WALL_TEST_CORE_OBJECT = $(SPHERICAL_WALL_TEST_BUILD_DIR)/EDMD_spherical_wall_test.o
 SPHERICAL_WALL_TEST_BINARY = $(SPHERICAL_WALL_TEST_BUILD_DIR)/test_spherical_wall
-SPHERICAL_FIELD_TEST_BUILD_DIR = build/tests/spherical-field/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+SPHERICAL_FIELD_TEST_BUILD_DIR = build/tests/spherical-field/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 SPHERICAL_FIELD_TEST_CORE_OBJECT = $(SPHERICAL_FIELD_TEST_BUILD_DIR)/EDMD_spherical_field_test.o
 SPHERICAL_FIELD_TEST_BINARY = $(SPHERICAL_FIELD_TEST_BUILD_DIR)/test_spherical_field
-CONFIG_TEST_BUILD_DIR = build/tests/config/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+CONFIG_TEST_BUILD_DIR = build/tests/config/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 CONFIG_TEST_CORE_OBJECT = $(CONFIG_TEST_BUILD_DIR)/EDMD_config_test.o
 CONFIG_TEST_BINARY = $(CONFIG_TEST_BUILD_DIR)/test_sim_config
-HEX_LATTICE_TEST_BUILD_DIR = build/tests/hex-lattice/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+HEX_LATTICE_TEST_BUILD_DIR = build/tests/hex-lattice/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 HEX_LATTICE_TEST_CORE_OBJECT = $(HEX_LATTICE_TEST_BUILD_DIR)/EDMD_hex_lattice_test.o
 HEX_LATTICE_TEST_BINARY = $(HEX_LATTICE_TEST_BUILD_DIR)/test_hexagonal_lattice
 FULL_BOX_3D_TEST_BUILD_DIR = build/tests/full-box/3d-stress-heat
@@ -158,11 +191,34 @@ FULL_BOX_3D_TEST_BINARY = $(FULL_BOX_3D_TEST_BUILD_DIR)/test_planar_wall_3d
 LEES_EDWARDS_3D_TEST_BUILD_DIR = build/tests/lees-edwards/3d-stress-heat
 LEES_EDWARDS_3D_TEST_CORE_OBJECT = $(LEES_EDWARDS_3D_TEST_BUILD_DIR)/EDMD_lees_edwards_test.o
 LEES_EDWARDS_3D_TEST_BINARY = $(LEES_EDWARDS_3D_TEST_BUILD_DIR)/test_lees_edwards_3d
-RECONFIGURE_TEST_BUILD_DIR = build/tests/reconfigure/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+RECONFIGURE_TEST_BUILD_DIR = build/tests/reconfigure/$(GRAPHICS_DIMENSION)/$(CORE_TEST_FEATURE_SET)
 RECONFIGURE_TEST_CORE_OBJECT = $(RECONFIGURE_TEST_BUILD_DIR)/EDMD_reconfigure_test.o
 RECONFIGURE_TEST_BINARY = $(RECONFIGURE_TEST_BUILD_DIR)/test_reconfigure
 FRUSTUM_TEST_BUILD_DIR = build/tests/camera-frustum
 FRUSTUM_TEST_BINARY = $(FRUSTUM_TEST_BUILD_DIR)/test_camera_frustum
+POLYGON_GEOMETRY_TEST_BUILD_DIR = build/tests/polygon-geometry
+POLYGON_GEOMETRY_TEST_BINARY = $(POLYGON_GEOMETRY_TEST_BUILD_DIR)/test_convex_polygon
+POLYGON_PARTICLE_TEST_BUILD_DIR = build/tests/polygon-particles
+POLYGON_PARTICLE_TEST_CORE_OBJECT = $(POLYGON_PARTICLE_TEST_BUILD_DIR)/EDMD_polygon_test.o
+POLYGON_PARTICLE_TEST_BINARY = $(POLYGON_PARTICLE_TEST_BUILD_DIR)/test_polygon_particles
+POLYGON_STABILITY_TEST_BUILD_DIR = build/tests/polygon-stability
+POLYGON_STABILITY_PERIODIC_CORE_OBJECT = $(POLYGON_STABILITY_TEST_BUILD_DIR)/EDMD_periodic.o
+POLYGON_STABILITY_PLANAR_CORE_OBJECT = $(POLYGON_STABILITY_TEST_BUILD_DIR)/EDMD_planar.o
+POLYGON_STABILITY_CIRCULAR_CORE_OBJECT = $(POLYGON_STABILITY_TEST_BUILD_DIR)/EDMD_circular.o
+POLYGON_STABILITY_PERIODIC_BINARY = $(POLYGON_STABILITY_TEST_BUILD_DIR)/test_periodic
+POLYGON_STABILITY_PLANAR_BINARY = $(POLYGON_STABILITY_TEST_BUILD_DIR)/test_planar
+POLYGON_STABILITY_CIRCULAR_BINARY = $(POLYGON_STABILITY_TEST_BUILD_DIR)/test_circular
+POLYGON_DENSE_GROWTH_TEST_BUILD_DIR = build/tests/polygon-dense-growth
+POLYGON_DENSE_GROWTH_TEST_CORE_OBJECT = $(POLYGON_DENSE_GROWTH_TEST_BUILD_DIR)/EDMD_dense_growth.o
+POLYGON_DENSE_GROWTH_TEST_BINARY = $(POLYGON_DENSE_GROWTH_TEST_BUILD_DIR)/test_polygon_dense_growth
+POLYGON_DENSE_BENCHMARK_BUILD_DIR = build/tests/polygon-dense-benchmark
+POLYGON_DENSE_BENCHMARK_CORE_OBJECT = $(POLYGON_DENSE_BENCHMARK_BUILD_DIR)/EDMD_dense_benchmark.o
+POLYGON_DENSE_BENCHMARK_BINARY = $(POLYGON_DENSE_BENCHMARK_BUILD_DIR)/benchmark_polygon_dense
+POLYGON_DENSE_BENCHMARK_ARGS ?= regular 1000 0.80 250000 1 1
+HEADLESS_DISK_BENCHMARK_BUILD_DIR = build/tests/headless-disk-benchmark
+HEADLESS_DISK_BENCHMARK_CORE_OBJECT = $(HEADLESS_DISK_BENCHMARK_BUILD_DIR)/EDMD_headless_disk_benchmark.o
+HEADLESS_DISK_BENCHMARK_BINARY = $(HEADLESS_DISK_BENCHMARK_BUILD_DIR)/benchmark_headless_disks
+HEADLESS_DISK_BENCHMARK_ARGS ?= ballistic 1000 0.60 100000 20000 1 3
 
 PYTHON ?= python3
 
@@ -171,6 +227,16 @@ INCLUDE_FLAGS = -I$(SRC_DIR)
 # away the validator's and scheduler's explicit NaN/Inf checks.  Retain the
 # other fast-math transforms while making those safety checks observable.
 FINITE_MATH_GUARD_FLAGS = -fno-finite-math-only
+
+# Release executables are built for the machine running make and use
+# cross-translation-unit optimization.  This matters for the polygon adapter,
+# whose event hot path crosses EDMD -> polygon scheduler -> CCD/SAT source
+# boundaries.  Packagers/cross-compilers can request a portable binary with
+# `make graphics NATIVE_OPT_FLAGS=`.
+NATIVE_OPT_FLAGS ?= -flto -march=native
+# Emscripten has no host architecture tuning, but LLVM LTO provides the same
+# cross-source inlining for the browser build.
+WEB_LTO_FLAGS ?= -flto
 
 ifeq ($(OPENMP_SUPPORT),yes)
 	OPENMP_FLAGS = -fopenmp
@@ -197,14 +263,16 @@ endif
 
 GRAPHICS_CPPFLAGS = $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) \
 	-I$(IMGUI_DIR) -I$(RLIMGUI_DIR) $(DIMENSION_FLAGS) \
-	$(EDMD_FEATURE_FLAGS) -DG=1
+	$(GRAPHICS_PROJECT_FEATURE_FLAGS) -DG=1
 GRAPHICS_VENDOR_CPPFLAGS = $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) \
 	-I$(IMGUI_DIR) -I$(RLIMGUI_DIR)
 GRAPHICS_CFLAGS = -std=c99 -Wall -Wno-missing-braces \
-	-Wno-unused-value -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -pthread
+	-Wno-unused-value -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) \
+	$(NATIVE_OPT_FLAGS) -pthread
 # Font Awesome is optional in rlImGui and its generated headers are not part
 # of the deliberately minimal vendored dependency set.
-GRAPHICS_CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread \
+GRAPHICS_CXXFLAGS = -std=c++17 -Wall -Wextra -O3 \
+	$(NATIVE_OPT_FLAGS) -pthread \
 	-DNO_FONT_AWESOME
 GRAPHICS_VENDOR_CXXFLAGS = -std=c++17 -O2 -pthread \
 	-DNO_FONT_AWESOME
@@ -217,7 +285,7 @@ WEB_CXX ?= em++
 WEB_AR ?= emar
 WEB_BUILD_ROOT = build/web
 WEB_OBJECT_ROOT = $(WEB_BUILD_ROOT)/objects
-WEB_BUILD_DIR = $(WEB_OBJECT_ROOT)/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
+WEB_BUILD_DIR = $(WEB_OBJECT_ROOT)/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)-$(WEB_RELEASE_MODE)
 WEB_EM_CACHE ?= $(abspath $(WEB_BUILD_ROOT)/emscripten-cache)
 WEB_RAYLIB_VERSION = 5.5
 WEB_RAYLIB_SOURCE ?= $(WEB_BUILD_ROOT)/raylib-$(WEB_RAYLIB_VERSION)
@@ -241,26 +309,30 @@ WEB_PLATFORM_CPPFLAGS = $(INCLUDE_FLAGS) -I$(WEB_RAYLIB_SOURCE)/src \
 	-I$(IMGUI_DIR) -I$(RLIMGUI_DIR) -D_DEFAULT_SOURCE \
 	-DPLATFORM_WEB -DGRAPHICS_API_OPENGL_ES3
 WEB_PROJECT_CPPFLAGS = $(WEB_PLATFORM_CPPFLAGS) $(DIMENSION_FLAGS) \
-	$(EDMD_FEATURE_FLAGS) -DG=1
+	$(GRAPHICS_PROJECT_FEATURE_FLAGS) -DG=1
 # Do not give Dear ImGui/rlImGui EDMD feature macros or `G`: ImGui uses `G`
 # as an internal identifier, and the project macro would corrupt that code.
 WEB_VENDOR_CPPFLAGS = $(WEB_PLATFORM_CPPFLAGS)
 WEB_CFLAGS = -std=gnu99 -Wall -Wno-missing-braces -Wno-unused-value \
-	-O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS)
-WEB_CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -DNO_FONT_AWESOME
+	-O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) $(WEB_LTO_FLAGS)
+WEB_CXXFLAGS = -std=c++17 -Wall -Wextra -O3 $(WEB_LTO_FLAGS) \
+	-DNO_FONT_AWESOME
 WEB_VENDOR_CXXFLAGS = -std=c++17 -O2 -DNO_FONT_AWESOME
-WEB_LINK_FLAGS = -O3 -sUSE_GLFW=3 -sGL_ENABLE_GET_PROC_ADDRESS=1 \
+WEB_LINK_FLAGS = -O3 $(WEB_LTO_FLAGS) -sUSE_GLFW=3 -sGL_ENABLE_GET_PROC_ADDRESS=1 \
 	-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 \
 	-sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864 \
 	-sSTACK_SIZE=1048576 -sFORCE_FILESYSTEM=1 -sENVIRONMENT=web \
 	-sEXPORTED_RUNTIME_METHODS=ccall --shell-file $(WEB_SHELL)
 
 EDMD: $(SOURCES)
-	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0
+	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O3 -ffast-math \
+		$(FINITE_MATH_GUARD_FLAGS) $(NATIVE_OPT_FLAGS) -Wall -Wextra \
+		-lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0
 
 
 graphics: $(GRAPHICS_OBJECTS)
-	$(CXX) $(GRAPHICS_OBJECTS) $(GRAPHICS_LIBS) -lm -pthread $(OPENMP_FLAGS) -o a.out
+	$(CXX) $(GRAPHICS_OBJECTS) $(GRAPHICS_LIBS) $(NATIVE_OPT_FLAGS) \
+		-lm -pthread $(OPENMP_FLAGS) -o a.out
 
 # Validate or fetch the pinned raylib source before compiling anything that
 # includes raylib.h. This phony order-only prerequisite also makes parallel
@@ -286,12 +358,12 @@ $(WEB_RAYLIB_LIBRARY): $(WEB_RAYLIB_CONFIG_STAMP)
 		RAYLIB_BUILD_MODE=RELEASE RAYLIB_MODULE_AUDIO=FALSE \
 		CC="$(WEB_CC)" AR="$(WEB_AR)"
 
-$(WEB_BUILD_DIR)/%.o: %.c | web-raylib-source
+$(WEB_BUILD_DIR)/%.o: %.c Makefile | web-raylib-source
 	@mkdir -p $(dir $@) "$(WEB_EM_CACHE)"
 	EM_CACHE="$(WEB_EM_CACHE)" $(WEB_CC) $(WEB_PROJECT_CPPFLAGS) \
 		$(WEB_CFLAGS) -MMD -MP -c $< -o $@
 
-$(WEB_BUILD_DIR)/%.o: %.cpp | web-raylib-source
+$(WEB_BUILD_DIR)/%.o: %.cpp Makefile | web-raylib-source
 	@mkdir -p $(dir $@) "$(WEB_EM_CACHE)"
 	EM_CACHE="$(WEB_EM_CACHE)" $(WEB_CXX) $(WEB_PROJECT_CPPFLAGS) \
 		$(WEB_CXXFLAGS) -MMD -MP -c $< -o $@
@@ -365,11 +437,11 @@ web-clean:
 	rm -f -- docs/.nojekyll docs/index.html docs/EDMD.html docs/EDMD.js \
 		docs/EDMD.wasm docs/EDMD.data docs/EDMD.js.map docs/EDMD.wasm.map
 
-$(GRAPHICS_BUILD_DIR)/%.o: %.c
+$(GRAPHICS_BUILD_DIR)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)
 	$(CC) $(GRAPHICS_CPPFLAGS) $(GRAPHICS_CFLAGS) $(OPENMP_FLAGS) -MMD -MP -c $< -o $@
 
-$(GRAPHICS_BUILD_DIR)/%.o: %.cpp
+$(GRAPHICS_BUILD_DIR)/%.o: %.cpp Makefile
 	@mkdir -p $(dir $@)
 	$(CXX) $(GRAPHICS_CPPFLAGS) $(GRAPHICS_CXXFLAGS) -MMD -MP -c $< -o $@
 
@@ -385,7 +457,7 @@ debug: $(SOURCES)
 profile: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0 -o EDMD_profile
 
-.PHONY: graphics prediction-test calendar-test live-analysis-test wall-pressure-test spherical-wall-test spherical-field-test config-test hex-lattice-test full-box-3d-test lees-edwards-3d-test reconfigure-test reconfigure-matrix-test frustum-test graphics-performance-test
+.PHONY: graphics prediction-test calendar-test live-analysis-test wall-pressure-test spherical-wall-test spherical-field-test config-test hex-lattice-test full-box-3d-test lees-edwards-3d-test reconfigure-test reconfigure-matrix-test frustum-test polygon-geometry-test polygon-particle-test polygon-stability-test polygon-dense-growth-test polygon-dense-benchmark headless-disk-benchmark graphics-performance-test
 prediction-test:
 	@mkdir -p $(PREDICTION_TEST_BUILD_DIR)
 	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0 -Dmain=edmd_program_main -c -o $(PREDICTION_TEST_CORE_OBJECT)
@@ -407,20 +479,20 @@ live-analysis-test:
 
 wall-pressure-test:
 	@mkdir -p $(WALL_PRESSURE_TEST_BUILD_DIR)
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_WALL_X=1 -DG=0 -Dmain=edmd_program_main -c -o $(WALL_PRESSURE_TEST_CORE_OBJECT)
-	$(CC) tests/test_wall_pressure.c $(WALL_PRESSURE_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_WALL_X=1 -DG=0 -o $(WALL_PRESSURE_TEST_BINARY)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DG=0 -Dmain=edmd_program_main -c -o $(WALL_PRESSURE_TEST_CORE_OBJECT)
+	$(CC) tests/test_wall_pressure.c $(WALL_PRESSURE_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DG=0 -o $(WALL_PRESSURE_TEST_BINARY)
 	$(WALL_PRESSURE_TEST_BINARY)
 
 spherical-wall-test:
 	@mkdir -p $(SPHERICAL_WALL_TEST_BUILD_DIR)
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_CIRCULAR_WALL=1 -DG=0 -Dmain=edmd_program_main -c -o $(SPHERICAL_WALL_TEST_CORE_OBJECT)
-	$(CC) tests/test_spherical_wall.c $(SPHERICAL_WALL_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_CIRCULAR_WALL=1 -DG=0 -o $(SPHERICAL_WALL_TEST_BINARY)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DG=0 -Dmain=edmd_program_main -c -o $(SPHERICAL_WALL_TEST_CORE_OBJECT)
+	$(CC) tests/test_spherical_wall.c $(SPHERICAL_WALL_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_SPHERICAL_FIELD=0 -DG=0 -o $(SPHERICAL_WALL_TEST_BINARY)
 	$(SPHERICAL_WALL_TEST_BINARY)
 
 spherical-field-test:
 	@mkdir -p $(SPHERICAL_FIELD_TEST_BUILD_DIR)
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_CIRCULAR_WALL=1 -DEDMD_ADD_FIELD=1 -DG=0 -Dmain=edmd_program_main -c -o $(SPHERICAL_FIELD_TEST_CORE_OBJECT)
-	$(CC) tests/test_spherical_wall.c $(SPHERICAL_FIELD_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_ADD_CIRCULAR_WALL=1 -DEDMD_ADD_FIELD=1 -DG=0 -o $(SPHERICAL_FIELD_TEST_BINARY)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DG=0 -Dmain=edmd_program_main -c -o $(SPHERICAL_FIELD_TEST_CORE_OBJECT)
+	$(CC) tests/test_spherical_wall.c $(SPHERICAL_FIELD_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O3 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_SPHERICAL_FIELD=1 -DG=0 -o $(SPHERICAL_FIELD_TEST_BINARY)
 	$(SPHERICAL_FIELD_TEST_BINARY)
 
 config-test:
@@ -437,14 +509,14 @@ hex-lattice-test:
 
 full-box-3d-test:
 	@mkdir -p $(FULL_BOX_3D_TEST_BUILD_DIR)
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_ADD_WALL_Z=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main -c -o $(FULL_BOX_3D_TEST_CORE_OBJECT)
-	$(CC) tests/test_planar_wall_3d.c $(FULL_BOX_3D_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_ADD_WALL_Z=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -o $(FULL_BOX_3D_TEST_BINARY)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main -c -o $(FULL_BOX_3D_TEST_CORE_OBJECT)
+	$(CC) tests/test_planar_wall_3d.c $(FULL_BOX_3D_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -o $(FULL_BOX_3D_TEST_BINARY)
 	$(FULL_BOX_3D_TEST_BINARY)
 
 lees-edwards-3d-test:
 	@mkdir -p $(LEES_EDWARDS_3D_TEST_BUILD_DIR)
-	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_ADD_SHEAR=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main -c -o $(LEES_EDWARDS_3D_TEST_CORE_OBJECT)
-	$(CC) tests/test_lees_edwards_3d.c $(LEES_EDWARDS_3D_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_ADD_SHEAR=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -o $(LEES_EDWARDS_3D_TEST_BINARY)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main -c -o $(LEES_EDWARDS_3D_TEST_CORE_OBJECT)
+	$(CC) tests/test_lees_edwards_3d.c $(LEES_EDWARDS_3D_TEST_CORE_OBJECT) $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) -DTHREE_D=1 -DSTRESS=1 -DHEAT=1 -DTANGENTIAL=0 -DINTRUDER=0 -DNONADDITIVE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 -o $(LEES_EDWARDS_3D_TEST_BINARY)
 	$(LEES_EDWARDS_3D_TEST_BINARY)
 
 reconfigure-test:
@@ -465,6 +537,149 @@ frustum-test:
 		$(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -O2 $(FINITE_MATH_GUARD_FLAGS) \
 		-Wall -Wextra -lm -o $(FRUSTUM_TEST_BINARY)
 	$(FRUSTUM_TEST_BINARY)
+
+polygon-geometry-test:
+	@mkdir -p $(POLYGON_GEOMETRY_TEST_BUILD_DIR)
+	$(CC) tests/test_convex_polygon.c $(SRC_DIR)/convex_polygon.c \
+		$(INCLUDE_FLAGS) -std=c11 -O2 $(FINITE_MATH_GUARD_FLAGS) \
+		-Wall -Wextra -lm -o $(POLYGON_GEOMETRY_TEST_BINARY)
+	$(POLYGON_GEOMETRY_TEST_BINARY)
+
+polygon-particle-test:
+	@mkdir -p $(POLYGON_PARTICLE_TEST_BUILD_DIR)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main \
+		-c -o $(POLYGON_PARTICLE_TEST_CORE_OBJECT)
+	$(CC) tests/test_polygon_particles.c $(POLYGON_PARTICLE_TEST_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c \
+		$(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-o $(POLYGON_PARTICLE_TEST_BINARY)
+	$(POLYGON_PARTICLE_TEST_BINARY)
+
+polygon-stability-test:
+	@mkdir -p $(POLYGON_STABILITY_TEST_BUILD_DIR)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-Dmain=edmd_program_main -c -o $(POLYGON_STABILITY_PERIODIC_CORE_OBJECT)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-Dmain=edmd_program_main -c -o $(POLYGON_STABILITY_PLANAR_CORE_OBJECT)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 -Dmain=edmd_program_main \
+		-c -o $(POLYGON_STABILITY_CIRCULAR_CORE_OBJECT)
+	$(CC) tests/test_polygon_stability.c $(POLYGON_STABILITY_PERIODIC_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) \
+		$(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm \
+		$(OPENMP_FLAGS) -DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_BOUNDARY_MODE=0 \
+		-DEDMD_TEST_MUTABLE_CONFIG=1 -DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-o $(POLYGON_STABILITY_PERIODIC_BINARY)
+	$(CC) tests/test_polygon_stability.c $(POLYGON_STABILITY_PLANAR_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) \
+		$(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm \
+		$(OPENMP_FLAGS) -DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_BOUNDARY_MODE=1 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-o $(POLYGON_STABILITY_PLANAR_BINARY)
+	$(CC) tests/test_polygon_stability.c $(POLYGON_STABILITY_CIRCULAR_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) \
+		$(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm \
+		$(OPENMP_FLAGS) -DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DEDMD_TEST_MUTABLE_CONFIG=1 \
+		-DEDMD_TEST_BOUNDARY_MODE=2 \
+		-DEDMD_TEST_PREPARED_STATE=1 -DG=0 \
+		-o $(POLYGON_STABILITY_CIRCULAR_BINARY)
+	$(POLYGON_STABILITY_PERIODIC_BINARY) 1 600
+	$(POLYGON_STABILITY_PLANAR_BINARY) 1 600
+	$(POLYGON_STABILITY_CIRCULAR_BINARY) 1 600
+
+polygon-dense-growth-test:
+	@mkdir -p $(POLYGON_DENSE_GROWTH_TEST_BUILD_DIR)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O2 \
+		$(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DG=0 -Dmain=edmd_program_main \
+		-c -o $(POLYGON_DENSE_GROWTH_TEST_CORE_OBJECT)
+	$(CC) tests/test_polygon_dense_growth.c \
+		$(POLYGON_DENSE_GROWTH_TEST_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) \
+		$(INCLUDE_FLAGS) -O2 $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm \
+		$(OPENMP_FLAGS) -DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_VERIFY_QUEUE=1 -DG=0 -o $(POLYGON_DENSE_GROWTH_TEST_BINARY)
+	$(POLYGON_DENSE_GROWTH_TEST_BINARY) regular 64 0.375 1000000 5000
+	$(POLYGON_DENSE_GROWTH_TEST_BINARY) regular 64 0.80 1000000 10000
+	$(POLYGON_DENSE_GROWTH_TEST_BINARY) skinny 64 0.70 1000000 10000
+
+polygon-dense-benchmark:
+	@mkdir -p $(POLYGON_DENSE_BENCHMARK_BUILD_DIR)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math \
+		$(FINITE_MATH_GUARD_FLAGS) -g -Wall -Wextra $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_POLYGON_SCHEDULER_STATS=1 \
+		-DG=0 -Dmain=edmd_program_main \
+		-c -o $(POLYGON_DENSE_BENCHMARK_CORE_OBJECT)
+	$(CC) tests/benchmark_polygon_dense.c \
+		$(POLYGON_DENSE_BENCHMARK_CORE_OBJECT) \
+		$(SRC_DIR)/convex_polygon.c $(SRC_DIR)/polygon_particles.c \
+		$(SRC_DIR)/sim_config.c $(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) \
+		$(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -g \
+		-Wall -Wextra -lm $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=1 \
+		-DEDMD_POLYGON_SCHEDULER_STATS=1 \
+		-DG=0 -o $(POLYGON_DENSE_BENCHMARK_BINARY)
+	$(POLYGON_DENSE_BENCHMARK_BINARY) $(POLYGON_DENSE_BENCHMARK_ARGS)
+
+headless-disk-benchmark:
+	@mkdir -p $(HEADLESS_DISK_BENCHMARK_BUILD_DIR)
+	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -O3 -ffast-math \
+		$(FINITE_MATH_GUARD_FLAGS) $(NATIVE_OPT_FLAGS) -Wall -Wextra \
+		$(OPENMP_FLAGS) -DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=0 \
+		-DG=1 -Dmain=edmd_program_main -c \
+		-o $(HEADLESS_DISK_BENCHMARK_CORE_OBJECT)
+	$(CC) tests/benchmark_headless_disks.c \
+		$(HEADLESS_DISK_BENCHMARK_CORE_OBJECT) \
+		$(filter-out $(SRC_DIR)/EDMD.c,$(SOURCES)) $(INCLUDE_FLAGS) \
+		$(GRAPHICS_INCLUDES) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) \
+		$(NATIVE_OPT_FLAGS) -Wall -Wextra -lm -pthread $(OPENMP_FLAGS) \
+		-DTHREE_D=0 -DSTRESS=0 -DHEAT=0 -DTANGENTIAL=0 \
+		-DINTRUDER=0 -DNONADDITIVE=1 -DPOLYGON_PARTICLES=0 -DG=1 \
+		-o $(HEADLESS_DISK_BENCHMARK_BINARY)
+	$(HEADLESS_DISK_BENCHMARK_BINARY) $(HEADLESS_DISK_BENCHMARK_ARGS)
 
 graphics-performance-test: tests/test_graphics_performance.py
 	$(PYTHON) -B $<

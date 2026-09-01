@@ -121,7 +121,9 @@ void draw_toolbar(edmd_gui::Context &context, GuiLiveState &live,
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "Tie simulated-time advancement to wall time. If event processing "
-            "cannot keep up, the accumulated simulated-time lag is shown here.");
+            "cannot keep up, the accumulated simulated-time lag is shown here. "
+            "Configuration growth runs as fast as possible; pacing begins from "
+            "the completed configuration.");
     }
     ImGui::SameLine();
     const double minimum_exact_rate = 1e-6;
@@ -220,8 +222,17 @@ void draw_toolbar(edmd_gui::Context &context, GuiLiveState &live,
     }
     ImGui::SameLine();
 
+    const bool polygon_snapshot_unsupported =
+        context.applied.particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS;
+    ImGui::BeginDisabled(polygon_snapshot_unsupported);
     if (ImGui::Button("Save Snapshot")) {
         assign_command(command, GUI_COMMAND_SAVE_SNAPSHOT, context.applied);
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) &&
+        polygon_snapshot_unsupported) {
+        ImGui::SetTooltip(
+            "Polygon angle/spin metadata is not part of the legacy dump format yet.");
     }
     ImGui::SameLine();
 
@@ -540,20 +551,51 @@ void draw_diagnostics(edmd_gui::Context &context, const GuiMetrics *metrics) {
             table_double_row("Ly", metrics->box_ly, "%.7g");
             if (metrics->dimensions == 3)
                 table_double_row("Lz", metrics->box_lz, "%.7g");
-            table_double_row("packing fraction", metrics->packing_fraction, "%.6g");
-            table_double_row("total energy", metrics->total_energy, "%.8g");
-            table_double_row("energy / particle", metrics->energy_per_particle, "%.8g");
-            table_double_row("kinetic temperature", metrics->temperature, "%.7g");
+            table_double_row(metrics->growing
+                                 ? "packing fraction (current)"
+                                 : "packing fraction",
+                             metrics->packing_fraction, "%.6g");
+            if (metrics->growing)
+                table_double_row("packing fraction (target)",
+                                 metrics->target_packing_fraction, "%.6g");
+            table_double_row(metrics->growing
+                                 ? "preparation energy (temporary)"
+                                 : "total energy",
+                             metrics->total_energy, "%.8g");
+            table_double_row(metrics->growing
+                                 ? "preparation energy / particle (temporary)"
+                                 : "energy / particle",
+                             metrics->energy_per_particle, "%.8g");
+            table_double_row(metrics->growing
+                                 ? "preparation kinetic temperature (temporary)"
+                                 : "kinetic temperature",
+                             metrics->temperature, "%.7g");
             table_double_row("bath / target temperature",
                              metrics->bath_temperature, "%.7g");
-            if (metrics->pressure_valid) {
+            LiveAnalysisSettings analysis_settings{};
+            live_analysis_get_settings(&analysis_settings);
+            const LiveAnalysisData *analysis = live_analysis_get_data();
+            const LiveAnalysisSeries *pressure_series =
+                analysis != nullptr ? &analysis->pressure : nullptr;
+            if (analysis_settings.pressure && pressure_series != nullptr &&
+                pressure_series->count > 0) {
+                const size_t latest =
+                    (pressure_series->first + pressure_series->count - 1) %
+                    LIVE_ANALYSIS_HISTORY_CAPACITY;
+                table_double_row("pressure", pressure_series->value[latest],
+                                 "%.7g");
+            } else if (metrics->pressure_valid) {
                 table_double_row("pressure", metrics->pressure, "%.7g");
             } else {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
                 ImGui::TextDisabled("pressure");
                 ImGui::TableSetColumnIndex(1);
-                ImGui::TextDisabled("not sampled in graphics mode");
+                ImGui::TextDisabled(!analysis_settings.pressure
+                    ? "disabled in Live analysis"
+                    : (analysis != nullptr && !analysis->pressure_supported
+                        ? "unavailable for current dynamics"
+                        : "warming up"));
             }
             table_double_row("events / second", metrics->event_rate, "%.4g");
             table_double_row("simulation time / second", metrics->simulation_time_rate, "%.4g");
@@ -979,6 +1021,15 @@ extern "C" void gui_imgui_report_error(const char *message) {
     }
 }
 
+extern "C" void gui_imgui_report_notice(const char *message) {
+    if (g_context == nullptr || message == nullptr || message[0] == '\0')
+        return;
+    std::snprintf(g_context->toast_message,
+                  sizeof(g_context->toast_message), "%s", message);
+    g_context->toast_started_at = ImGui::GetTime();
+    g_context->toast_visible = true;
+}
+
 extern "C" void gui_imgui_report_fault(const char *message) {
     if (g_context == nullptr) return;
     std::snprintf(g_context->runtime_error,
@@ -1064,7 +1115,9 @@ extern "C" GuiFrameResult gui_imgui_frame(
         } else if (ImGui::IsKeyPressed(ImGuiKey_F, false)) {
             assign_command(result.command, GUI_COMMAND_TOGGLE_FULLSCREEN,
                            g_context->applied);
-        } else if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
+        } else if (ImGui::IsKeyPressed(ImGuiKey_S, false) &&
+                   g_context->applied.particle_shape.mode !=
+                       SIM_PARTICLE_CONVEX_POLYGONS) {
             assign_command(result.command, GUI_COMMAND_SAVE_SNAPSHOT,
                            g_context->applied);
         }

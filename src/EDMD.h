@@ -27,6 +27,10 @@
 #    define INTRUDER 0
 #endif
 
+#ifndef POLYGON_PARTICLES
+#    define POLYGON_PARTICLES 0
+#endif
+
 enum event{
 	CELLCROSS,
 	COLLISION, 
@@ -39,6 +43,10 @@ enum event{
 	#if INTRUDER
 	INTRUDER_COLLISION,
 	#endif
+	#if POLYGON_PARTICLES && !THREE_D
+	POLYGON_CELLCROSS,
+	POLYGON_RECHECK,
+	#endif
 };
 
 typedef struct arguments arguments;
@@ -47,7 +55,10 @@ struct arguments{
 	char **argv;
 };
 
+#ifndef EDMD_PARTICLE_TYPEDEF
+#define EDMD_PARTICLE_TYPEDEF
 typedef struct particle particle;
+#endif
 struct particle{
 	double x, y, vx, vy, rad, t, vr;
 	particle *nxt, *prv;
@@ -105,6 +116,13 @@ struct node{
 void simulationClearFault(void);
 bool simulationHasFault(void);
 const char* simulationFaultMessage(void);
+/* Numerical polygon penetrations may be recoverable by the graphical
+ * checkpoint/replay layer. Other faults always remain restart-only. */
+bool simulationFaultIsRecoverableOverlap(void);
+/* Mark an externally implemented collision model as unsafe. In a graphical
+ * run this pauses event processing while leaving the state inspectable. */
+void simulationReportFault(const char *message);
+void simulationReportRecoverableOverlapFault(const char *message);
 
 
 
@@ -173,6 +191,9 @@ EDMD_NOINLINE void crossingEventGrow(int i);
 EDMD_NOINLINE void crossingEventNormal(int i);
 void addCrossingEvent(int i, int info, double tCross);
 void doTheCrossing();
+#if POLYGON_PARTICLES && !THREE_D
+void doTheCrossingPolygon(void);
+#endif
 
 EDMD_PURE double collisionTimeNormal(const particle* p1, const particle* p2);
 EDMD_PURE double collisionTimeGrow(const particle* p1, const particle* p2);
@@ -232,6 +253,10 @@ EDMD_PURE particlePrediction predictParticle(const particle* p,
 	double targetTime, enum particleFlightPhysics physics, double parameter);
 EDMD_PURE particlePrediction predictFreeFlyGrow(const particle* p, double targetTime);
 EDMD_PURE particlePrediction predictFreeFlyNormal(const particle* p, double targetTime);
+/* Realized occupied particle measure divided by the active container measure
+ * at an explicit simulation time. During radius growth this deliberately
+ * differs from the requested/final `phi`. */
+double simulationCurrentPackingFraction(double queryTime);
 void saveTXT();
 void saveThermo();
 void saveTempProfile();

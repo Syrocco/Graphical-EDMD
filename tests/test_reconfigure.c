@@ -47,6 +47,7 @@ void draw(int argc, char **argv, window *screen_window, state *screen_state)
 void graphicsFree(state *screen_state) { (void)screen_state; }
 void graphicsPauseSimulation(state *screen_state) { (void)screen_state; }
 double graphicsSimulationTimeLimit(double current_time) { return current_time; }
+void graphicsRebaseSimulationPacing(double current_time) { (void)current_time; }
 void graphicsReportRuntimeError(const char *message) { (void)message; }
 void graphicsReportSimulationFault(const char *message) { (void)message; }
 
@@ -54,6 +55,7 @@ void CloseWindow(void) {}
 bool WindowShouldClose(void) { return true; }
 int GetScreenHeight(void) { return 900; }
 double GetTime(void) { return 0.0; }
+float GetFrameTime(void) { return 1.0f/60.0f; }
 void TraceLog(int log_level, const char *text, ...)
 {
     (void)log_level;
@@ -844,6 +846,13 @@ static void test_restart_required_and_rendering_only(void)
     reconfigure(&current, &next, SIM_RECONFIGURE_RESTART_REQUIRED,
                 "initializer update", message);
     expect_particle_state_preserved(&before, "initializer restart request");
+
+    next = current;
+    next.particle_shape.vertices[0][0] -= 0.01;
+    reconfigure(&current, &next, SIM_RECONFIGURE_RESTART_REQUIRED,
+                "particle-shape template update", message);
+    expect_particle_state_preserved(&before,
+                                    "particle-shape restart request");
 
 #if !THREE_D
     /* Use a binary random-growth setup so both initializer identities are

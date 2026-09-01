@@ -179,9 +179,14 @@ void graphicsPauseSimulation(state* screenState);
  * unpaced run returns +infinity.  The event loop may advance the global clock
  * up to this limit when the next discrete event lies later. */
 double graphicsSimulationTimeLimit(double currentSimulationTime);
+/* Start a fresh wall-clock pacing epoch at the supplied simulation time.
+ * Configuration growth is intentionally unpaced; rebasing at its handoff
+ * prevents that artificial preparation interval from delaying production. */
+void graphicsRebaseSimulationPacing(double currentSimulationTime);
 /* Requested render cap.  Browser hosts use it to skip animation callbacks
  * without blocking the JavaScript thread. */
 int graphicsTargetFrameRate(void);
 void graphicsReportRuntimeError(const char* message);
+void graphicsReportTransientNotice(const char* message);
 void graphicsReportSimulationFault(const char* message);
 void saveSnapshotGraphics();

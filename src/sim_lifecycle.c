@@ -2,6 +2,10 @@
 
 #include "EDMD.h"
 
+#if POLYGON_PARTICLES && !THREE_D
+#include "polygon_particles.h"
+#endif
+
 #include <ctype.h>
 #include <errno.h>
 #include <float.h>
@@ -822,6 +826,19 @@ static bool changed_double(double left, double right)
     return left != right;
 }
 
+static bool particle_shape_fields_changed(
+    const SimParticleShapeConfig *left,
+    const SimParticleShapeConfig *right)
+{
+    return left->mode != right->mode ||
+        left->vertex_count != right->vertex_count ||
+        memcmp(left->vertices, right->vertices,
+               sizeof(left->vertices)) != 0 ||
+        left->random_orientation != right->random_orientation ||
+        changed_double(left->angular_temperature,
+                       right->angular_temperature);
+}
+
 static bool initialization_fields_changed(
     const SimInitializationConfig *left,
     const SimInitializationConfig *right)
@@ -962,6 +979,8 @@ static ReconfigurePlan classify_reconfiguration(
                        next->potential.neutral_charge_fraction);
 
     if (current->schema_version != next->schema_version ||
+        particle_shape_fields_changed(&current->particle_shape,
+                                      &next->particle_shape) ||
         initialization_fields_changed(&current->initialization,
                                       &next->initialization)) {
         return RECONFIGURE_PLAN_FULL_RESTART;
@@ -1135,7 +1154,11 @@ static double canonical_coordinate(double coordinate, double length)
 
 static particlePrediction particle_at_current_time(const particle *value)
 {
-    return freeFly == &freeFlyGrow
+    return (freeFly == &freeFlyGrow
+#if POLYGON_PARTICLES && !THREE_D
+            || polygon_particles_growing()
+#endif
+        )
         ? predictFreeFlyGrow(value, t)
         : predictFreeFlyNormal(value, t);
 }
@@ -1409,9 +1432,10 @@ SimulationReconfigureAction simulation_reconfigure_core(
     const ReconfigurePlan plan = classify_reconfiguration(current, next);
     if (plan & RECONFIGURE_PLAN_FULL_RESTART) {
         restart_error(message, message_capacity,
-                      "This edit changes the initial state, box construction, "
-                      "output lifecycle, observable allocation, or intruder "
-                      "geometry and requires a transactional restart.");
+                      "This edit changes the particle shape, initial state, "
+                      "box construction, output lifecycle, observable "
+                      "allocation, or intruder geometry and requires a "
+                      "transactional restart.");
         return SIM_RECONFIGURE_RESTART_REQUIRED;
     }
     if (plan == 0)

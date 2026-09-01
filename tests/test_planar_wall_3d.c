@@ -11,6 +11,7 @@
 
 extern int N, S1, Hex;
 extern int periodicDumps, ther, Nxcells, Nycells, Nzcells;
+extern int addWallz;
 extern particle *particles;
 extern particle **cellList;
 extern node **eventList;
@@ -46,6 +47,7 @@ static void expect_close(double actual, double expected, const char *message)
 
 int main(void)
 {
+    addWallz = 1;
     N = 1;
     S1 = Hex = 0;
     periodicDumps = ther = 0;

@@ -2,11 +2,24 @@
 
 #include "EDMD.h"
 
+#ifndef POLYGON_PARTICLES
+#define POLYGON_PARTICLES 0
+#endif
+
+#if POLYGON_PARTICLES && !THREE_D
+#include "convex_polygon.h"
+#include "polygon_particles.h"
+#endif
+
 #include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef M_PI
+#define M_PI 3.141592653589793238462643383279502884
+#endif
 
 #ifndef G
 #define G 0
@@ -44,6 +57,46 @@ static const double RENDER_CAMERA_FOV_MIN = 10.0;
 static const double RENDER_CAMERA_FOV_MAX = 120.0;
 static const double RENDER_REFRESH_SECONDS_MIN = 1.0/1000.0;
 static const double RENDER_REFRESH_SECONDS_MAX = 3600.0;
+
+double simulation_particle_shape_unit_area(
+    const SimParticleShapeConfig *particle_shape)
+{
+    double twice_area = 0.0;
+    int count;
+
+    if (particle_shape == NULL) return NAN;
+    if (particle_shape->mode == SIM_PARTICLE_CIRCLES) return M_PI;
+    if (particle_shape->mode != SIM_PARTICLE_CONVEX_POLYGONS) return NAN;
+    count = particle_shape->vertex_count;
+    if (count < 3 || count > SIM_POLYGON_MAX_VERTICES) return NAN;
+    for (int vertex = 0; vertex < count; ++vertex) {
+        const int next = (vertex + 1) % count;
+        const double x = particle_shape->vertices[vertex][0];
+        const double y = particle_shape->vertices[vertex][1];
+        const double next_x = particle_shape->vertices[next][0];
+        const double next_y = particle_shape->vertices[next][1];
+        if (!isfinite(x) || !isfinite(y) ||
+            !isfinite(next_x) || !isfinite(next_y)) return NAN;
+        twice_area += x*next_y - next_x*y;
+    }
+    if (!isfinite(twice_area) || twice_area == 0.0) return NAN;
+    return 0.5*fabs(twice_area);
+}
+
+double simulation_particle_shape_packing_fraction_2d(
+    const SimParticleShapeConfig *particle_shape,
+    double sum_radius_squared,
+    double container_area)
+{
+    const double unit_area =
+        simulation_particle_shape_unit_area(particle_shape);
+    if (!isfinite(unit_area) || !(unit_area > 0.0) ||
+        !isfinite(sum_radius_squared) || sum_radius_squared < 0.0 ||
+        !isfinite(container_area) || !(container_area > 0.0)) {
+        return NAN;
+    }
+    return unit_area*sum_radius_squared/container_area;
+}
 
 /* Legacy globals.  This translation unit is intentionally the only bridge
  * between the declarative configuration and EDMD.c's current global state. */
@@ -102,7 +155,7 @@ extern const int addEnergyCenterOfMassThermo, thermoKurt, thermoSonine;
 extern const int unwrap;
 #endif
 
-#if G
+#if G || defined(EDMD_TEST_MUTABLE_CONFIG)
 extern bool addWell, addField, damping;
 extern bool addDelta, addDeltaTangent, addDoubleDelta;
 extern bool addDoubleDeltaTangent, polydispersity, thermoWall;
@@ -115,10 +168,10 @@ extern double randomInjection;
 extern int simplifyInjection;
 extern double shearWallSpeed;
 #else
-extern const int addWell, addField, damping;
-extern const int addDelta, addDeltaTangent, addDoubleDelta;
-extern const int addDoubleDeltaTangent, polydispersity, thermoWall;
-extern const int charged, addShear, addShearWall;
+extern const bool addWell, addField, damping;
+extern const bool addDelta, addDeltaTangent, addDoubleDelta;
+extern const bool addDoubleDeltaTangent, polydispersity, thermoWall;
+extern const bool charged, addShear, addShearWall;
 extern const int noise, addWally, addWallx, addWallz, addMidWall, addCircularWall;
 extern const int addEvolvingDelta, addExpo, addEnergy, addActiveDelta;
 extern const int liquidliquid;
@@ -215,6 +268,8 @@ BuildCapabilities simulation_build_capabilities(void)
     result.runtime_output_lifecycle = G != 0;
     result.runtime_output_column_toggles = G != 0;
     result.runtime_intruder_parameters = INTRUDER != 0;
+    result.convex_polygon_particles =
+        G != 0 && POLYGON_PARTICLES != 0 && THREE_D == 0;
 
     result.spherical_confinement = true;
     result.tangent_delta_3d = true;
@@ -249,6 +304,16 @@ void simulation_config_set_defaults(SimulationConfig *config,
     dimensions = capabilities->dimensions;
     memset(config, 0, sizeof(*config));
     config->schema_version = SIM_CONFIG_SCHEMA_VERSION;
+
+    config->particle_shape.mode = SIM_PARTICLE_CIRCLES;
+    config->particle_shape.vertex_count = 6;
+    for (int vertex = 0; vertex < 6; ++vertex) {
+        const double angle = 2.0*M_PI*(double)vertex/6.0;
+        config->particle_shape.vertices[vertex][0] = cos(angle);
+        config->particle_shape.vertices[vertex][1] = sin(angle);
+    }
+    config->particle_shape.random_orientation = true;
+    config->particle_shape.angular_temperature = 1.0;
 
     config->initialization.mode = SIM_INIT_RANDOM_GROWTH;
     config->initialization.particle_count = graphical ? 1000 : 500;
@@ -375,6 +440,10 @@ void simulation_config_capture_globals(SimulationConfig *config)
     BuildCapabilities capabilities = simulation_build_capabilities();
     if (config == NULL) return;
     simulation_config_set_defaults(config, &capabilities);
+
+#if POLYGON_PARTICLES && !THREE_D
+    polygon_particles_get_config(&config->particle_shape);
+#endif
 
     config->initialization.mode = capture_init_mode();
     (void)strncpy(config->initialization.load_path, initialFilePath,
@@ -573,6 +642,9 @@ static void apply_initialization_mode(SimInitMode mode)
 void simulation_config_apply_globals(const SimulationConfig *config)
 {
     if (config == NULL) return;
+#if POLYGON_PARTICLES && !THREE_D
+    polygon_particles_set_config(&config->particle_shape);
+#endif
     apply_initialization_mode(config->initialization.mode);
     if (config->initialization.load_path[0] != '\0') {
         (void)strncpy(initialFilePath, config->initialization.load_path, 349);
@@ -831,6 +903,105 @@ static bool injection_supplies_energy(SimInjectionMode mode)
            mode != SIM_INJECTION_ROUGH_ROTATIONAL;
 }
 
+static bool polygon_template_is_strictly_convex(
+    const SimParticleShapeConfig *shape)
+{
+#if POLYGON_PARTICLES && !THREE_D
+    ConvexPolygon polygon = {0};
+    const int count = shape->vertex_count;
+
+    if (count < 3 || count > SIM_POLYGON_MAX_VERTICES ||
+        count > CONVEX_POLYGON_MAX_VERTICES) {
+        return false;
+    }
+    polygon.count = count;
+    for (int vertex = 0; vertex < count; ++vertex) {
+        polygon.vertices[vertex].x = shape->vertices[vertex][0];
+        polygon.vertices[vertex].y = shape->vertices[vertex][1];
+    }
+    return convex_polygon_validate(&polygon) == CONVEX_POLYGON_VALID;
+#else
+    double coordinate_scale = 1.0;
+    double area_twice = 0.0;
+    double tolerance;
+    const int count = shape->vertex_count;
+
+    if (count < 3 || count > SIM_POLYGON_MAX_VERTICES) return false;
+    for (int vertex = 0; vertex < count; ++vertex) {
+        const double x = shape->vertices[vertex][0];
+        const double y = shape->vertices[vertex][1];
+        const int next = (vertex + 1) % count;
+        if (!isfinite(x) || !isfinite(y)) return false;
+        coordinate_scale = fmax(coordinate_scale, fabs(x));
+        coordinate_scale = fmax(coordinate_scale, fabs(y));
+        area_twice += x*shape->vertices[next][1] -
+                      y*shape->vertices[next][0];
+    }
+    tolerance = 1e-12*coordinate_scale*coordinate_scale;
+    if (!isfinite(area_twice) || area_twice <= tolerance) return false;
+
+    /* Requiring every other vertex to lie strictly to the left of every
+       directed edge simultaneously establishes CCW winding, strict
+       convexity, and a non-self-intersecting boundary. */
+    for (int edge = 0; edge < count; ++edge) {
+        const int next = (edge + 1) % count;
+        const double ax = shape->vertices[edge][0];
+        const double ay = shape->vertices[edge][1];
+        const double dx = shape->vertices[next][0] - ax;
+        const double dy = shape->vertices[next][1] - ay;
+        if (dx*dx + dy*dy <= tolerance) return false;
+        for (int vertex = 0; vertex < count; ++vertex) {
+            double cross;
+            if (vertex == edge || vertex == next) continue;
+            cross = dx*(shape->vertices[vertex][1] - ay) -
+                    dy*(shape->vertices[vertex][0] - ax);
+            if (!isfinite(cross) || cross <= tolerance) return false;
+        }
+    }
+    return true;
+#endif
+}
+
+static bool polygon_template_is_canonically_normalized(
+    const SimParticleShapeConfig *shape)
+{
+    double area_twice = 0.0;
+    double centroid_x_numerator = 0.0;
+    double centroid_y_numerator = 0.0;
+    double maximum_radius_squared = 0.0;
+    const int count = shape->vertex_count;
+
+    if (count < 3 || count > SIM_POLYGON_MAX_VERTICES) return false;
+    for (int vertex = 0; vertex < count; ++vertex) {
+        const int next = (vertex + 1) % count;
+        const double x = shape->vertices[vertex][0];
+        const double y = shape->vertices[vertex][1];
+        const double next_x = shape->vertices[next][0];
+        const double next_y = shape->vertices[next][1];
+        const double cross = x*next_y - next_x*y;
+        const double radius_squared = x*x + y*y;
+        if (!isfinite(cross) || !isfinite(radius_squared)) return false;
+        area_twice += cross;
+        centroid_x_numerator += (x + next_x)*cross;
+        centroid_y_numerator += (y + next_y)*cross;
+        maximum_radius_squared = fmax(maximum_radius_squared,
+                                      radius_squared);
+    }
+    if (!is_finite_positive(area_twice) ||
+        !is_finite_positive(maximum_radius_squared)) {
+        return false;
+    }
+    {
+        const double centroid_x = centroid_x_numerator/(3.0*area_twice);
+        const double centroid_y = centroid_y_numerator/(3.0*area_twice);
+        const double maximum_radius = sqrt(maximum_radius_squared);
+        const double tolerance = 1e-6*fmax(1.0, maximum_radius);
+        return isfinite(centroid_x) && isfinite(centroid_y) &&
+            hypot(centroid_x, centroid_y) <= tolerance &&
+            fabs(maximum_radius - 1.0) <= tolerance;
+    }
+}
+
 size_t simulation_config_validate(const SimulationConfig *config,
                                   const BuildCapabilities *capabilities,
                                   ConfigIssue *issues,
@@ -838,6 +1009,7 @@ size_t simulation_config_validate(const SimulationConfig *config,
 {
     BuildCapabilities detected;
     IssueWriter writer = { issues, issue_capacity, 0 };
+    const SimParticleShapeConfig *particle_shape;
     const SimInitializationConfig *initialization;
     const SimGeometryConfig *geometry;
     const SimDynamicsConfig *dynamics;
@@ -863,6 +1035,9 @@ size_t simulation_config_validate(const SimulationConfig *config,
     bool collision_injection_active;
     bool dissipative;
     bool driven;
+    bool polygon_active;
+    double polygon_unit_area = NAN;
+    double polygon_lattice_limit = NAN;
 
     if (config == NULL) {
         add_issue(&writer, CONFIG_ISSUE_ERROR, "config",
@@ -873,6 +1048,7 @@ size_t simulation_config_validate(const SimulationConfig *config,
         detected = simulation_build_capabilities();
         capabilities = &detected;
     }
+    particle_shape = &config->particle_shape;
     initialization = &config->initialization;
     geometry = &config->geometry;
     dynamics = &config->dynamics;
@@ -891,6 +1067,170 @@ size_t simulation_config_validate(const SimulationConfig *config,
     if (capabilities->dimensions != 2 && capabilities->dimensions != 3) {
         add_issue(&writer, CONFIG_ISSUE_ERROR, "capabilities.dimensions",
                   "The build must have either two or three dimensions.");
+    }
+
+    polygon_active = particle_shape->mode ==
+        SIM_PARTICLE_CONVEX_POLYGONS;
+    if (polygon_active) {
+        polygon_unit_area = simulation_particle_shape_unit_area(particle_shape);
+        if (is_finite_positive(polygon_unit_area)) {
+            /* The separate hex initializer places polygon centers on a disk-
+             * safe lattice. Random preparation below uses polygon-native
+             * homothetic growth and is not subject to this envelope limit. */
+            polygon_lattice_limit =
+                polygon_unit_area/(2.0*sqrt(3.0));
+        }
+    }
+    if (particle_shape->mode < SIM_PARTICLE_CIRCLES ||
+        particle_shape->mode > SIM_PARTICLE_CONVEX_POLYGONS) {
+        add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                  "Unknown particle-shape mode.");
+    }
+    if (polygon_active) {
+        if (capabilities->dimensions != 2) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygon particles are available only in 2D.");
+        } else if (!capabilities->convex_polygon_particles) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygon particles were not compiled into this graphical build.");
+        }
+        if (particle_shape->vertex_count < 3 ||
+            particle_shape->vertex_count > SIM_POLYGON_MAX_VERTICES) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "particle_shape.vertex_count",
+                      "A convex particle requires between 3 and %d vertices.",
+                      SIM_POLYGON_MAX_VERTICES);
+        } else if (!polygon_template_is_strictly_convex(particle_shape)) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "particle_shape.vertices",
+                      "Polygon vertices must be finite, strictly convex, non-self-intersecting, and counter-clockwise.");
+        } else if (!polygon_template_is_canonically_normalized(
+                       particle_shape)) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "particle_shape.vertices",
+                      "The polygon template must have its area centroid at the origin and maximum vertex radius equal to one.");
+        }
+        if (!isfinite(particle_shape->angular_temperature) ||
+            particle_shape->angular_temperature < 0.0) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "particle_shape.angular_temperature",
+                      "Initial angular temperature must be finite and nonnegative.");
+        }
+        if (initialization->mode == SIM_INIT_DUMP_FILE) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "initialization.mode",
+                      "Legacy dump restarts do not store polygon orientations and angular velocities.");
+        }
+        if (output->periodic_dumps) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "output.periodic_dumps",
+                      "Legacy periodic dumps do not store polygon orientations and angular velocities.");
+        }
+        if (dynamics->flight != SIM_FLIGHT_BALLISTIC) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "dynamics.flight",
+                      "Convex polygon particles currently require ballistic free flight.");
+        }
+        if (dynamics->injection != SIM_INJECTION_NONE) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "dynamics.injection",
+                      "Collision energy-injection models are unavailable for convex polygon particles.");
+        }
+        if (driving->thermostat != SIM_THERMOSTAT_NONE &&
+            driving->thermostat != SIM_THERMOSTAT_LANGEVIN) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "driving.thermostat",
+                      "Convex polygon particles support only the Langevin thermostat, which thermalizes translation and rotation together.");
+        }
+        if (driving->thermostat == SIM_THERMOSTAT_LANGEVIN &&
+            driving->euler_noise) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "driving.euler_noise",
+                      "Convex polygon Langevin dynamics require the analytical OU update so translation and rotation have the exact bath equilibrium.");
+        }
+        if (potential->enabled) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "potential.enabled",
+                      "Square-potential events are unavailable for convex polygon particles.");
+        }
+        if (intruder->enabled) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "intruder.enabled",
+                      "The separate intruder model cannot be combined with convex polygon particles.");
+        }
+        if (capabilities->intruder) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygon particles cannot be selected in a build whose legacy intruder collision path is compiled in.");
+        }
+        if (capabilities->rough_particles) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygon particles cannot be combined with the legacy TANGENTIAL rough-disk build model.");
+        }
+        if (geometry->thermal_wall) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "geometry.thermal_wall",
+                      "Thermal walls are unavailable for convex polygon particles.");
+        }
+        if (geometry->shear_wall) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "geometry.shear_wall",
+                      "Moving shear walls are unavailable for convex polygon particles.");
+        }
+        if (!capabilities->additive_contacts) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygons require additive contact distances (NONADDITIVE=1).");
+        }
+        if (capabilities->stress || capabilities->heat) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR, "particle_shape.mode",
+                      "Convex polygon rotation does not yet maintain complete STRESS/HEAT transport bookkeeping.");
+        }
+        if (observables->pressure) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.pressure",
+                      "The saved thermodynamic pressure column is unavailable for convex polygons; the graphical live-pressure estimator remains supported.");
+        }
+        if (observables->thermo_enabled &&
+            (geometry->center_membrane ||
+             initialization->mode == SIM_INIT_MEMBRANE_OSMOSIS)) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.thermo_enabled",
+                      "Saved membrane thermodynamics report hard-disk local packing and omit polygon rotational energy.");
+        }
+        if (observables->pressure_field) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.pressure_field",
+                      "The local pressure field is not connected to polygon collision impulses.");
+        }
+        if (observables->temperature_profile) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.temperature_profile",
+                      "The saved temperature/heat-current profile does not yet include polygon rotational energy.");
+        }
+        if (observables->interface_density ||
+            observables->interface_temperature) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      observables->interface_density
+                          ? "observables.interface_density"
+                          : "observables.interface_temperature",
+                      "Interface fields currently normalize local packing with circular particle area.");
+        }
+        if (observables->osmosis) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.osmosis",
+                      "Osmosis profiles currently normalize local packing with circular particle area.");
+        }
+        if (observables->voronoi_area) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.voronoi_area",
+                      "Voronoi packing columns currently divide circular particle area by each Voronoi-cell area.");
+        }
+        if (observables->critical_regions) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.critical_regions",
+                      "Critical-region energy fields do not yet include polygon rotational energy.");
+        }
+        if (observables->bubble_stop) {
+            add_issue(&writer, CONFIG_ISSUE_ERROR,
+                      "observables.bubble_stop",
+                      "Bubble-stop thresholds use hard-disk kinetic-theory formulas and are unavailable for convex polygons.");
+        }
     }
 
     init_mode_valid = initialization->mode >= SIM_INIT_RANDOM_GROWTH &&
@@ -952,6 +1292,11 @@ size_t simulation_config_validate(const SimulationConfig *config,
                   "initialization.packing_fraction",
                   "Packing fraction must be finite and greater than zero.");
     } else if (packing_fraction_active &&
+               initialization->packing_fraction > 1.0) {
+        add_issue(&writer, CONFIG_ISSUE_ERROR,
+                  "initialization.packing_fraction",
+                  "Packing fraction is occupied particle area/volume divided by container area/volume and cannot exceed one.");
+    } else if (packing_fraction_active &&
                ((capabilities->dimensions == 2 &&
                 initialization->packing_fraction > 0.91) ||
                (capabilities->dimensions == 3 &&
@@ -962,14 +1307,19 @@ size_t simulation_config_validate(const SimulationConfig *config,
     }
     if (initialization->mode == SIM_INIT_HEX_LATTICE &&
         is_finite_positive(initialization->packing_fraction)) {
-        const double close_packing = capabilities->dimensions == 3
-            ? M_PI/(3.0*sqrt(2.0))
-            : M_PI/(2.0*sqrt(3.0));
+        const double close_packing = polygon_active &&
+            capabilities->dimensions == 2 &&
+            is_finite_positive(polygon_lattice_limit)
+            ? polygon_lattice_limit
+            : (capabilities->dimensions == 3
+                ? M_PI/(3.0*sqrt(2.0))
+                : M_PI/(2.0*sqrt(3.0)));
         if (initialization->packing_fraction > close_packing) {
             add_issue(&writer, CONFIG_ISSUE_ERROR,
                       "initialization.packing_fraction",
-                      "The requested lattice packing fraction exceeds exact %s close packing (%.12g) and would start with overlapping particles.",
-                      capabilities->dimensions == 3 ? "HCP" : "triangular",
+                      "The requested lattice packing fraction exceeds the exact overlap-safe %s limit (%.12g) and would start with overlapping particle envelopes.",
+                      polygon_active ? "polygon circumdisk" :
+                        (capabilities->dimensions == 3 ? "HCP" : "triangular"),
                       close_packing);
         }
     }

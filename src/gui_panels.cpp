@@ -1,4 +1,7 @@
 #include "gui_imgui_internal.hpp"
+#if POLYGON_PARTICLES && !THREE_D
+#include "gui_polygon_editor.hpp"
+#endif
 
 #include "imgui.h"
 
@@ -399,6 +402,27 @@ void clamp_live_double(double &value, double minimum, double maximum,
     value = std::clamp(value, minimum, maximum);
 }
 
+void disable_polygon_incompatible_saved_analysis(SimulationConfig &config) {
+    SimObservablesConfig &observables = config.observables;
+    /* These legacy file-oriented measurements either receive impulses only
+       from the disk handler or normalize local occupancy with pi*r^2. Live
+       center-based plots use a separate pipeline and remain available. */
+    observables.pressure = false;
+    observables.pressure_field = false;
+    observables.temperature_profile = false;
+    observables.interface_density = false;
+    observables.interface_temperature = false;
+    observables.osmosis = false;
+    observables.voronoi_area = false;
+    observables.critical_regions = false;
+    observables.bubble_stop = false;
+    if (config.geometry.center_membrane ||
+        config.initialization.mode == SIM_INIT_MEMBRANE_OSMOSIS) {
+        observables.thermo_enabled = false;
+    }
+    config.output.periodic_dumps = false;
+}
+
 void draw_setup(Context &context) {
     SimInitializationConfig &init = context.draft.initialization;
     const bool is3d = context.capabilities.dimensions == 3;
@@ -419,12 +443,27 @@ void draw_setup(Context &context) {
         0.90689968211710892530;
     constexpr double hcp_close_packing =
         0.74048048969306104117;
-    const double hex_close_packing = is3d
-        ? hcp_close_packing : triangular_close_packing;
+    constexpr double pi = 3.141592653589793238462643383279502884;
     const bool curved_boundary = context.draft.geometry.boundary ==
                                  SIM_BOUNDARY_CIRCULAR_SPHERICAL;
     const bool file_initializer = init.mode == SIM_INIT_DUMP_FILE;
     const bool generic_initializer = init.mode == SIM_INIT_RANDOM_GROWTH;
+    const bool polygon_mode = !is3d &&
+        context.draft.particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS;
+    const double polygon_unit_area = polygon_mode
+        ? simulation_particle_shape_unit_area(&context.draft.particle_shape)
+        : pi;
+    /* The explicit hex initializer still uses a disk-safe center lattice.
+       Random preparation grows the actual polygons and has no envelope cap. */
+    const double polygon_lattice_limit = polygon_mode &&
+        std::isfinite(polygon_unit_area) && polygon_unit_area > 0.0
+        ? polygon_unit_area/(2.0*std::sqrt(3.0))
+        : triangular_close_packing;
+    const double hex_close_packing = polygon_mode
+        ? polygon_lattice_limit
+        : (is3d ? hcp_close_packing : triangular_close_packing);
+    if (polygon_mode)
+        disable_polygon_incompatible_saved_analysis(context.draft);
     const char *hex_initializer_reason =
         is3d && !context.capabilities.lattice_initializers_3d
         ? "This build does not provide the complete 3D HCP initializer."
@@ -432,6 +471,77 @@ void draw_setup(Context &context) {
     const char *curved_initializer_reason = curved_boundary
         ? "Circular/spherical confinement currently supports only Random placement + growth."
         : nullptr;
+
+    #if POLYGON_PARTICLES && !THREE_D
+    if (!is3d && context.capabilities.convex_polygon_particles) {
+        SimParticleShapeConfig &particle_shape = context.draft.particle_shape;
+        ImGui::SeparatorText("Particle body");
+        if (begin_properties("setup-particle-body")) {
+            const char *polygon_build_reason =
+                (context.capabilities.stress || context.capabilities.heat)
+                    ? "This build accumulates transport terms that do not yet include polygon rotation."
+                : (context.capabilities.intruder
+                    ? "The legacy intruder collision path is compiled into this build."
+                : (context.capabilities.rough_particles
+                    ? "The legacy TANGENTIAL rough-disk model is compiled into this build."
+                : (!context.capabilities.additive_contacts
+                    ? "Convex polygons require additive radius scaling (NONADDITIVE=1)."
+                    : nullptr)));
+            const EnumOption body_modes[] = {
+                {SIM_PARTICLE_CIRCLES, "Circular disks", nullptr},
+                {SIM_PARTICLE_CONVEX_POLYGONS,
+                    "Rigid convex polygons", polygon_build_reason},
+            };
+            int body_mode = particle_shape.mode;
+            if (enum_row(context, "Shape model", "circle disk polygon rigid body",
+                         &body_mode, body_modes, std::size(body_modes),
+                         "Polygon particles use the same editable convex body shape, scaled by each particle radius.")) {
+                particle_shape.mode =
+                    static_cast<SimParticleShapeMode>(body_mode);
+                if (particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS) {
+                    /* Enter the model through a complete, valid combination.
+                       The disabled controls in their own panels explain why
+                       these choices cannot be re-enabled for polygons. */
+                    if (init.mode == SIM_INIT_DUMP_FILE)
+                        init.mode = SIM_INIT_RANDOM_GROWTH;
+                    context.draft.dynamics.flight = SIM_FLIGHT_BALLISTIC;
+                    context.draft.dynamics.injection = SIM_INJECTION_NONE;
+                    if (context.draft.driving.thermostat !=
+                            SIM_THERMOSTAT_LANGEVIN)
+                        context.draft.driving.thermostat =
+                            SIM_THERMOSTAT_NONE;
+                    context.draft.driving.euler_noise = false;
+                    context.draft.potential.enabled = false;
+                    context.draft.geometry.thermal_wall = false;
+                    context.draft.geometry.shear_wall = false;
+                    context.draft.intruder.enabled = false;
+                    disable_polygon_incompatible_saved_analysis(context.draft);
+                }
+            }
+            if (particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS) {
+                checkbox_row(context, "Random initial orientation",
+                             "polygon angle orientation",
+                             &particle_shape.random_orientation,
+                             "Otherwise every body starts with the editor's orientation.");
+                slider_double_row(context, "Initial angular temperature",
+                                  "polygon spin omega rotation",
+                                  &particle_shape.angular_temperature,
+                                  0.0, 10.0,
+                                  "Sets the variance of initial angular velocity; zero starts without spin.");
+            }
+            ImGui::EndTable();
+        }
+        if (particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS) {
+            section_note(
+                "Drag a numbered vertex or an edge handle. The editor stops at the convexity boundary; releasing commits one restart.");
+            (void)edmd_gui::draw_polygon_editor(particle_shape);
+            section_note(
+                "Radius is the circumradius used only by the collision grid. Packing fraction is the polygon area occupied by all particles divided by the container area; random preparation grows and collides the actual polygons.");
+            section_note(
+                "Live energy, translational temperature, pressure, MSD, g(r), and structure factor remain available. Legacy saved local pressure, packing, and heat profiles are disabled because they still assume disks.");
+        }
+    }
+    #endif
 
     ImGui::SeparatorText("Starting point");
     if (begin_properties("setup-start")) {
@@ -456,9 +566,13 @@ void draw_setup(Context &context) {
                 "Changing the initializer automatically constructs a new t = 0 state.");
         } else {
             const EnumOption modes_2d[] = {
-                {SIM_INIT_RANDOM_GROWTH, "Random placement + growth", nullptr},
+                {SIM_INIT_RANDOM_GROWTH,
+                    polygon_mode ? "Random placement + polygon growth"
+                                 : "Random placement + growth", nullptr},
                 {SIM_INIT_DUMP_FILE, "LAMMPS-style dump restart",
-                    curved_initializer_reason},
+                    polygon_mode
+                        ? "Legacy dumps do not contain polygon angles or angular velocities."
+                        : curved_initializer_reason},
                 {SIM_INIT_SQUARE_LATTICE, "Binary square lattice",
                     curved_initializer_reason},
                 {SIM_INIT_HEX_LATTICE, "Hexagonal lattice",
@@ -526,19 +640,31 @@ void draw_setup(Context &context) {
             : (init.mode == SIM_INIT_MEMBRANE_OSMOSIS
                 ? "This initializer derives the overall packing fraction from its liquid and gas inputs."
                 : nullptr);
-        const double packing_slider_max =
-            init.mode == SIM_INIT_HEX_LATTICE
+        const double packing_slider_max = init.mode == SIM_INIT_HEX_LATTICE
             ? hex_close_packing : 1.0;
-        slider_double_row(context, "Packing fraction", "phi density volume fraction",
+        const char *packing_label = init.mode == SIM_INIT_RANDOM_GROWTH
+            ? "Target packing fraction" : "Packing fraction";
+        slider_double_row(context, packing_label, "phi density volume fraction",
                          &init.packing_fraction, 0.001, packing_slider_max,
-                         init.mode == SIM_INIT_HEX_LATTICE
+                         polygon_mode && init.mode == SIM_INIT_RANDOM_GROWTH
+                            ? "Target occupied polygon area divided by container area. Diagnostics shows the smaller instantaneous value while polygon-native preparation grows toward it; difficult near-unity targets can jam and pause clearly."
+                         : polygon_mode
+                            ? "Occupied polygon area divided by container area. This explicit lattice remains capped by its conservative center spacing."
+                         : init.mode == SIM_INIT_HEX_LATTICE
                             ? (is3d
                                 ? "HCP is capped at exact hard-sphere close packing; larger values overlap at t = 0."
                                 : "The triangular lattice is capped at exact hard-disk close packing; larger values overlap at t = 0.")
                             : "Values near one may be impossible to initialize without overlaps; validation warnings remain visible.",
                          packing_reason);
-        slider_double_row(context, "Initial energy / particle", "Einit temperature velocity",
-                         &init.initial_energy, 0.0, 10.0, nullptr,
+        const char *initial_energy_label = polygon_mode
+            ? "Initial translational energy / particle"
+            : "Initial energy / particle";
+        slider_double_row(context, initial_energy_label,
+                         "Einit temperature velocity",
+                         &init.initial_energy, 0.0, 10.0,
+                         polygon_mode
+                            ? "Sets translational kinetic energy after preparation. Rotational energy is initialized separately by Initial angular temperature and is included in the displayed total energy."
+                            : nullptr,
                          init.mode == SIM_INIT_DUMP_FILE
                             ? "A dump restart restores particle velocities, so this energy is not used."
                             : nullptr);
@@ -690,22 +816,29 @@ void draw_dynamics(Context &context) {
     SimDrivingConfig &driving = context.draft.driving;
     SimPotentialConfig &potential = context.draft.potential;
     const bool is3d = context.capabilities.dimensions == 3;
+    const bool polygon_mode = !is3d &&
+        context.draft.particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS;
+    const char *polygon_ballistic_reason = polygon_mode
+        ? "Rigid convex polygons currently use conservative collision prediction with ballistic free flight."
+        : nullptr;
     const char *transport_flight_reason =
         context.capabilities.stress || context.capabilities.heat
         ? "STRESS/HEAT transport bookkeeping currently requires ballistic free flight."
         : nullptr;
-    const char *nonballistic_flight_reason = context.draft.intruder.enabled
+    const char *nonballistic_flight_reason = polygon_ballistic_reason != nullptr
+        ? polygon_ballistic_reason : (context.draft.intruder.enabled
         ? "The polygonal intruder predictor currently requires ballistic particle flight."
-        : transport_flight_reason;
+        : transport_flight_reason);
     const bool physical_boundary =
         context.draft.geometry.boundary != SIM_BOUNDARY_PERIODIC ||
         context.draft.geometry.center_membrane ||
         context.draft.initialization.mode == SIM_INIT_MEMBRANE_OSMOSIS;
     /* STRESS/HEAT has complete Lees-Edwards bookkeeping.  The transport
        restriction applies only to field and damping trajectories. */
-    const char *lees_reason = context.draft.intruder.enabled
+    const char *lees_reason = polygon_ballistic_reason != nullptr
+        ? polygon_ballistic_reason : (context.draft.intruder.enabled
         ? "The polygonal intruder predictor currently requires ballistic particle flight."
-        : nullptr;
+        : nullptr);
     if (lees_reason == nullptr && is3d && !context.capabilities.shear_3d) {
         lees_reason = "Lees-Edwards shear has not been validated for the 3D build.";
     }
@@ -798,14 +931,16 @@ void draw_dynamics(Context &context) {
             dynamics.injection == SIM_INJECTION_EVOLVING_DELTA ||
             dynamics.injection == SIM_INJECTION_COLLISION_ENERGY ||
             dynamics.injection == SIM_INJECTION_ACTIVE_TANGENTIAL;
-        const char *injection_selector_reason = rough_fixed_reason != nullptr
+        const char *injection_selector_reason = polygon_mode
+            ? "Collision-injection laws are not defined for rigid convex contacts."
+            : (rough_fixed_reason != nullptr
             ? rough_fixed_reason
             : (current_advanced_injection &&
                !context.capabilities.runtime_advanced_injection_toggles
                 ? advanced_injection_reason
                 : (!current_advanced_injection &&
                    !context.capabilities.runtime_basic_injection_toggles
-                    ? basic_injection_reason : nullptr));
+                    ? basic_injection_reason : nullptr)));
         int injection = dynamics.injection;
         bool injection_changed = false;
         if (is3d) {
@@ -941,6 +1076,10 @@ void draw_dynamics(Context &context) {
         const bool lees_edwards =
             dynamics.flight == SIM_FLIGHT_LEES_EDWARDS_SHEAR;
         const char *potential_toggle_reason = physics_toggle_reason;
+        if (polygon_mode) {
+            potential_toggle_reason =
+                "Square-well events are not implemented for rotating convex particles.";
+        }
         if (potential_toggle_reason == nullptr && lees_edwards && !potential.enabled) {
             potential_toggle_reason =
                 "Square-well events cannot be enabled with Lees-Edwards shear.";
@@ -1013,17 +1152,27 @@ void draw_dynamics(Context &context) {
 
     ImGui::SeparatorText("Thermostat and global driving");
     if (begin_properties("dynamics-thermostat")) {
+        const char *polygon_translation_only_reason = polygon_mode
+            ? "This thermostat changes translation without consistently thermalizing polygon rotation."
+            : nullptr;
         const EnumOption thermostats[] = {
             {SIM_THERMOSTAT_NONE, "None", nullptr},
             {SIM_THERMOSTAT_LANGEVIN, "Langevin / OU kicks", nullptr},
-            {SIM_THERMOSTAT_VELOCITY_RESCALE, "Global velocity rescale", nullptr},
-            {SIM_THERMOSTAT_REMOVE_COM, "Remove center-of-mass drift", nullptr},
-            {SIM_THERMOSTAT_MAXWELL_REDRAW, "Maxwell velocity redraw", nullptr},
+            {SIM_THERMOSTAT_VELOCITY_RESCALE, "Global velocity rescale",
+                polygon_translation_only_reason},
+            {SIM_THERMOSTAT_REMOVE_COM, "Remove center-of-mass drift",
+                polygon_translation_only_reason},
+            {SIM_THERMOSTAT_MAXWELL_REDRAW, "Maxwell velocity redraw",
+                polygon_translation_only_reason},
         };
         int thermostat = driving.thermostat;
         if (enum_row(context, "Thermostat", "noise temperature rescale active OU",
-                     &thermostat, thermostats, std::size(thermostats))) {
+                     &thermostat, thermostats, std::size(thermostats),
+                     polygon_mode
+                        ? "Analytical Langevin kicks thermalize both polygon translation and rotation."
+                        : nullptr)) {
             driving.thermostat = static_cast<SimThermostatMode>(thermostat);
+            if (polygon_mode) driving.euler_noise = false;
         }
         const bool thermostat_enabled =
             driving.thermostat != SIM_THERMOSTAT_NONE;
@@ -1045,8 +1194,10 @@ void draw_dynamics(Context &context) {
             : (dynamics.flight == SIM_FLIGHT_LINEAR_DAMPING
                 ? "Adjust the shared gamma with Damping gamma in the Free flight section."
                 : "Only the Langevin thermostat uses noise gamma.");
-        const char *euler_off = thermostat_uses_euler ? nullptr
-            : "The Euler/OU choice applies only to Langevin thermostat kicks.";
+        const char *euler_off = polygon_mode
+            ? "Polygon rotation uses the analytical OU update to preserve the exact bath equilibrium."
+            : (thermostat_uses_euler ? nullptr
+                : "The Euler/OU choice applies only to Langevin thermostat kicks.");
         input_nonnegative_double_row(context, "Thermostat interval", "dt noise kick",
                                      &driving.thermostat_interval, nullptr, thermostat_off);
         input_nonnegative_double_row(context, "Temperature", "T thermostat bath",
@@ -1074,6 +1225,8 @@ void draw_dynamics(Context &context) {
 void draw_boundaries(Context &context) {
     SimGeometryConfig &geometry = context.draft.geometry;
     const bool is3d = context.capabilities.dimensions == 3;
+    const bool polygon_mode = !is3d &&
+        context.draft.particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS;
     if (!is3d && geometry.boundary == SIM_BOUNDARY_WALL_XYZ) {
         /* XYZ from an imported 3D configuration has an exact 2D analogue. */
         geometry.boundary = SIM_BOUNDARY_WALL_XY;
@@ -1229,7 +1382,9 @@ void draw_boundaries(Context &context) {
         checkbox_row(context, "Thermal wall", "Maxwell diffuse temperature wall",
                      &geometry.thermal_wall,
                      "Draws outgoing velocities from the wall-temperature distribution.",
-                     no_wall != nullptr && !geometry.thermal_wall ? no_wall : nullptr);
+                     polygon_mode
+                        ? "Thermal-wall redraws do not yet sample polygon spin consistently."
+                        : (no_wall != nullptr && !geometry.thermal_wall ? no_wall : nullptr));
         if (geometry.thermal_wall) {
             input_nonnegative_double_row(
                 context, "Thermal-wall temperature",
@@ -1242,8 +1397,10 @@ void draw_boundaries(Context &context) {
         const bool y_wall = geometry.boundary == SIM_BOUNDARY_WALL_Y ||
                             geometry.boundary == SIM_BOUNDARY_WALL_XY ||
                             geometry.boundary == SIM_BOUNDARY_WALL_XYZ;
-        const char *shear_reason = !y_wall && !geometry.shear_wall
-            ? "Shear walls require walls normal to y." : nullptr;
+        const char *shear_reason = polygon_mode
+            ? "Moving shear-wall contact is not yet implemented for rotating convex particles."
+            : (!y_wall && !geometry.shear_wall
+                ? "Shear walls require walls normal to y." : nullptr);
         checkbox_row(context, "Moving shear walls", "Couette shear wall",
                      &geometry.shear_wall,
                      is3d
@@ -1488,6 +1645,8 @@ void draw_capability_row(const char *name, bool available,
 void draw_advanced(Context &context) {
     SimIntruderConfig &intruder = context.draft.intruder;
     const bool is3d = context.capabilities.dimensions == 3;
+    const bool polygon_mode = !is3d &&
+        context.draft.particle_shape.mode == SIM_PARTICLE_CONVEX_POLYGONS;
     if (is3d && !context.capabilities.intruder_3d) {
         intruder.enabled = false;
     }
@@ -1525,6 +1684,10 @@ void draw_advanced(Context &context) {
             draw_capability_row("Rotational rough particles",
                                 context.capabilities.rough_particles);
             draw_capability_row("Intruder", context.capabilities.intruder);
+            if (!is3d) {
+                draw_capability_row("Rigid convex particles",
+                                    context.capabilities.convex_polygon_particles);
+            }
             draw_capability_row("Radius-sum / additive contacts",
                                 context.capabilities.additive_contacts);
             draw_capability_row("Circular / spherical confinement",
@@ -1544,8 +1707,13 @@ void draw_advanced(Context &context) {
                                 "complete z/vz state unavailable");
             draw_capability_row("3D intruder collisions",
                                 !is3d || context.capabilities.intruder_3d);
-            draw_capability_row("3D pressure field",
-                                !is3d || context.capabilities.pressure_field_3d);
+            draw_capability_row(
+                "Saved local pressure field",
+                (!is3d || context.capabilities.pressure_field_3d) &&
+                    !polygon_mode,
+                polygon_mode
+                    ? "disk collision impulses only"
+                    : "3D field unavailable");
             draw_capability_row("XY-projected 3D observables",
                                 !is3d || context.capabilities.projected_xy_observables);
             draw_capability_row("Queue invariant checks",
@@ -1565,9 +1733,11 @@ void draw_advanced(Context &context) {
             : ((context.capabilities.stress || context.capabilities.heat)
                     ? "Intruder collisions do not yet maintain complete STRESS/HEAT transport bookkeeping."
                     : nullptr);
-        const char *intruder_enable_reason = intruder_build_reason != nullptr
+        const char *intruder_enable_reason = polygon_mode
+            ? "The intruder and rigid convex-particle collision models cannot be active together."
+            : (intruder_build_reason != nullptr
             ? intruder_build_reason
-            : "Intruder presence is fixed by the INTRUDER build option; live reload cannot add or remove it.";
+            : "Intruder presence is fixed by the INTRUDER build option; live reload cannot add or remove it.");
         if (begin_properties("advanced-intruder")) {
             checkbox_row(context, "Enable intruder", "polygon obstacle body",
                          &intruder.enabled, nullptr, intruder_enable_reason);

@@ -1,6 +1,9 @@
 #include "live_analysis.h"
-
 #include "EDMD.h"
+
+#if POLYGON_PARTICLES && !THREE_D
+#include "polygon_particles.h"
+#endif
 
 #include <float.h>
 #include <math.h>
@@ -100,7 +103,11 @@ static void append_series(LiveAnalysisSeries *series, double time,
 
 static particlePrediction predicted_particle(const particle *value)
 {
-    if (freeFly == &freeFlyGrow) return predictFreeFlyGrow(value, t);
+    if (freeFly == &freeFlyGrow
+#if POLYGON_PARTICLES && !THREE_D
+        || polygon_particles_growing()
+#endif
+    ) return predictFreeFlyGrow(value, t);
     return predictFreeFlyNormal(value, t);
 }
 
@@ -238,6 +245,9 @@ static void sample_energetics(double *total_energy,
         rotational += 0.5*value->J*value->omega*value->omega;
 #endif
     }
+#if POLYGON_PARTICLES && !THREE_D
+    rotational += polygon_particles_rotational_energy();
+#endif
 
     if (addWell && U != 0.0) {
         for (int index = 0; index < N; ++index) {
@@ -324,7 +334,11 @@ static bool sample_pressure(double kinetic_energy, double *result)
 #endif
                                       ;
     state.data.pressure_supported = !addMidWall && !addShear &&
-                                    freeFly != &freeFlyGrow;
+                                    freeFly != &freeFlyGrow
+#if POLYGON_PARTICLES && !THREE_D
+                                    && !polygon_particles_growing()
+#endif
+                                    ;
     if (!state.data.pressure_supported || result == NULL) {
         capture_pressure_baseline();
         return false;

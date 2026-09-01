@@ -11,6 +11,7 @@
 
 extern int N, S1, Hex;
 extern int periodicDumps, ther, Nxcells, Nycells, Nzcells;
+extern bool addShear;
 extern particle *particles;
 extern node **eventList;
 extern node *nextEvent;
@@ -244,6 +245,7 @@ static void test_shifted_seam_collision(void)
 
 int main(void)
 {
+    addShear = true;
     test_shear_transport_update();
     test_lower_seam_crossing();
     test_shifted_seam_collision();

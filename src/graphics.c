@@ -4,6 +4,9 @@
 #include "live_analysis.h"
 #include "sim_lifecycle.h"
 #include "EDMD.h"
+#if POLYGON_PARTICLES && !THREE_D
+#include "polygon_particles.h"
+#endif
 #include "raymath.h"
 #if THREE_D
 #include "camera_frustum.h"
@@ -11,6 +14,7 @@
 #endif
 #include <errno.h>
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #if !defined(PLATFORM_WEB)
 #include <pthread.h>
@@ -77,6 +81,20 @@ static Material arrowMaterial = {0};
 static bool arrowMaterialLoaded = false;
 static Material proceduralCircleMaterial = {0};
 static bool proceduralCircleMaterialLoaded = false;
+#if POLYGON_PARTICLES
+typedef struct polygonTriangleBatch polygonTriangleBatch;
+struct polygonTriangleBatch{
+	Mesh mesh;
+	Material material;
+	int capacity;
+	int shapeVertexCount;
+	int verticesPerParticle;
+	int count;
+	bool meshLoaded;
+	bool materialLoaded;
+};
+static polygonTriangleBatch particlePolygonBatch = {0};
+#endif
 #endif
 #if THREE_D
 typedef struct sphereBatch sphereBatch;
@@ -153,6 +171,7 @@ static GuiViewport guiViewport = {0};
 static bool imguiInitialized = false;
 static char pendingRuntimeError[1024] = {0};
 static bool pendingRuntimeFault = false;
+static char pendingTransientNotice[512] = {0};
 /* Keep the declarative configuration separate from mutable engine working
  * state.  Recapturing derived runtime values as the user's applied
  * configuration could make an unrelated slider edit silently reset or
@@ -429,7 +448,20 @@ int getWhatsUnderClick(window* screenWindow, state* screenState){
 					double dx = predicted.x - x;
 					double dy = predicted.y - y;
 					graphicsPBCXY(&dx, &dy);
-					if (dx*dx + dy*dy < predicted.rad*predicted.rad){
+					const double distanceSquared = dx*dx + dy*dy;
+					const double radiusSquared = predicted.rad*predicted.rad;
+					const double pickTolerance = 128.0*DBL_EPSILON*
+						(1.0 + distanceSquared + radiusSquared);
+					if (distanceSquared <= radiusSquared + pickTolerance){
+						#if POLYGON_PARTICLES
+						if (polygon_particles_requested() &&
+							!polygon_particles_contains_point(
+								screenState->particleUnderClick->num, x, y, t)){
+							screenState->particleUnderClick =
+								screenState->particleUnderClick->nxt;
+							continue;
+						}
+						#endif
 						return 1;
 					}
 					screenState->particleUnderClick = screenState->particleUnderClick->nxt;
@@ -780,7 +812,6 @@ static void updateParticleDrag(window* screenWindow, Vector2 sceneMouse){
 	PBC(&dx, &dy, &dz);
 	#else
 	PBC(&dx, &dy);
-	const double dz = 0;
 	#endif
 	const double now = GetTime();
 	double wallDt = now - activeParticleDrag.lastWallTime;
@@ -806,7 +837,9 @@ static void updateParticleDrag(window* screenWindow, Vector2 sceneMouse){
 	(void)oldVx;
 	(void)oldVy;
 	(void)oldVz;
-	(void)dz;
+	#endif
+	#if POLYGON_PARTICLES && !THREE_D
+	if (!polygon_particles_refresh_growth_energy()) return;
 	#endif
 	/* A velocity impulse invalidates predictions but leaves coordinates, cell
 	   links, potential membership, and MSD continuity intact. */
@@ -970,7 +1003,11 @@ static void invalidateParticleColorCache(void){
 
 static particlePrediction graphicsParticlePrediction(const particle* p){
 	particlePrediction prediction;
-	if (freeFly == freeFlyGrow){
+	if (freeFly == freeFlyGrow
+		#if POLYGON_PARTICLES && !THREE_D
+		|| polygon_particles_growing()
+		#endif
+	){
 		prediction = predictFreeFlyGrow(p, t);
 	}
 	else{
@@ -1303,6 +1340,148 @@ static void drawCircleBatch(circleBatch* batch){
 	visibleMesh.triangleCount = batch->count*2;
 	DrawMesh(visibleMesh, proceduralCircleMaterial, MatrixIdentity());
 }
+
+#if POLYGON_PARTICLES
+static void unloadPolygonTriangleBatch(polygonTriangleBatch* batch){
+	if (batch->meshLoaded){
+		UnloadMesh(batch->mesh);
+	}
+	if (batch->materialLoaded){
+		UnloadMaterial(batch->material);
+	}
+	*batch = (polygonTriangleBatch){0};
+}
+
+static bool loadPolygonTriangleBatch(polygonTriangleBatch* batch,
+	int capacity, int shapeVertexCount){
+	if (capacity <= 0 || shapeVertexCount < 3 ||
+		shapeVertexCount > SIM_POLYGON_MAX_VERTICES){
+		return false;
+	}
+
+	const int verticesPerParticle = 3*(shapeVertexCount - 2);
+	const size_t maximumVertexCount =
+		(size_t)INT_MAX/(3*sizeof(float));
+	if ((size_t)capacity >
+		maximumVertexCount/(size_t)verticesPerParticle){
+		TraceLog(LOG_ERROR, "Polygon render batch is too large");
+		return false;
+	}
+	const size_t vertexCount = (size_t)capacity*(size_t)verticesPerParticle;
+
+	Mesh mesh = {0};
+	mesh.vertexCount = (int)vertexCount;
+	mesh.triangleCount = mesh.vertexCount/3;
+	mesh.vertices = calloc(vertexCount*3, sizeof(float));
+	mesh.colors = malloc(vertexCount*4*sizeof(unsigned char));
+	if (mesh.vertices == NULL || mesh.colors == NULL){
+		free(mesh.vertices);
+		free(mesh.colors);
+		TraceLog(LOG_ERROR, "Unable to allocate the polygon particle render batch");
+		return false;
+	}
+	memset(mesh.colors, 255, vertexCount*4*sizeof(unsigned char));
+	UploadMesh(&mesh, true);
+
+	Material material = LoadMaterialDefault();
+	if (material.maps == NULL){
+		UnloadMesh(mesh);
+		TraceLog(LOG_ERROR, "Unable to allocate the polygon particle material");
+		return false;
+	}
+
+	batch->mesh = mesh;
+	batch->material = material;
+	batch->capacity = capacity;
+	batch->shapeVertexCount = shapeVertexCount;
+	batch->verticesPerParticle = verticesPerParticle;
+	batch->count = 0;
+	batch->meshLoaded = true;
+	batch->materialLoaded = true;
+	return true;
+}
+
+static bool ensurePolygonTriangleBatch(polygonTriangleBatch* batch,
+	int capacity, int shapeVertexCount){
+	if (batch->meshLoaded && batch->materialLoaded &&
+		batch->capacity == capacity &&
+		batch->shapeVertexCount == shapeVertexCount){
+		return true;
+	}
+	unloadPolygonTriangleBatch(batch);
+	return loadPolygonTriangleBatch(batch, capacity, shapeVertexCount);
+}
+
+static void setPolygonTriangleBatchVertex(polygonTriangleBatch* batch,
+	int vertex, Vector2 point, Color color){
+	float* position = batch->mesh.vertices + (size_t)vertex*3;
+	position[0] = point.x;
+	position[1] = point.y;
+	position[2] = 0.0f;
+
+	unsigned char* vertexColor = batch->mesh.colors + (size_t)vertex*4;
+	vertexColor[0] = color.r;
+	vertexColor[1] = color.g;
+	vertexColor[2] = color.b;
+	vertexColor[3] = color.a;
+}
+
+static Vector2 polygonParticleScreenVertex(Vector2 canonical,
+	const particlePrediction* predicted, double cosine, double sine,
+	double factor, double scale){
+	const double localX = scale*predicted->rad*canonical.x;
+	const double localY = scale*predicted->rad*canonical.y;
+	const double worldX = predicted->x + cosine*localX - sine*localY;
+	const double worldY = predicted->y + sine*localX + cosine*localY;
+	return (Vector2){
+		(float)(worldX*factor),
+		(float)((Ly - worldY)*factor),
+	};
+}
+
+static bool appendPolygonParticle(polygonTriangleBatch* batch,
+	const Vector2* canonical, int shapeVertexCount,
+	const particlePrediction* predicted, double angle, double factor,
+	Color color){
+	if (!batch->meshLoaded || !batch->materialLoaded || canonical == NULL ||
+		predicted == NULL || batch->count >= batch->capacity ||
+		shapeVertexCount != batch->shapeVertexCount){
+		return false;
+	}
+
+	const double cosine = cos(angle);
+	const double sine = sin(angle);
+	const Vector2 first = polygonParticleScreenVertex(canonical[0], predicted,
+		cosine, sine, factor, 1.0);
+	int vertex = batch->count*batch->verticesPerParticle;
+	for (int triangle = 1; triangle < shapeVertexCount - 1; triangle++){
+		const Vector2 second = polygonParticleScreenVertex(canonical[triangle],
+			predicted, cosine, sine, factor, 1.0);
+		const Vector2 third = polygonParticleScreenVertex(canonical[triangle + 1],
+			predicted, cosine, sine, factor, 1.0);
+		setPolygonTriangleBatchVertex(batch, vertex++, first, color);
+		setPolygonTriangleBatchVertex(batch, vertex++, second, color);
+		setPolygonTriangleBatchVertex(batch, vertex++, third, color);
+	}
+	batch->count++;
+	return true;
+}
+
+static void drawPolygonTriangleBatch(polygonTriangleBatch* batch){
+	if (!batch->meshLoaded || !batch->materialLoaded || batch->count == 0){
+		return;
+	}
+	const int vertexCount = batch->count*batch->verticesPerParticle;
+	UpdateMeshBuffer(batch->mesh, 0, batch->mesh.vertices,
+		vertexCount*3*(int)sizeof(float), 0);
+	UpdateMeshBuffer(batch->mesh, 3, batch->mesh.colors,
+		vertexCount*4*(int)sizeof(unsigned char), 0);
+	Mesh visibleMesh = batch->mesh;
+	visibleMesh.vertexCount = vertexCount;
+	visibleMesh.triangleCount = vertexCount/3;
+	DrawMesh(visibleMesh, batch->material, MatrixIdentity());
+}
+#endif
 
 typedef struct velocityArrowShape2D velocityArrowShape2D;
 struct velocityArrowShape2D{
@@ -1862,7 +2041,174 @@ static void releaseStructureFactorPositions(void){
 }
 
 #if !THREE_D
+#if POLYGON_PARTICLES
+static bool loadPolygonCanonicalVertices(Vector2* vertices, int vertexCount){
+	if (vertices == NULL || vertexCount < 3 ||
+		vertexCount > SIM_POLYGON_MAX_VERTICES){
+		return false;
+	}
+	for (int vertex = 0; vertex < vertexCount; vertex++){
+		double x = 0;
+		double y = 0;
+		if (!polygon_particles_vertex(vertex, &x, &y) ||
+			!isfinite(x) || !isfinite(y)){
+			return false;
+		}
+		vertices[vertex] = (Vector2){(float)x, (float)y};
+	}
+	return true;
+}
+
+static void drawPolygonSelectionOutline(const particle* selectedParticle,
+	const particlePrediction* selectedPrediction, const Vector2* canonical,
+	int shapeVertexCount, double factor, float zoom){
+	if (selectedParticle == NULL || selectedPrediction == NULL ||
+		canonical == NULL || shapeVertexCount < 3){
+		return;
+	}
+	double angle = polygon_particles_angle_at(selectedParticle->num, t);
+	if (!isfinite(angle)) angle = 0;
+	const double cosine = cos(angle);
+	const double sine = sin(angle);
+	Vector2 outline[SIM_POLYGON_MAX_VERTICES];
+	for (int vertex = 0; vertex < shapeVertexCount; vertex++){
+		outline[vertex] = polygonParticleScreenVertex(canonical[vertex],
+			selectedPrediction, cosine, sine, factor, 1.09);
+	}
+	const Color selectionColor = {245, 247, 250, 255};
+	const float safeZoom = fmaxf(zoom, 0.01f);
+	const float thickness = fmaxf(1.6f/safeZoom,
+		(float)(0.055*selectedPrediction->rad*factor));
+	for (int vertex = 0; vertex < shapeVertexCount; vertex++){
+		DrawLineEx(outline[vertex], outline[(vertex + 1)%shapeVertexCount],
+			thickness, selectionColor);
+	}
+}
+
+static void drawPolygonParticlesAndBox(double factor, state* screenState,
+	float zoom, Rectangle viewport){
+	particle* particleUnderClick = screenState->particleUnderClick;
+	const bool predictionsReady = refreshRenderPredictions();
+	const bool colorsReady = refreshParticleColorCache(screenState);
+	const int shapeVertexCount = polygon_particles_vertex_count();
+	Vector2 canonical[SIM_POLYGON_MAX_VERTICES] = {0};
+	const bool shapeReady = loadPolygonCanonicalVertices(canonical,
+		shapeVertexCount);
+	const bool particleBatchReady = (N == 0) || (shapeReady &&
+		ensurePolygonTriangleBatch(&particlePolygonBatch, N,
+			shapeVertexCount));
+	const bool arrowBatchReady = !screenState->arrow ||
+		(arrowMaterialLoaded && ensureVelocityArrowBatch(&arrowBatch, N));
+	particlePolygonBatch.count = 0;
+	arrowBatch.count = 0;
+
+	for (int i = N - 1; i >= 0; i--){
+		const particlePrediction predicted = predictionsReady ?
+			renderPredictions[i] : graphicsParticlePrediction(particles + i);
+		if (colorsReady){
+			screenState->particleColor = colorSelect(
+				(screenState->colorFunctionArray[i] - colorCache.min)/
+					(colorCache.max - colorCache.min), screenState->colorArray);
+		}
+		else{
+			screenState->particleColor =
+				screenState->particleArray[particles[i].type];
+		}
+
+		const float left = (float)((predicted.x - predicted.rad)*factor);
+		const float top = (float)((Ly - predicted.y - predicted.rad)*factor);
+		const float diameter = (float)(2*predicted.rad*factor);
+		if (!particleIntersectsViewport(left, top, left + diameter,
+			top + diameter, viewport)){
+			continue;
+		}
+
+		if (particleBatchReady && shapeReady){
+			double angle = polygon_particles_angle_at(i, t);
+			if (!isfinite(angle)) angle = 0;
+			appendPolygonParticle(&particlePolygonBatch, canonical,
+				shapeVertexCount, &predicted, angle, factor,
+				screenState->particleColor);
+		}
+		else if (shapeReady){
+			/* Allocation/GPU failure is exceptional, but it must not make every
+			 * particle disappear. Keep a correct immediate-mode fallback. */
+			double angle = polygon_particles_angle_at(i, t);
+			if (!isfinite(angle)) angle = 0;
+			const double cosine = cos(angle);
+			const double sine = sin(angle);
+			Vector2 outline[SIM_POLYGON_MAX_VERTICES];
+			for (int vertex = 0; vertex < shapeVertexCount; vertex++){
+				outline[vertex] = polygonParticleScreenVertex(canonical[vertex],
+					&predicted, cosine, sine, factor, 1.0);
+			}
+			DrawTriangleFan(outline, shapeVertexCount,
+				screenState->particleColor);
+		}
+
+		if (screenState->arrow && arrowBatchReady){
+			appendVelocityArrow2D(&arrowBatch, predicted.vx, predicted.vy,
+				(Vector2){(float)(predicted.x*factor),
+					(float)((Ly - predicted.y)*factor)},
+				(float)(predicted.rad*factor), zoom);
+		}
+	}
+
+	if (particleBatchReady && shapeReady){
+		drawPolygonTriangleBatch(&particlePolygonBatch);
+	}
+	if (screenState->arrow && arrowBatchReady){
+		drawVelocityArrowBatch(&arrowBatch);
+	}
+	else if (screenState->arrow){
+		for (int i = N - 1; i >= 0; i--){
+			const particlePrediction predicted = predictionsReady ?
+				renderPredictions[i] : graphicsParticlePrediction(particles + i);
+			const float radius = (float)(predicted.rad*factor);
+			const float centerX = (float)(predicted.x*factor);
+			const float centerY = (float)((Ly - predicted.y)*factor);
+			if (!particleIntersectsViewport(centerX - radius, centerY - radius,
+				centerX + radius, centerY + radius, viewport)) continue;
+			drawVelocityArrow2DImmediate(predicted.vx, predicted.vy,
+				(Vector2){centerX, centerY}, radius, zoom);
+		}
+	}
+	if (shapeReady && guiLive.show_selection_outline &&
+		screenState->selected && particleUnderClick != NULL){
+		const particlePrediction selected =
+			cachedGraphicsParticlePrediction(particleUnderClick);
+		drawPolygonSelectionOutline(particleUnderClick, &selected, canonical,
+			shapeVertexCount, factor, zoom);
+	}
+	if (guiLive.show_boundary && addWallx){
+		const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
+		DrawLineEx((Vector2){0, 0}, (Vector2){0, Ly*factor},
+			0.3*factor/zoom, boundaryColor);
+		DrawLineEx((Vector2){Lx*factor, 0}, (Vector2){Lx*factor, Ly*factor},
+			0.3*factor/zoom, boundaryColor);
+	}
+	if (guiLive.show_boundary && addWally){
+		const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
+		DrawLineEx((Vector2){0, 0}, (Vector2){Lx*factor, 0},
+			0.3*factor/zoom, boundaryColor);
+		DrawLineEx((Vector2){0, Ly*factor}, (Vector2){Lx*factor, Ly*factor},
+			0.3*factor/zoom, boundaryColor);
+	}
+	else if (guiLive.show_boundary && addCircularWall){
+		DrawRing((Vector2){Lx/2*factor, Lx/2*factor}, Lx/2*factor,
+			(Lx/2 + 1)*factor, 0, 360, 360,
+			colorFromRgba(guiLive.boundary_rgba));
+	}
+}
+#endif
+
 void drawParticlesAndBox(double factor, state* screenState, float zoom, Rectangle viewport){
+	#if POLYGON_PARTICLES
+	if (polygon_particles_requested()){
+		drawPolygonParticlesAndBox(factor, screenState, zoom, viewport);
+		return;
+	}
+	#endif
 	particle* particleUnderClick = screenState->particleUnderClick;
 	const bool predictionsReady = refreshRenderPredictions();
 	const bool colorsReady = refreshParticleColorCache(screenState);
@@ -2299,6 +2645,14 @@ double graphicsSimulationTimeLimit(double currentSimulationTime){
 	return fmax(currentSimulationTime, pacingState.targetSimulationTime);
 }
 
+void graphicsRebaseSimulationPacing(double currentSimulationTime){
+	/* Growth time parameterizes an initializer; it is not elapsed physical
+	 * dynamics.  Begin pacing production from the completed configuration
+	 * instead of making it wait for wall time to catch up with preparation. */
+	pacingState.initialized = false;
+	synchronizeSimulationPacing(guiLive.running, currentSimulationTime);
+}
+
 static const GuiMetrics* refreshGuiMetrics(void){
 	const double now = GetTime();
 	synchronizeSimulationPacing(guiLive.running, t);
@@ -2335,7 +2689,10 @@ static const GuiMetrics* refreshGuiMetrics(void){
 	guiMetrics.simulation_time = t;
 	guiMetrics.box_lx = Lx;
 	guiMetrics.box_ly = Ly;
-	guiMetrics.packing_fraction = phi;
+	guiMetrics.packing_fraction = simulationCurrentPackingFraction(t);
+	if (!isfinite(guiMetrics.packing_fraction))
+		guiMetrics.packing_fraction = phi;
+	guiMetrics.target_packing_fraction = phi;
 	guiMetrics.pressure = pressure;
 	/* Pressure is accumulated by the headless thermodynamic sampling path,
 	 * which graphical runs intentionally do not schedule. */
@@ -2344,21 +2701,29 @@ static const GuiMetrics* refreshGuiMetrics(void){
 	guiMetrics.collisions = (uint64_t)ncol;
 	guiMetrics.crossings = (uint64_t)ncross;
 	guiMetrics.frames_per_second = (float)GetFPS();
-	guiMetrics.growing = freeFly == &freeFlyGrow;
+	guiMetrics.growing = freeFly == &freeFlyGrow
+		#if POLYGON_PARTICLES && !THREE_D
+		|| polygon_particles_growing()
+		#endif
+		;
 
-	double energy = 0;
+	double translationalEnergy = 0;
 	for (int i = 0; i < N; i++){
 		const particlePrediction predicted = graphicsParticlePrediction(particles + i);
 		double speedSquared = predicted.vx*predicted.vx + predicted.vy*predicted.vy;
 		#if THREE_D
 		speedSquared += predicted.vz*predicted.vz;
 		#endif
-		energy += 0.5*particles[i].m*speedSquared;
+		translationalEnergy += 0.5*particles[i].m*speedSquared;
 	}
+	double energy = translationalEnergy;
+	#if POLYGON_PARTICLES && !THREE_D
+	energy += polygon_particles_rotational_energy();
+	#endif
 	guiMetrics.total_energy = energy;
 	guiMetrics.energy_per_particle = (N > 0) ? energy/N : 0;
 	guiMetrics.temperature = (N > 0) ?
-		2.0*energy/((THREE_D ? 3.0 : 2.0)*N) : 0;
+		2.0*translationalEnergy/((THREE_D ? 3.0 : 2.0)*N) : 0;
 	if (elapsed > 0){
 		guiMetrics.event_rate = (events - lastMetricsEvents)/elapsed;
 		guiMetrics.simulation_time_rate =
@@ -2495,7 +2860,15 @@ static void updateSelectedParticle(const GuiParticleUpdate* update,
 	(void)oldVy;
 	(void)oldVz;
 	#endif
+	#if POLYGON_PARTICLES && !THREE_D
+	if (polygon_particles_active()){
+		if (!polygon_particles_set_mass(update->index, update->mass)) return;
+	} else {
+		p->m = update->mass;
+	}
+	#else
 	p->m = update->mass;
+	#endif
 	p->coll++;
 	removeEventFromQueue(eventList[N + p->num]);
 	removeEventFromQueue(eventList[p->num]);
@@ -2728,6 +3101,10 @@ void draw(int argc, char *argv[], window* screenWindow, state* screenState){
 			pendingRuntimeError[0] = '\0';
 			pendingRuntimeFault = false;
 		}
+		if (imguiInitialized && pendingTransientNotice[0] != '\0'){
+			gui_imgui_report_notice(pendingTransientNotice);
+			pendingTransientNotice[0] = '\0';
+		}
 	}
 	/* Match the headless stop condition without closing the interactive
 	 * workspace: reaching tmax pauses the event loop so the final state can be
@@ -2808,6 +3185,18 @@ void graphicsReportRuntimeError(const char* message){
 	}
 	snprintf(pendingRuntimeError, sizeof(pendingRuntimeError), "%s", message);
 	pendingRuntimeFault = false;
+}
+
+void graphicsReportTransientNotice(const char* message){
+	if (message == NULL || message[0] == '\0'){
+		return;
+	}
+	if (imguiInitialized){
+		gui_imgui_report_notice(message);
+		return;
+	}
+	snprintf(pendingTransientNotice, sizeof(pendingTransientNotice), "%s",
+		message);
 }
 
 void graphicsReportSimulationFault(const char* message){
@@ -3383,6 +3772,9 @@ void graphicsFree(state* screenState){
 		imguiInitialized = false;
 	}
 	#if !THREE_D
+	#if POLYGON_PARTICLES
+	unloadPolygonTriangleBatch(&particlePolygonBatch);
+	#endif
 	unloadCircleBatch(&particleCircleBatch);
 	unloadVelocityArrowBatch(&arrowBatch);
 	if (proceduralCircleMaterialLoaded){

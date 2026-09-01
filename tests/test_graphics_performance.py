@@ -16,6 +16,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EDMD_SOURCE = (ROOT / "src" / "EDMD.c").read_text(encoding="utf-8")
+EDMD_HEADER_SOURCE = (ROOT / "src" / "EDMD.h").read_text(encoding="utf-8")
+POLYGON_RUNTIME_SOURCE = (ROOT / "src" / "polygon_particles.c").read_text(
+    encoding="utf-8"
+)
+POLYGON_RUNTIME_HEADER = (ROOT / "src" / "polygon_particles.h").read_text(
+    encoding="utf-8"
+)
 GRAPHICS_SOURCE = (ROOT / "src" / "graphics.c").read_text(encoding="utf-8")
 SIM_CONFIG_SOURCE = (ROOT / "src" / "sim_config.c").read_text(
     encoding="utf-8"
@@ -212,9 +219,15 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         bounded_loop = compact(
             EDMD_SOURCE[budget_start : draw_after_budget + len("draw(argc")]
         )
+        self.assertIn("previousFrameDuration = GetFrameTime()", bounded_loop)
+        self.assertIn("fmin(1.0/90.0", bounded_loop)
+        self.assertIn("fmax(1.0/180.0", bounded_loop)
+        self.assertIn("configurationGrowth", bounded_loop)
+        self.assertIn("1.0/75.0", bounded_loop)
+        self.assertIn("1.0/45.0", bounded_loop)
         self.assertRegex(
             bounded_loop,
-            r"GetTime\(\)\s*-\s*simulationFrameStart\s*<\s*1\.0\s*/\s*180\.0",
+            r"GetTime\(\)\s*-\s*simulationFrameStart\s*<\s*simulationFrameBudget",
         )
         self.assert_in_order(
             bounded_loop, "simulationFrameStart = GetTime()", "draw(argc"
@@ -223,12 +236,13 @@ class GraphicsPerformanceContracts(unittest.TestCase):
     def test_optional_simulation_time_pacing_is_exact_and_reports_lag(self) -> None:
         # The host advances continuous event-free time only to the current
         # wall-clock target; a later queued event remains untouched.
+        graphical_frame = function_body(EDMD_SOURCE, "graphicalFrame")
+        pacing_start = graphical_frame.index("graphicsSimulationTimeLimit(t)")
+        pacing_end = graphical_frame.index("t = nextEvent->t", pacing_start)
         pacing_gate = compact(
-            EDMD_SOURCE[
-                EDMD_SOURCE.find("graphicsSimulationTimeLimit(t)") - 120 :
-                EDMD_SOURCE.find("graphicsSimulationTimeLimit(t)") + 520
-            ]
+            graphical_frame[max(0, pacing_start - 120) : pacing_end]
         )
+        self.assertIn("!preparingConfiguration", pacing_gate)
         self.assert_in_order(
             pacing_gate,
             "graphicsSimulationTimeLimit(t)",
@@ -242,6 +256,19 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         self.assertIn("synchronizeSimulationPacing(true, currentSimulationTime)", pacing)
         self.assertIn("return HUGE_VAL", pacing)
         self.assertIn("fmax(currentSimulationTime, pacingState.targetSimulationTime)", pacing)
+        rebase = compact(
+            function_body(GRAPHICS_SOURCE, "graphicsRebaseSimulationPacing")
+        )
+        self.assert_in_order(
+            rebase,
+            "pacingState.initialized = false",
+            "synchronizeSimulationPacing(guiLive.running, currentSimulationTime)",
+        )
+        self.assertRegex(
+            compact(graphical_frame),
+            r"case GROWSTOP: stopGrow\(\);.*?"
+            r"graphicsRebaseSimulationPacing\(t\)",
+        )
 
         toolbar = compact(function_body(GUI_SOURCE, "draw_toolbar"))
         self.assertIn("pace_simulation_time", toolbar)
@@ -364,9 +391,12 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         self.assertIn("hcp_close_packing = 0.74048048969306104117", setup)
         self.assertRegex(
             setup,
-            r"packing_slider_max\s*=\s*init\.mode\s*==\s*"
-            r"SIM_INIT_HEX_LATTICE\s*\?\s*hex_close_packing\s*:\s*1\.0",
+            r"packing_slider_max\s*=\s*"
+            r"init\.mode\s*==\s*SIM_INIT_HEX_LATTICE\s*\?\s*"
+            r"hex_close_packing\s*:\s*1\.0",
         )
+        self.assertIn('"Target packing fraction"', setup)
+        self.assertIn("Random preparation grows the actual polygons", setup)
 
         appearance = compact(
             function_body(GUI_PANELS_SOURCE, "draw_appearance")
@@ -385,6 +415,23 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         )
         self.assertIn("Nxcells = (int)(Lx/targetCellSize)", box)
         self.assertIn("Nycells = (int)(Ly/targetCellSize)", box)
+        self.assertIn("collisionCellNeighborRange = 1", box)
+        self.assertIn(
+            "polygonCollisionCellNeighborRange = polygonCellNeighborRangeForBox()",
+            box,
+        )
+        self.assertRegex(
+            box,
+            r"targetCellSize\s*=\s*2\s*\*\s*collisionGridMaxRadius\s*/\s*"
+            r"gridNeighborRange",
+        )
+
+        polygon_grid = compact(
+            function_body(EDMD_SOURCE, "polygonCellNeighborRangeForBox")
+        )
+        self.assertIn("floor(16.0*phi + 0.5)", polygon_grid)
+        self.assertIn("POLYGON_PARTICLES_MAX_CELL_NEIGHBOR_RANGE", polygon_grid)
+        self.assertIn("EDMD_POLYGON_ABSOLUTE_CELL_HEAD_LIMIT", polygon_grid)
 
         neighbors = compact(
             function_body(EDMD_SOURCE, "neighboringCellCoordinates")
@@ -604,6 +651,8 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         diagnostics = compact(function_body(GUI_SOURCE, "draw_diagnostics"))
         self.assertIn("visible particles", diagnostics)
         self.assertIn("frustum-culled particles", diagnostics)
+        self.assertIn("live_analysis_get_data", diagnostics)
+        self.assertNotIn("not sampled in graphics mode", diagnostics)
 
     def test_velocity_arrows_are_directional_speed_aware_geometry(self) -> None:
         shape_2d = compact(function_body(GRAPHICS_SOURCE, "velocityArrowShape"))
@@ -979,6 +1028,167 @@ class GraphicsPerformanceContracts(unittest.TestCase):
             "freeFly(p)",
         )
 
+    def test_polygon_overlap_recovery_is_a_bounded_gui_transaction(self) -> None:
+        recovery_declarations = compact(
+            EDMD_SOURCE[
+                EDMD_SOURCE.index("#if G && POLYGON_PARTICLES && !THREE_D") :
+                EDMD_SOURCE.index("#if (STRESS || HEAT)",
+                                  EDMD_SOURCE.index(
+                                      "#if G && POLYGON_PARTICLES && !THREE_D"
+                                  ))
+            ]
+        )
+        self.assertIn("GRAPHICAL_RECOVERY_SNAPSHOT_COUNT = 4", recovery_declarations)
+        self.assertIn("graphicalRecoverySnapshot graphicalRecovery", recovery_declarations)
+        self.assertIn("particle* particleState", recovery_declarations)
+        self.assertIn("void* polygonState", recovery_declarations)
+        self.assertIn("node auxiliary[GRAPHICAL_RECOVERY_AUXILIARY_COUNT]",
+                      recovery_declarations)
+
+        capture = compact(
+            function_body(EDMD_SOURCE, "captureGraphicalRecoveryCheckpoint")
+        )
+        self.assertIn("simulationHasFault()", capture)
+        self.assertNotIn("synchronizeParticlesAtCurrentTime()", capture)
+        self.assertIn("memcpy(snapshot->particleState, particles", capture)
+        self.assertIn("polygon_particles_capture_checkpoint", capture)
+        self.assertIn("snapshot->collisions = ncol", capture)
+        self.assertIn("snapshot->crossings = ncross", capture)
+        self.assertIn("snapshot->virialX = collTermX", capture)
+        self.assertIn("snapshot->wallImpulse = cumulativeWallImpulse", capture)
+        self.assertIn("snapshot->samples = outputSamples", capture)
+        self.assertIn("memcpy(snapshot->randomState, mt", capture)
+        self.assertIn("snapshot->randomIndex = mti", capture)
+        self.assertIn("source->q >= 0", capture)
+        self.assertIn("% GRAPHICAL_RECOVERY_SNAPSHOT_COUNT", capture)
+
+        calendar = compact(
+            function_body(EDMD_SOURCE, "restoreGraphicalRecoveryCalendar")
+        )
+        self.assertIn("memset(eventPaul", calendar)
+        self.assertIn("memset(EVENT_NODE(index), 0", calendar)
+        self.assertIn("scheduledEventCount = 0", calendar)
+        self.assertIn("snapshot->auxiliaryQueued", calendar)
+        self.assertIn("addEventToQueue(restored)", calendar)
+        self.assert_in_order(
+            calendar,
+            "crossingEvent(index)",
+            "collisionEvent(index)",
+            "if (simulationHasFault())",
+        )
+        self.assertIn("nextEvent = NULL", calendar)
+
+        restore = compact(
+            function_body(EDMD_SOURCE, "restoreGraphicalRecoverySnapshot")
+        )
+        self.assert_in_order(
+            restore,
+            "polygon_particles_restore_checkpoint",
+            "t = snapshot->time",
+            "synchronizeParticlesAtCurrentTime()",
+            "particles[index].cell[0] = -1",
+            "particles[index].cell[1] = -1",
+            "simulationClearFault()",
+            "polygon_particles_enable_recovery_precision(1.0)",
+            "rebuildSpatialIndexAtCurrentTime()",
+            "restoreGraphicalRecoveryCalendar(snapshot)",
+        )
+        self.assertIn("polygon_particles_verify_local_no_overlaps", restore)
+        for restored_counter in (
+            "ncol = snapshot->collisions",
+            "ncross = snapshot->crossings",
+            "collTermX = snapshot->virialX",
+            "collTermY = snapshot->virialY",
+            "collTermXY = snapshot->virialXY",
+            "collTermYX = snapshot->virialYX",
+            "cumulativeWallImpulse = snapshot->wallImpulse",
+            "dp = snapshot->sampledWallImpulse",
+            "dpLeft = snapshot->sampledLeftImpulse",
+            "dpRight = snapshot->sampledRightImpulse",
+            "dpMid = snapshot->sampledMiddleImpulse",
+            "outputSamples = snapshot->samples",
+            "memcpy(mt, snapshot->randomState",
+            "mti = snapshot->randomIndex",
+        ):
+            self.assertIn(restored_counter, restore)
+        self.assert_in_order(restore, "outputSamples = snapshot->samples",
+                             "physicalQ()", "nextEvent = NULL")
+
+        recovery_definition = EDMD_SOURCE.rindex(
+            "static bool tryGraphicalPolygonRecovery"
+        )
+        recover = compact(function_body(
+            EDMD_SOURCE[recovery_definition:], "tryGraphicalPolygonRecovery"
+        ))
+        self.assertIn("simulationFaultIsRecoverableOverlap()", recover)
+        self.assertIn("snapshot->valid = false", recover)
+        self.assertIn("live_analysis_reset_generation()", recover)
+        self.assertNotIn("graphicsPauseSimulation", recover)
+        self.assertNotIn("graphicsReportSimulationFault", recover)
+
+        frame = compact(function_body(EDMD_SOURCE, "graphicalFrame"))
+        self.assertIn("captureGraphicalRecoveryCheckpoint(screenState)", frame)
+        self.assertRegex(
+            frame,
+            r"tryGraphicalPolygonRecovery\(screenState\).*?"
+            r"graphicsReportTransientNotice",
+        )
+        self.assertRegex(
+            frame,
+            r"if \(tryGraphicalPolygonRecovery\(screenState\)\).*?"
+            r"else\{ graphicsPauseSimulation\(screenState\); "
+            r"graphicsReportSimulationFault",
+        )
+
+        notice_bridge = compact(
+            function_body(GRAPHICS_SOURCE, "graphicsReportTransientNotice")
+        )
+        self.assertIn("gui_imgui_report_notice(message)", notice_bridge)
+        self.assertIn("pendingTransientNotice", notice_bridge)
+        self.assertNotIn("gui_imgui_report_error", notice_bridge)
+        self.assertNotIn("gui_imgui_report_fault", notice_bridge)
+        notice = compact(function_body(GUI_SOURCE, "gui_imgui_report_notice"))
+        self.assertIn("toast_message", notice)
+        self.assertIn("toast_started_at = ImGui::GetTime()", notice)
+        self.assertIn("toast_visible = true", notice)
+        self.assertNotIn("runtime_message_visible", notice)
+        self.assertNotIn("simulation_faulted", notice)
+
+        release = compact(
+            function_body(EDMD_SOURCE, "releaseGraphicalRecoveryCheckpoints")
+        )
+        self.assertIn("free(graphicalRecovery[index].particleState)", release)
+        self.assertIn("free(graphicalRecovery[index].polygonState)", release)
+        self.assertIn("graphicalRecoveryCount = 0", release)
+        event_init = compact(function_body(EDMD_SOURCE, "eventListInit"))
+        self.assertIn("graphicalRecoveryGeneration++", event_init)
+        shutdown = compact(function_body(EDMD_SOURCE, "graphicalShutdown"))
+        self.assertIn("releaseGraphicalRecoveryCheckpoints()", shutdown)
+
+        # The expensive mode is activated only by the graphical restore and
+        # is absent from the ordinary headless event loop and circle hot paths.
+        self.assertEqual(
+            EDMD_SOURCE.count("polygon_particles_enable_recovery_precision("), 1
+        )
+        for api in (
+            "polygon_particles_checkpoint_bytes",
+            "polygon_particles_capture_checkpoint",
+            "polygon_particles_restore_checkpoint",
+            "polygon_particles_enable_recovery_precision",
+            "polygon_particles_verify_local_no_overlaps",
+        ):
+            self.assertIn(api, POLYGON_RUNTIME_HEADER)
+        pair_ccd = compact(
+            function_body(POLYGON_RUNTIME_SOURCE, "pair_time_of_impact")
+        )
+        self.assertIn("if (recovery_precision_active())", pair_ccd)
+        self.assertIn("settings.max_iterations = 4096U", pair_ccd)
+        self.assertIn("else if (polygon_growing)", pair_ccd)
+        self.assertIn("settings.max_iterations = 256U", pair_ccd)
+        self.assertIn("settings.max_iterations = 512U", pair_ccd)
+        self.assertIn("recovery_precision_active() ? 4096 : 512",
+                      POLYGON_RUNTIME_SOURCE)
+
     def test_explicit_restart_preserves_run_pause_state(self) -> None:
         assign = compact(
             function_body(GUI_SOURCE, "assign_restart_command")
@@ -1009,9 +1219,32 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         )
         self.assertIsNotNone(prediction_dir)
         self.assertIn("$(GRAPHICS_DIMENSION)", prediction_dir.group(1))
-        self.assertIn("$(GRAPHICS_FEATURE_SET)", prediction_dir.group(1))
+        self.assertIn("$(CORE_TEST_FEATURE_SET)", prediction_dir.group(1))
         self.assertIn("$(PREDICTION_TEST_CORE_OBJECT)", MAKEFILE)
         self.assertIn("$(PREDICTION_TEST_BINARY)", MAKEFILE)
+
+    def test_polygon_support_is_outside_circle_event_hot_paths(self) -> None:
+        for function in (
+            "crossingEventNormal",
+            "collisionEventNormal",
+            "doTheCrossing",
+            "doTheCollisionNormal",
+        ):
+            body = function_body(EDMD_SOURCE, function).lower()
+            self.assertNotIn("polygon", body, function)
+
+        particle = re.search(
+            r"struct particle\s*\{(?P<body>.*?)\n\};",
+            EDMD_HEADER_SOURCE,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(particle)
+        particle_body = particle.group("body").lower()
+        self.assertNotIn("polygon", particle_body)
+        self.assertNotIn("angle", particle_body)
+        self.assertIn("typedef struct PolygonParticleState", POLYGON_RUNTIME_SOURCE)
+        self.assertIn("polygon_state = calloc", POLYGON_RUNTIME_SOURCE)
+        self.assertIn("POLYGON_CELLCROSS", EDMD_SOURCE)
 
 
 if __name__ == "__main__":

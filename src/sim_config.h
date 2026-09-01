@@ -19,10 +19,26 @@
 extern "C" {
 #endif
 
-#define SIM_CONFIG_SCHEMA_VERSION 2
+#define SIM_CONFIG_SCHEMA_VERSION 3
 #define SIM_CONFIG_PATH_CAPACITY 512
 #define SIM_CONFIG_FIELD_CAPACITY 64
 #define SIM_CONFIG_MESSAGE_CAPACITY 256
+#define SIM_POLYGON_MAX_VERTICES 16
+
+typedef enum SimParticleShapeMode {
+    SIM_PARTICLE_CIRCLES = 0,
+    SIM_PARTICLE_CONVEX_POLYGONS
+} SimParticleShapeMode;
+
+/* A normalized, counter-clockwise convex particle template.  The runtime
+   scales this common shape by each particle's existing radius. */
+typedef struct SimParticleShapeConfig {
+    SimParticleShapeMode mode;
+    int vertex_count;
+    double vertices[SIM_POLYGON_MAX_VERTICES][2];
+    bool random_orientation;
+    double angular_temperature;
+} SimParticleShapeConfig;
 
 typedef enum SimInitMode {
     SIM_INIT_RANDOM_GROWTH = 0,
@@ -169,6 +185,7 @@ typedef struct BuildCapabilities {
     bool runtime_output_lifecycle;
     bool runtime_output_column_toggles;
     bool runtime_intruder_parameters;
+    bool convex_polygon_particles;
 
     bool spherical_confinement;
     bool tangent_delta_3d;
@@ -390,6 +407,7 @@ typedef struct SimIntruderConfig {
 
 typedef struct SimulationConfig {
     int schema_version;
+    SimParticleShapeConfig particle_shape;
     SimInitializationConfig initialization;
     SimGeometryConfig geometry;
     SimDynamicsConfig dynamics;
@@ -406,6 +424,21 @@ void simulation_config_set_defaults(SimulationConfig *config,
                                     const BuildCapabilities *capabilities);
 void simulation_config_capture_globals(SimulationConfig *config);
 void simulation_config_apply_globals(const SimulationConfig *config);
+
+/* Physical area of a unit-radius 2D particle.  Circle radius is the usual
+ * geometric radius; polygon radius is the canonical template circumradius.
+ * Returns NaN for an invalid/unknown shape description. */
+double simulation_particle_shape_unit_area(
+    const SimParticleShapeConfig *particle_shape);
+
+/* Occupied-area fraction for similarly shaped 2D particles whose individual
+ * circumradii have squared sum `sum_radius_squared`.  Keeping this calculation
+ * in the shared configuration layer lets box sizing, diagnostics, and tests
+ * use the exact same definition: sum(particle areas) / container area. */
+double simulation_particle_shape_packing_fraction_2d(
+    const SimParticleShapeConfig *particle_shape,
+    double sum_radius_squared,
+    double container_area);
 
 /* Returns the total number of issues, which may exceed issue_capacity. */
 size_t simulation_config_validate(const SimulationConfig *config,

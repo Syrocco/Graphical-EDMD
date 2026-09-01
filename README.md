@@ -18,6 +18,41 @@ make                    # 2D, no graphical interface
 make THREE_D=1          # 3D, no graphical interface
 ```
 
+Headless physics uses the plain configuration list in `src/EDMD.c`; `make`
+does not select or override damping, Delta, walls, fields, or shear. Change the
+values directly when a non-default headless model is wanted, for example:
+
+```c
+const bool damping = true;
+const bool addDelta = true;
+```
+
+Then compile normally and provide the physical amplitudes on the command line:
+
+```sh
+make
+./a.out -N 10000 --phi 0.6 --gamma 0.02 --res 0.9 --delta 0.5
+```
+
+The defaults are ballistic hard disks. The graphical executable continues to
+switch these laws at runtime from the interface.
+
+A headless dissipative run with no kinetic-energy source terminates when its
+total kinetic energy falls below `1e-10`. Delta-driven and otherwise forced
+systems are excluded from this freely-cooling stop.
+
+The output-free event-loop benchmark accepts `ballistic`, `damping`, `delta`,
+or `damping-delta`. For example, this measures three identical-seed dense
+runs after a separate warm-up interval:
+
+```sh
+make headless-disk-benchmark \
+  HEADLESS_DISK_BENCHMARK_ARGS='ballistic 10000 0.60 500000 100000 1 3'
+```
+
+Use `0.10` in place of `0.60` for the dilute regression guard. Setup and
+growth timings are reported separately from the measured event loop.
+
 The graphical build requires `make`, a C99 compiler, a C++17 compiler, and
 [raylib](https://github.com/raysan5/raylib/wiki/Working-on-GNU-Linux). Dear
 ImGui (docking branch) and rlImGui are pinned and vendored under `src/vendor`,
@@ -29,6 +64,11 @@ make graphics THREE_D=1 # 3D raylib + Dear ImGui interface
 ./a.out
 ```
 
+Release builds use link-time optimization and tune native code for the host
+CPU.  For a portable/cross-compiled desktop binary, disable the host-specific
+flags explicitly with `make graphics NATIVE_OPT_FLAGS=`.  Browser builds use
+LLVM LTO but no host architecture tuning.
+
 Compile-time physics capabilities can be selected explicitly. They are shown
 in the GUI's **Advanced > Build capabilities** table, and each feature set gets
 its own object directory:
@@ -37,14 +77,72 @@ its own object directory:
 make graphics THREE_D=1 STRESS=1 HEAT=1 \
     EDMD_VERIFY_COLLISION_ACCOUNTING=1 \
     EDMD_VERIFY_QUEUE=1 EDMD_VERIFY_OVERLAPS=1
+make graphics POLYGON_PARTICLES=0 # omit the optional 2D polygon system
 make graphics TANGENTIAL=1 # legacy 2D scalar-spin rough particles
 make graphics INTRUDER=1   # legacy 2D polygonal intruder
 ```
 
+`POLYGON_PARTICLES=1` is the default for 2D desktop and browser graphics. It
+adds the editable rigid-convex-particle mode while leaving circles as the
+runtime default. The module is always compiled out of 3D and non-graphical
+builds, so their particle layout and circle collision path are unchanged.
+Select **Setup > Particle body > Rigid convex polygons** in the GUI, choose
+3--16 sides, then drag a numbered vertex or the smaller handle at an edge.
+Edits are staged while dragging, clamped before convexity would be lost, and
+committed with one safe simulation rebuild on release. Polygon contacts use
+numerical continuous collision detection and support periodic, planar,
+mid-wall, and circular confinement; incompatible disk-only dynamics and saved
+analyses are disabled with an explanation in the interface. The analytical
+Langevin/OU thermostat is available for polygons and thermalizes both linear
+velocity and angular velocity; its stationary variances are `T/m` and `T/I`
+for every kick interval.
+
+Polygon packing fraction is computed from the actual editable polygon area,
+not from the area of its circumscribed collision-search disk.  The radius still
+denotes the circumradius used by the broad phase and renderer. Random polygon
+states are prepared by homothetically growing the actual oriented bodies, so
+their edges—not invisible circumscribed disks—set the attainable density. The
+GUI labels the requested value as the target packing fraction and reports the
+instantaneous occupied-area fraction separately during growth. Preparation
+tracks aggregate kinetic energy without modifying resolved contact velocities;
+the production handoff then restores the requested translational energy and
+initializes rotation independently. An unattainable near-unity target pauses
+with a clear failure instead of running away. Graphical polygon runs keep a
+four-entry rolling checkpoint ring: if the exact overlap guard detects a small
+numerical penetration, the simulator rolls back to a verified production
+state, temporarily raises the continuous-collision search precision, and
+reports the recovery with a fading notice. This recovery path is compiled out
+of non-graphical builds. Configuration growth is not limited by the optional
+physical-time **Pace** control; pacing is rebased when production begins.
+Growth also uses a conservative preparation-only contact tolerance and performs
+one local exact-SAT overlap check at handoff, while production keeps the full
+collision-search precision.
+
+For solver diagnostics, `EDMD_VERIFY_OVERLAPS=1` now checks polygon pairs with
+exact SAT and checks the transformed vertices against every active wall after
+each polygon event (and at paced graphical times). This is an intentionally
+expensive invariant guard, not a performance build. The permanent long-time
+regression matrix is available as `make polygon-stability-test`; it covers
+periodic, planar, and circular boundaries, several convex shapes, rotation,
+mixed radii, and elastic/dissipative restitution.
+`make polygon-dense-growth-test` additionally checks true-area preparation at
+dense target fractions, the exact growth-to-production handoff, overlap
+freedom, and long-run elastic energy conservation.
+For repeatable throughput measurements, `make polygon-dense-benchmark` times
+growth and production separately while keeping full energy evaluation and the
+O(N^2) final SAT verification outside the timed event loops. Arguments can be
+overridden, for example:
+
+```sh
+make polygon-dense-benchmark \
+  POLYGON_DENSE_BENCHMARK_ARGS='regular 1000 0.80 500000 1 1'
+```
+
 `NONADDITIVE=1` (the historical macro name) selects the usual radius-sum
 contact distance; `NONADDITIVE=0` selects the geometric-mean rule. Dimension,
-transport, contact, and verification flags are all part of the build-cache
-key, preventing objects from an incompatible feature set from being reused.
+transport, polygon-module, contact, and verification flags are all part of the
+build-cache key, preventing objects from an incompatible feature set from
+being reused.
 
 The Makefile rejects combinations whose implementation is not physically
 complete, such as the 2D rough-particle or intruder models in 3D, and those
@@ -126,10 +224,11 @@ workspace** to restore the initial arrangement.
 
 The Configuration window is split into modular **Setup**, **Dynamics**,
 **Boundaries**, **Appearance**, and **Advanced** sections. Its
-search box filters settings by name and related terms. Options that cannot be
-combined, are unavailable in the selected dimension, or are fixed by the build
-remain visible but disabled; hover them to see the reason. Red validation
-errors prevent an invalid restart, while yellow warnings are advisory.
+search box filters settings by name and related terms. Controls that are
+intrinsically meaningless in the selected dimension are omitted. Options that
+cannot be combined or are fixed by the build remain visible but disabled;
+hover them to see the reason. Red validation errors prevent an invalid restart,
+while yellow warnings are advisory.
 
 Configuration changes are hot-reloaded at the smallest safe scope. Collision
 response parameters such as restitution update in place. Flight-law changes

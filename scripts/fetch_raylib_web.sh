@@ -10,6 +10,7 @@ RAYLIB_URL="https://github.com/raysan5/raylib/archive/refs/tags/${RAYLIB_VERSION
 SCRIPT_DIR=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -P "${SCRIPT_DIR}/.." && pwd)
 DESTINATION=${1:-"${PROJECT_ROOT}/build/web/raylib-${RAYLIB_VERSION}"}
+WEB_PATCH="${PROJECT_ROOT}/web/raylib-${RAYLIB_VERSION}-web-hidpi.patch"
 
 log() {
     printf '%s\n' "$*" >&2
@@ -29,6 +30,27 @@ is_valid_source_tree() {
             "${candidate}/src/raylib.h"
 }
 
+apply_web_patch() {
+    candidate=$1
+    [ -f "${WEB_PATCH}" ] || fail "missing browser backend patch: ${WEB_PATCH}"
+    command -v patch >/dev/null 2>&1 || fail "patch is required to prepare raylib for Web HiDPI"
+
+    if grep -Fq "EDMD WEB HIGHDPI" "${candidate}/src/platforms/rcore_web.c"; then
+        patch -f -R -p1 -d "${candidate}" --dry-run < "${WEB_PATCH}" >/dev/null 2>&1 ||
+            fail "the existing raylib Web HiDPI patch is incomplete or differs from ${WEB_PATCH}"
+        log "Using existing EDMD Web HiDPI patch"
+        return
+    fi
+
+    patch -f -p1 -d "${candidate}" --dry-run < "${WEB_PATCH}" >/dev/null 2>&1 ||
+        fail "the EDMD Web HiDPI patch does not apply to raylib ${RAYLIB_VERSION}"
+    patch -f -p1 -d "${candidate}" < "${WEB_PATCH}" >/dev/null ||
+        fail "could not apply the EDMD Web HiDPI patch"
+    grep -Fq "EDMD WEB HIGHDPI" "${candidate}/src/platforms/rcore_web.c" ||
+        fail "the EDMD Web HiDPI patch did not install its validation marker"
+    log "Applied EDMD Web HiDPI patch"
+}
+
 destination_parent=$(dirname "${DESTINATION}")
 destination_name=$(basename "${DESTINATION}")
 [ -n "${destination_name}" ] || fail "destination must name a directory"
@@ -42,6 +64,7 @@ DESTINATION="${destination_parent}/${destination_name}"
 
 if [ -e "${DESTINATION}" ]; then
     if is_valid_source_tree "${DESTINATION}"; then
+        apply_web_patch "${DESTINATION}"
         log "Using existing raylib ${RAYLIB_VERSION} source at ${DESTINATION}"
         printf '%s\n' "${DESTINATION}"
         exit 0
@@ -89,6 +112,7 @@ tar -xzf "${archive_path}" -C "${work_dir}"
 extracted_source="${work_dir}/raylib-${RAYLIB_VERSION}"
 is_valid_source_tree "${extracted_source}" ||
     fail "the verified archive did not contain the expected raylib ${RAYLIB_VERSION} source tree"
+apply_web_patch "${extracted_source}"
 
 mv "${extracted_source}" "${DESTINATION}"
 log "Installed raylib ${RAYLIB_VERSION} source at ${DESTINATION}"

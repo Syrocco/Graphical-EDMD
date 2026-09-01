@@ -129,6 +129,15 @@ typedef enum SimSphereQuality {
     SIM_SPHERE_QUALITY_ULTRA
 } SimSphereQuality;
 
+/* Portable, single-pass lighting profiles for the instanced 3D spheres.
+   The depth-enhanced profile adds view-dependent depth cues, not screen-space
+   ambient occlusion or ray tracing. */
+typedef enum SimLightingMode {
+    SIM_LIGHTING_SIMPLE = 0,
+    SIM_LIGHTING_STUDIO,
+    SIM_LIGHTING_DEPTH_ENHANCED
+} SimLightingMode;
+
 typedef enum ConfigIssueSeverity {
     CONFIG_ISSUE_INFO = 0,
     CONFIG_ISSUE_WARNING,
@@ -345,6 +354,7 @@ typedef struct SimRenderingConfig {
     bool show_axes;
     bool show_boundary;
     bool show_selection_outline;
+    SimLightingMode lighting_mode;
     SimSphereQuality sphere_quality;
     double scene_supersampling;
     double camera_fov_degrees;

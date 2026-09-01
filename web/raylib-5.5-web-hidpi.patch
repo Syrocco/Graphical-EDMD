@@ -1,0 +1,196 @@
+--- a/src/platforms/rcore_web.c
++++ b/src/platforms/rcore_web.c
+@@ -76,6 +76,7 @@
+     bool ourFullscreen;                 // Internal var to filter our handling of fullscreen vs the user handling of fullscreen
+     int unmaximizedWidth;               // Internal var to store the unmaximized window (canvas) width
+     int unmaximizedHeight;              // Internal var to store the unmaximized window (canvas) height
++    float pixelRatio;                   // Browser backing-store pixels per logical CSS pixel
+ } PlatformData;
+ 
+ //----------------------------------------------------------------------------------
+@@ -115,6 +116,7 @@
+ 
+ // Window callbacks events
+ static void WindowSizeCallback(GLFWwindow *window, int width, int height);              // GLFW3 WindowSize Callback, runs when window is resized
++static void FramebufferSizeCallback(GLFWwindow *window, int width, int height);         // GLFW3 FramebufferSize Callback, runs when backing store is resized
+ static void WindowIconifyCallback(GLFWwindow *window, int iconified);                   // GLFW3 WindowIconify Callback, runs when window is minimized/restored
+ //static void WindowMaximizeCallback(GLFWwindow *window, int maximized);                // GLFW3 WindowMaximize Callback, runs when window is maximized
+ static void WindowFocusCallback(GLFWwindow *window, int focused);                       // GLFW3 WindowFocus Callback, runs when window get/lose focus
+@@ -771,8 +773,16 @@
+ // Get window scale DPI factor for current monitor
+ Vector2 GetWindowScaleDPI(void)
+ {
+-    TRACELOG(LOG_WARNING, "GetWindowScaleDPI() not implemented on target platform");
+-    return (Vector2){ 1.0f, 1.0f };
++    Vector2 scale = { 1.0f, 1.0f };
++    if (platform.handle != NULL) glfwGetWindowContentScale(platform.handle, &scale.x, &scale.y);
++
++    // GLFW owns this value so mouse, window and framebuffer coordinates stay
++    // coherent. Fall back to the browser only while the window is starting.
++    if (!isfinite(scale.x) || (scale.x <= 0.0f)) scale.x = (float)emscripten_get_device_pixel_ratio();
++    if (!isfinite(scale.y) || (scale.y <= 0.0f)) scale.y = scale.x;
++    if (!isfinite(scale.x) || (scale.x <= 0.0f)) scale.x = 1.0f;
++    if (!isfinite(scale.y) || (scale.y <= 0.0f)) scale.y = 1.0f;
++    return scale;
+ }
+ 
+ // Set clipboard text content
+@@ -1066,6 +1076,18 @@
+ 
+     CORE.Window.resizedLastFrame = false;
+ 
++    // EDMD WEB HIGHDPI: Emscripten's GLFW installs a media query for the
++    // initial devicePixelRatio. That query catches the first transition, but
++    // not necessarily a sequence of browser zoom or monitor-DPI changes. Poll
++    // one scalar per frame and only resize when it actually changed.
++    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
++    {
++        double pixelRatio = emscripten_get_device_pixel_ratio();
++        if (isfinite(pixelRatio) && (pixelRatio > 0.0) &&
++            (fabs(pixelRatio - platform.pixelRatio) > 0.001))
++                EmscriptenResizeCallback(EMSCRIPTEN_EVENT_RESIZE, NULL, NULL);
++    }
++
+     // TODO: This code does not seem to do anything??
+     //if (CORE.Window.eventWaiting) glfwWaitEvents();     // Wait for in input events before continue (drawing is paused)
+     //else glfwPollEvents(); // Poll input events: keyboard/mouse/window events (callbacks) --> WARNING: Where is key input reset?
+@@ -1125,8 +1147,8 @@
+ 
+     // Scale content area based on the monitor content scale where window is placed on
+     // NOTE: This feature requires emscripten 3.1.51
+-    //if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0) glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+-    //else glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_FALSE);
++    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0) glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
++    else glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_FALSE);
+ 
+     if (CORE.Window.flags & FLAG_MSAA_4X_HINT)
+     {
+@@ -1267,6 +1289,7 @@
+ 
+     // Set window callback events
+     glfwSetWindowSizeCallback(platform.handle, WindowSizeCallback); // NOTE: Resizing not allowed by default!
++    glfwSetFramebufferSizeCallback(platform.handle, FramebufferSizeCallback);
+     glfwSetWindowIconifyCallback(platform.handle, WindowIconifyCallback);
+     glfwSetWindowFocusCallback(platform.handle, WindowFocusCallback);
+     glfwSetDropCallback(platform.handle, WindowDropCallback);
+@@ -1292,8 +1315,16 @@
+     {
+         CORE.Window.ready = true;
+ 
+-        int fbWidth = CORE.Window.screen.width;
+-        int fbHeight = CORE.Window.screen.height;
++        int fbWidth = 0;
++        int fbHeight = 0;
++        glfwGetFramebufferSize(platform.handle, &fbWidth, &fbHeight);
++        if (fbWidth <= 0) fbWidth = CORE.Window.screen.width;
++        if (fbHeight <= 0) fbHeight = CORE.Window.screen.height;
++
++        Vector2 scale = GetWindowScaleDPI();
++        platform.pixelRatio = scale.x;
++        if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
++            CORE.Window.screenScale = MatrixScale(scale.x, scale.y, 1.0f);
+ 
+         CORE.Window.render.width = fbWidth;
+         CORE.Window.render.height = fbHeight;
+@@ -1390,34 +1421,28 @@
+ // NOTE: Window resizing not allowed by default
+ static void WindowSizeCallback(GLFWwindow *window, int width, int height)
+ {
+-    // Reset viewport and projection matrix for new size
++    // Emscripten GLFW reports logical CSS pixels here. The independent
++    // framebuffer callback owns the physical render size and viewport.
++    CORE.Window.screen.width = width;
++    CORE.Window.screen.height = height;
++    CORE.Window.resizedLastFrame = true;
++}
++
++static void FramebufferSizeCallback(GLFWwindow *window, int width, int height)
++{
++    if ((width <= 0) || (height <= 0)) return;
+     SetupViewport(width, height);
+ 
+     CORE.Window.currentFbo.width = width;
+     CORE.Window.currentFbo.height = height;
+     CORE.Window.resizedLastFrame = true;
+-
+-    if (IsWindowFullscreen()) return;
+-
+-    // Set current screen size
+-    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
+-    {
+-        Vector2 windowScaleDPI = GetWindowScaleDPI();
+-
+-        CORE.Window.screen.width = (unsigned int)(width/windowScaleDPI.x);
+-        CORE.Window.screen.height = (unsigned int)(height/windowScaleDPI.y);
+-    }
+-    else
+-    {
+-        CORE.Window.screen.width = width;
+-        CORE.Window.screen.height = height;
+-    }
+-
+-    // NOTE: Postprocessing texture is not scaled to new size
+ }
+ 
+ static void WindowContentScaleCallback(GLFWwindow *window, float scalex, float scaley)
+ {
++    if (!isfinite(scalex) || (scalex <= 0.0f)) scalex = 1.0f;
++    if (!isfinite(scaley) || (scaley <= 0.0f)) scaley = scalex;
++    platform.pixelRatio = scalex;
+     CORE.Window.screenScale = MatrixScale(scalex, scaley, 1.0f);
+ }
+ 
+@@ -1645,8 +1670,8 @@
+     // Don't resize non-resizeable windows
+     if ((CORE.Window.flags & FLAG_WINDOW_RESIZABLE) == 0) return 1;
+ 
+-    // This event is called whenever the window changes sizes,
+-    // so the size of the canvas object is explicitly retrieved below
++    // Keep the GLFW logical window, WebGL backing store and raylib screen
++    // state in one transaction. Width and height below are logical CSS pixels.
+     int width = EM_ASM_INT( return window.innerWidth; );
+     int height = EM_ASM_INT( return window.innerHeight; );
+ 
+@@ -1656,22 +1681,28 @@
+     if (height < (int)CORE.Window.screenMin.height) height = CORE.Window.screenMin.height;
+     else if (height > (int)CORE.Window.screenMax.height && CORE.Window.screenMax.height > 0) height = CORE.Window.screenMax.height;
+ 
+-    emscripten_set_canvas_element_size("#canvas", width, height);
+-
+-    SetupViewport(width, height); // Reset viewport and projection matrix for new size
+-
+-    CORE.Window.currentFbo.width = width;
+-    CORE.Window.currentFbo.height = height;
+-    CORE.Window.resizedLastFrame = true;
++    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
++    {
++        double pixelRatio = emscripten_get_device_pixel_ratio();
++        if (!isfinite(pixelRatio) || (pixelRatio <= 0.0)) pixelRatio = 1.0;
++        if (fabs(pixelRatio - platform.pixelRatio) > 0.001)
++        {
++            platform.pixelRatio = (float)pixelRatio;
++            // Emscripten GLFW has no public setter for a window's content
++            // scale. Use its own scale-change path, which calls the registered
++            // callback and makes Browser.setCanvasSize() multiply by DPR.
++            EM_ASM({
++                if ((typeof GLFW !== 'undefined') && GLFW.active)
++                    GLFW.onWindowContentScaleChanged($0);
++            }, pixelRatio);
++        }
++    }
++    else platform.pixelRatio = 1.0f;
+ 
+-    if (IsWindowFullscreen()) return 1;
++    // Unlike emscripten_set_canvas_element_size(), this updates GLFW's
++    // logical size and input transform as well as the physical canvas.
++    glfwSetWindowSize(platform.handle, width, height);
+ 
+-    // Set current screen size
+-    CORE.Window.screen.width = width;
+-    CORE.Window.screen.height = height;
+-
+-    // NOTE: Postprocessing texture is not scaled to new size
+-
+     return 0;
+ }
+ 

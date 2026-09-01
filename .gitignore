@@ -25,6 +25,7 @@ tests/*
 !tests/test_planar_wall_3d.c
 !tests/test_lees_edwards_3d.c
 !tests/test_reconfigure.c
+!tests/test_camera_frustum.c
 !src/
 !src/**
 src/EDMD_chiral.c

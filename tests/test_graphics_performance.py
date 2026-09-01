@@ -35,6 +35,15 @@ WEB_SHELL_SOURCE = (ROOT / "web" / "shell.html").read_text(encoding="utf-8")
 WEB_LAUNCHER_SOURCE = (ROOT / "web" / "launcher.html").read_text(
     encoding="utf-8"
 )
+WEB_RAYLIB_PATCH_SOURCE = (
+    ROOT / "web" / "raylib-5.5-web-hidpi.patch"
+).read_text(encoding="utf-8")
+WEB_FETCH_SOURCE = (ROOT / "scripts" / "fetch_raylib_web.sh").read_text(
+    encoding="utf-8"
+)
+RLIMGUI_SOURCE = (
+    ROOT / "src" / "vendor" / "rlimgui" / "rlImGui.cpp"
+).read_text(encoding="utf-8")
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
@@ -149,6 +158,48 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         self.assertIn("target.search = params.toString()", WEB_SHELL_SOURCE)
         self.assertIn("target.hash = window.location.hash", WEB_SHELL_SOURCE)
         self.assertIn('window.location.protocol === "file:"', WEB_SHELL_SOURCE)
+
+    def test_web_canvas_separates_logical_and_hidpi_framebuffer_sizes(self) -> None:
+        web_config = compact(
+            MAKEFILE[
+                MAKEFILE.index("WEB_RAYLIB_VERSION =") :
+                MAKEFILE.index("EDMD:")
+            ]
+        )
+        self.assertIn(
+            "WEB_RAYLIB_PATCH = web/raylib-$(WEB_RAYLIB_VERSION)-web-hidpi.patch",
+            web_config,
+        )
+        self.assertIn("release-noaudio-hidpi-v1", web_config)
+        self.assertIn(
+            "$(WEB_RAYLIB_CONFIG_STAMP): $(WEB_RAYLIB_PATCH)",
+            MAKEFILE,
+        )
+
+        # The pinned upstream backend conflates CSS and framebuffer pixels.
+        # The maintained patch must route both through Emscripten GLFW so its
+        # logical input transform remains in sync with the physical canvas.
+        self.assertIn("GLFW_SCALE_TO_MONITOR, GLFW_TRUE", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("glfwSetFramebufferSizeCallback", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("glfwGetFramebufferSize", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("glfwGetWindowContentScale", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("glfwSetWindowSize(platform.handle", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("emscripten_get_device_pixel_ratio", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertIn("GLFW.onWindowContentScaleChanged", WEB_RAYLIB_PATCH_SOURCE)
+        self.assertNotIn(
+            '+    emscripten_set_canvas_element_size("#canvas", width, height);',
+            WEB_RAYLIB_PATCH_SOURCE,
+        )
+
+        # Fetching an existing tree is safe and validates the reverse patch;
+        # fetching a clean tree applies exactly the same checked patch.
+        self.assertIn('apply_web_patch "${DESTINATION}"', WEB_FETCH_SOURCE)
+        self.assertIn('apply_web_patch "${extracted_source}"', WEB_FETCH_SOURCE)
+        self.assertIn("patch -f -R -p1", WEB_FETCH_SOURCE)
+        self.assertIn("--dry-run", WEB_FETCH_SOURCE)
+
+        display_scale = compact(function_body(RLIMGUI_SOURCE, "GetDisplayScale"))
+        self.assertEqual(display_scale, "return GetWindowScaleDPI();")
 
     def test_event_processing_has_a_wall_clock_frame_budget(self) -> None:
         # main() contains mutually exclusive #if G branches whose raw braces do
@@ -485,7 +536,74 @@ class GraphicsPerformanceContracts(unittest.TestCase):
         self.assertEqual(triangle_proxies, sorted(triangle_proxies, reverse=True))
         self.assertRegex(resolution, r"else\s*\{\s*\*rings\s*=\s*4\s*;\s*\*slices\s*=\s*6")
         self.assertIn("GenMeshSphere", function_body(GRAPHICS_SOURCE, "loadSphereBatch"))
-        self.assertIn("DrawMeshInstanced", function_body(GRAPHICS_SOURCE, "drawSphereBatch"))
+        sphere_draw = function_body(GRAPHICS_SOURCE, "drawSphereBatch")
+        self.assertIn("DrawMeshInstanced", sphere_draw)
+        self.assertIn("SetShaderValue", sphere_draw)
+        self.assertIn("camera->position", sphere_draw)
+        self.assertIn("SIM_LIGHTING_STUDIO", sphere_draw)
+        for shader_input in (
+            "sphereWorldPosition",
+            "lightingMode",
+            "cameraPosition",
+            "backgroundColor",
+            "sceneRadius",
+            "wrappedKey",
+            "edgeSeparation",
+        ):
+            self.assertIn(shader_input, GRAPHICS_SOURCE)
+
+    def test_3d_frustum_culling_uses_the_exact_dynamic_clip_volume(self) -> None:
+        self.assertIn('#include "camera_frustum.h"', GRAPHICS_SOURCE)
+        clip_planes = compact(
+            function_body(GRAPHICS_SOURCE, "computeCameraClipPlanes3D")
+        )
+        self.assertIn("cameraDistance + contentRadius", clip_planes)
+        self.assertIn("maximumParticleRadius", clip_planes)
+        self.assertIn("sceneRadius + particleExtent", clip_planes)
+        self.assertIn("minimumNear", clip_planes)
+        self.assertIn("FLT_MAX", clip_planes)
+
+        render = compact(function_body(GRAPHICS_SOURCE, "renderSimulationScene"))
+        self.assert_in_order(
+            render,
+            "refreshRenderPredictions",
+            "maximumPredictedParticleRadius3D",
+            "rlSetClipPlanes",
+            "rlGetCullDistanceNear",
+            "rlGetCullDistanceFar",
+            "camera_frustum_3d_build_perspective",
+            "BeginMode3D",
+            "drawParticlesAndBox3D",
+        )
+        self.assertIn("sceneTargetWidth/sceneTargetHeight", render)
+        particles_raw = function_body(GRAPHICS_SOURCE, "drawParticlesAndBox3D")
+        self.assertNotIn("refreshRenderPredictions", particles_raw)
+
+        particles = compact(particles_raw)
+        self.assert_in_order(
+            particles,
+            "camera_frustum_3d_intersects_sphere",
+            "continue;",
+            "Color particleColor",
+            "appendSphereBatch",
+        )
+        self.assertIn("frustum_culled_particle_count++", particles)
+        self.assertIn("visible_particle_count++", particles)
+        self.assertIn("outlineRadius", particles)
+
+        arrow = compact(function_body(GRAPHICS_SOURCE, "drawVelocityArrow3D"))
+        self.assert_in_order(
+            arrow,
+            "tip =",
+            "camera_frustum_3d_intersects_arrow",
+            "shaftEnd =",
+            "DrawCylinderEx",
+        )
+        self.assertIn("0.30f*radius", arrow)
+
+        diagnostics = compact(function_body(GUI_SOURCE, "draw_diagnostics"))
+        self.assertIn("visible particles", diagnostics)
+        self.assertIn("frustum-culled particles", diagnostics)
 
     def test_velocity_arrows_are_directional_speed_aware_geometry(self) -> None:
         shape_2d = compact(function_body(GRAPHICS_SOURCE, "velocityArrowShape"))
@@ -723,6 +841,11 @@ class GraphicsPerformanceContracts(unittest.TestCase):
             function_body(GUI_PANELS_SOURCE, "draw_appearance")
         )
         self.assertIn("if (is3d)", appearance)
+        self.assertIn("lighting_modes_3d", appearance)
+        self.assertIn("SIM_LIGHTING_SIMPLE", appearance)
+        self.assertIn("SIM_LIGHTING_STUDIO", appearance)
+        self.assertIn("SIM_LIGHTING_DEPTH_ENHANCED", appearance)
+        self.assertIn("not ambient occlusion or ray tracing", appearance)
         self.assertIn("sphere_quality_3d", appearance)
         color_modes_3d = appearance[
             appearance.index("const EnumOption color_modes_3d[]") :

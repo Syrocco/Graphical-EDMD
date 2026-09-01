@@ -46,7 +46,7 @@ SRC_DIR = src
 SOURCES = $(SRC_DIR)/EDMD.c $(SRC_DIR)/parser.c $(SRC_DIR)/boop.c $(SRC_DIR)/pcf.c $(SRC_DIR)/voronoi_edmd.c $(SRC_DIR)/osmosis.c $(SRC_DIR)/intruder.c $(SRC_DIR)/field.c
 GRAPHICS_SOURCES = $(SOURCES) $(SRC_DIR)/graphics.c \
 	$(SRC_DIR)/sim_config.c $(SRC_DIR)/sim_lifecycle.c \
-	$(SRC_DIR)/live_analysis.c
+	$(SRC_DIR)/live_analysis.c $(SRC_DIR)/camera_frustum.c
 
 IMGUI_DIR = $(SRC_DIR)/vendor/imgui
 RLIMGUI_DIR = $(SRC_DIR)/vendor/rlimgui
@@ -161,6 +161,8 @@ LEES_EDWARDS_3D_TEST_BINARY = $(LEES_EDWARDS_3D_TEST_BUILD_DIR)/test_lees_edward
 RECONFIGURE_TEST_BUILD_DIR = build/tests/reconfigure/$(GRAPHICS_DIMENSION)/$(GRAPHICS_FEATURE_SET)
 RECONFIGURE_TEST_CORE_OBJECT = $(RECONFIGURE_TEST_BUILD_DIR)/EDMD_reconfigure_test.o
 RECONFIGURE_TEST_BINARY = $(RECONFIGURE_TEST_BUILD_DIR)/test_reconfigure
+FRUSTUM_TEST_BUILD_DIR = build/tests/camera-frustum
+FRUSTUM_TEST_BINARY = $(FRUSTUM_TEST_BUILD_DIR)/test_camera_frustum
 
 PYTHON ?= python3
 
@@ -220,7 +222,8 @@ WEB_EM_CACHE ?= $(abspath $(WEB_BUILD_ROOT)/emscripten-cache)
 WEB_RAYLIB_VERSION = 5.5
 WEB_RAYLIB_SOURCE ?= $(WEB_BUILD_ROOT)/raylib-$(WEB_RAYLIB_VERSION)
 WEB_RAYLIB_LIBRARY = $(WEB_RAYLIB_SOURCE)/src/libraylib.a
-WEB_RAYLIB_CONFIG_STAMP = $(WEB_RAYLIB_SOURCE)/src/.edmd-webgl2-release-noaudio
+WEB_RAYLIB_PATCH = web/raylib-$(WEB_RAYLIB_VERSION)-web-hidpi.patch
+WEB_RAYLIB_CONFIG_STAMP = $(WEB_RAYLIB_SOURCE)/src/.edmd-webgl2-release-noaudio-hidpi-v1
 WEB_SHELL ?= web/shell.html
 WEB_LAUNCHER ?= web/launcher.html
 WEB_OUTPUT_DIR ?= docs
@@ -266,7 +269,7 @@ graphics: $(GRAPHICS_OBJECTS)
 web-raylib-source:
 	./scripts/fetch_raylib_web.sh "$(WEB_RAYLIB_SOURCE)"
 
-$(WEB_RAYLIB_CONFIG_STAMP): | web-raylib-source
+$(WEB_RAYLIB_CONFIG_STAMP): $(WEB_RAYLIB_PATCH) | web-raylib-source
 	@touch "$@"
 
 # raylib's upstream object names do not encode graphics/audio flags. Clean it
@@ -382,7 +385,7 @@ debug: $(SOURCES)
 profile: $(SOURCES)
 	$(CC) $(SOURCES) $(INCLUDE_FLAGS) -O1 -g -fno-omit-frame-pointer -fno-inline $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra -lm $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0 -o EDMD_profile
 
-.PHONY: graphics prediction-test calendar-test live-analysis-test wall-pressure-test spherical-wall-test spherical-field-test config-test hex-lattice-test full-box-3d-test lees-edwards-3d-test reconfigure-test reconfigure-matrix-test graphics-performance-test
+.PHONY: graphics prediction-test calendar-test live-analysis-test wall-pressure-test spherical-wall-test spherical-field-test config-test hex-lattice-test full-box-3d-test lees-edwards-3d-test reconfigure-test reconfigure-matrix-test frustum-test graphics-performance-test
 prediction-test:
 	@mkdir -p $(PREDICTION_TEST_BUILD_DIR)
 	$(CC) $(SRC_DIR)/EDMD.c $(INCLUDE_FLAGS) -O3 -ffast-math $(FINITE_MATH_GUARD_FLAGS) -Wall -Wextra $(OPENMP_FLAGS) $(DIMENSION_FLAGS) $(EDMD_FEATURE_FLAGS) -DG=0 -Dmain=edmd_program_main -c -o $(PREDICTION_TEST_CORE_OBJECT)
@@ -455,6 +458,13 @@ reconfigure-matrix-test:
 	$(MAKE) reconfigure-test THREE_D=1 STRESS=0 HEAT=0 TANGENTIAL=0 INTRUDER=0
 	$(MAKE) reconfigure-test THREE_D=0 STRESS=1 HEAT=1 TANGENTIAL=0 INTRUDER=0
 	$(MAKE) reconfigure-test THREE_D=1 STRESS=1 HEAT=1 TANGENTIAL=0 INTRUDER=0
+
+frustum-test:
+	@mkdir -p $(FRUSTUM_TEST_BUILD_DIR)
+	$(CC) tests/test_camera_frustum.c $(SRC_DIR)/camera_frustum.c \
+		$(INCLUDE_FLAGS) $(GRAPHICS_INCLUDES) -O2 $(FINITE_MATH_GUARD_FLAGS) \
+		-Wall -Wextra -lm -o $(FRUSTUM_TEST_BINARY)
+	$(FRUSTUM_TEST_BINARY)
 
 graphics-performance-test: tests/test_graphics_performance.py
 	$(PYTHON) -B $<

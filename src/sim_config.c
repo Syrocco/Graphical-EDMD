@@ -347,6 +347,7 @@ void simulation_config_set_defaults(SimulationConfig *config,
     config->rendering.show_axes = dimensions == 3;
     config->rendering.show_boundary = true;
     config->rendering.show_selection_outline = true;
+    config->rendering.lighting_mode = SIM_LIGHTING_STUDIO;
     config->rendering.sphere_quality = SIM_SPHERE_QUALITY_AUTO;
     config->rendering.scene_supersampling = 1.0;
     config->rendering.camera_fov_degrees = 45.0;
@@ -1902,6 +1903,12 @@ size_t simulation_config_validate(const SimulationConfig *config,
         add_issue(&writer, CONFIG_ISSUE_ERROR,
                   "rendering.sphere_quality",
                   "Unknown sphere tessellation quality.");
+    }
+    if (rendering->lighting_mode < SIM_LIGHTING_SIMPLE ||
+        rendering->lighting_mode > SIM_LIGHTING_DEPTH_ENHANCED) {
+        add_issue(&writer, CONFIG_ISSUE_ERROR,
+                  "rendering.lighting_mode",
+                  "Unknown 3D lighting mode.");
     }
     if (capabilities->dimensions == 3 &&
         (rendering->color_mode == SIM_COLOR_BY_HEX_ORDER ||

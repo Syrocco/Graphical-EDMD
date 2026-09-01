@@ -1334,6 +1334,20 @@ void draw_appearance(Context &context, GuiLiveState &live) {
             clamp_live_double(live.scene_supersampling, 0.5, 3.0, 1.0);
         }
         if (is3d) {
+            const EnumOption lighting_modes_3d[] = {
+                {SIM_LIGHTING_SIMPLE, "Simple", nullptr},
+                {SIM_LIGHTING_STUDIO, "Studio", nullptr},
+                {SIM_LIGHTING_DEPTH_ENHANCED, "Depth enhanced", nullptr},
+            };
+            int lighting = live.lighting_mode;
+            if (enum_row(
+                    context, "Lighting", "3D light shading depth rim specular",
+                    &lighting, lighting_modes_3d,
+                    std::size(lighting_modes_3d),
+                    "Simple is the least expensive Lambert shading. Studio adds hemisphere, key/fill, and soft specular light. Depth enhanced also adds subtle silhouette, rim, and distance cues; it is a single-pass effect, not ambient occlusion or ray tracing.")) {
+                live.lighting_mode = static_cast<SimLightingMode>(lighting);
+            }
+
             if (slider_double_row(
                     context, "Camera field of view", "3D FOV perspective",
                     &live.camera_fov_degrees, 10.0, 120.0,
@@ -1444,6 +1458,10 @@ void draw_appearance(Context &context, GuiLiveState &live) {
     /* Also sanitize values loaded from older configuration schemas before the
        renderer consumes these live fields. */
     live.target_fps = std::clamp(live.target_fps, 1, 1000);
+    if (live.lighting_mode < SIM_LIGHTING_SIMPLE ||
+        live.lighting_mode > SIM_LIGHTING_DEPTH_ENHANCED) {
+        live.lighting_mode = SIM_LIGHTING_STUDIO;
+    }
     clamp_live_double(live.scene_supersampling, 0.5, 3.0, 1.0);
     clamp_live_double(live.camera_fov_degrees, 10.0, 120.0, 45.0);
     live.structure_factor_sample_cap =

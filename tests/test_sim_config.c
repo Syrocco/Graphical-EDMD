@@ -155,6 +155,30 @@ static void test_thermostat_validation(void)
                        "thermal wall accepted zero temperature");
 }
 
+static void test_3d_lighting_configuration(void)
+{
+    SimulationConfig config;
+    BuildCapabilities capabilities;
+    const SimLightingMode modes[] = {
+        SIM_LIGHTING_SIMPLE,
+        SIM_LIGHTING_STUDIO,
+        SIM_LIGHTING_DEPTH_ENHANCED,
+    };
+
+    default_config(&config, &capabilities);
+    expect_true(config.rendering.lighting_mode == SIM_LIGHTING_STUDIO,
+                "Studio lighting is not the default");
+    for (size_t index = 0; index < sizeof(modes)/sizeof(modes[0]); ++index) {
+        config.rendering.lighting_mode = modes[index];
+        expect_no_validation_errors(&config, &capabilities,
+                                    "a supported lighting mode was rejected");
+    }
+    config.rendering.lighting_mode = (SimLightingMode)99;
+    expect_error_field(&config, &capabilities,
+                       "rendering.lighting_mode",
+                       "an unknown lighting mode was accepted");
+}
+
 static void test_binary_mixture_round_trip(void)
 {
     SimulationConfig config;
@@ -405,6 +429,7 @@ int main(void)
 {
     test_3d_geometry_capabilities();
     test_thermostat_validation();
+    test_3d_lighting_configuration();
     test_binary_mixture_round_trip();
     test_default_time_horizon();
     test_exposed_numeric_ranges();

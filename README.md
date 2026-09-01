@@ -95,8 +95,9 @@ overlay; the old raylib header, logo, controls, and console band are gone. It
 runs the same dockable ImGui application as the native graphics target.
 Snapshots become browser downloads, restart dumps can be selected from the
 local machine, and structure-factor work is spread across animation frames so
-it does not freeze the page. Scene render targets also account for the browser
-pixel ratio on HiDPI displays.
+it does not freeze the page. On HiDPI displays, the browser canvas keeps its
+logical CSS size separate from its physical backing buffer, and scene render
+targets use the same live pixel ratio through resizes and browser zoom changes.
 
 ## Running
 
@@ -186,8 +187,16 @@ nonmodal: configuration, inspection, plots, and restart remain usable, but Run,
 Space, and single-step stay locked until a successful reconstruction clears the
 fault.
 
-The 3D renderer uses perspective, depth testing, lighting, true sphere meshes,
-and complete velocity-arrow geometry. Random growth and hexagonal
+The 3D renderer uses perspective, depth testing, true sphere meshes, and
+complete velocity-arrow geometry. Its live lighting selector offers the
+inexpensive original shading, balanced studio key/fill/hemisphere lighting,
+or a single-pass depth-enhanced profile with subtle silhouette, rim, and
+distance cues. The latter is deliberately lightweight rather than claiming
+screen-space ambient occlusion or ray tracing. Conservative camera-frustum
+culling skips off-screen sphere instances, velocity arrows, and selection
+outlines; Diagnostics reports the visible and culled particle counts. Dynamic
+clip planes keep large boxes visible without sacrificing ordinary-scene depth
+precision. Random growth and hexagonal
 close-packed (HCP) lattice starts are available, as are periodic boundaries,
 individual X/Y planar walls, an X/Y wall box, a fully closed X/Y/Z wall box,
 and spherical confinement. Lees-Edwards shear and fixed-axis tangential delta

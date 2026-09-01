@@ -63,6 +63,8 @@ typedef struct GuiViewport {
 typedef struct GuiMetrics {
     int dimensions;
     int particle_count;
+    int visible_particle_count;
+    int frustum_culled_particle_count;
     int cells_x;
     int cells_y;
     int cells_z;
@@ -132,6 +134,7 @@ typedef struct GuiLiveState {
     bool pair_correlation_log_log;
     SimColorMode color_mode;
     SimColorPalette palette;
+    SimLightingMode lighting_mode;
     SimSphereQuality sphere_quality;
     int target_fps;
     double scene_supersampling;

@@ -5,6 +5,10 @@
 #include "sim_lifecycle.h"
 #include "EDMD.h"
 #include "raymath.h"
+#if THREE_D
+#include "camera_frustum.h"
+#include "rlgl.h"
+#endif
 #include <errno.h>
 #include <float.h>
 #include <math.h>
@@ -81,6 +85,10 @@ struct sphereBatch{
 	Material material;
 	Shader shader;
 	Matrix* transforms;
+	int lightingModeLocation;
+	int cameraPositionLocation;
+	int backgroundColorLocation;
+	int sceneRadiusLocation;
 	int capacity;
 	int count;
 	int rings;
@@ -94,7 +102,9 @@ static sphereBatch particleSphereBatch = {0};
 #endif
 static particlePrediction* renderPredictions = NULL;
 static int renderPredictionCapacity = 0;
-#if !THREE_D
+#if THREE_D
+static double maximumPredictedParticleRadius3D = 0;
+#else
 static double maximumPredictedParticleRadius = 0;
 static double maximumPredictedParticleRadiusTime = NAN;
 static int maximumPredictedParticleRadiusCount = -1;
@@ -161,6 +171,7 @@ static GuiLiveState guiLive = {
 	.show_selection_outline = true,
 	.color_mode = SIM_COLOR_BY_TYPE,
 	.palette = SIM_PALETTE_PLASMA,
+	.lighting_mode = SIM_LIGHTING_STUDIO,
 	.sphere_quality = SIM_SPHERE_QUALITY_AUTO,
 	.target_fps = 144,
 	.scene_supersampling = 1.0,
@@ -313,7 +324,9 @@ static int graphicsNeighborCellCoordinate(int center, int cellCount,
 #if THREE_D
 static void resetCamera3D(window* screenWindow);
 static void ensureCamera3D(window* screenWindow);
-static void drawParticlesAndBox3D(state* screenState);
+static void drawParticlesAndBox3D(const Camera3D* camera,
+	const CameraFrustum3D* frustum, state* screenState,
+	bool predictionsReady);
 #else
 static void resetCamera2D(window* screenWindow);
 #endif
@@ -462,6 +475,64 @@ static bool ensureSceneTarget(int width, int height){
 static float boxRadius3D(void){
 	const double diagonalSquared = Lx*Lx + Ly*Ly + Lz*Lz;
 	return (float)(0.5*sqrt(fmax(diagonalSquared, 1.0)));
+}
+
+typedef struct cameraClipPlanes3D {
+	double nearDistance;
+	double farDistance;
+} cameraClipPlanes3D;
+
+/* raylib's fixed far plane is 1000, which can cut through a large simulation
+ * even though resetCamera3D has correctly moved the camera far enough away.
+ * Bound the complete box, particle radii and (when enabled) the longest
+ * velocity arrow, while keeping the near plane as far forward as is safely
+ * possible for useful depth-buffer precision. */
+static cameraClipPlanes3D computeCameraClipPlanes3D(const Camera3D* camera,
+	bool includeVelocityArrows, double maximumParticleRadius){
+	cameraClipPlanes3D result = {0.01, 1000.0};
+	if (camera == NULL) return result;
+
+	const double sceneRadius = boxRadius3D();
+	const double centerX = 0.5*Lx;
+	const double centerY = 0.5*Ly;
+	const double centerZ = 0.5*Lz;
+	const double dx = (double)camera->position.x - centerX;
+	const double dy = (double)camera->position.y - centerY;
+	const double dz = (double)camera->position.z - centerZ;
+	const double cameraDistance = sqrt(dx*dx + dy*dy + dz*dz);
+	if (!isfinite(sceneRadius) || sceneRadius <= 0 ||
+		!isfinite(cameraDistance)){
+		return result;
+	}
+
+	if (!isfinite(maximumParticleRadius) || maximumParticleRadius < 0){
+		/* A failed prediction snapshot must widen, never narrow, the clip volume. */
+		maximumParticleRadius = sceneRadius;
+	}
+	/* Particle centers lie within the box bounding sphere.  Add only the actual
+	 * largest predicted radius: 1.1 covers selection wires, while 5.9 covers
+	 * the longest 5.5-radius arrow and its 0.3-radius cone with margin. */
+	const double particleExtent = (includeVelocityArrows ? 5.9 : 1.1)*
+		maximumParticleRadius;
+	const double padding = fmax(0.02*sceneRadius, 1e-3);
+	const double contentRadius = sceneRadius + particleExtent + padding;
+	const double minimumNear = fmax(1e-4, 1e-5*sceneRadius);
+	const double nearestContent = cameraDistance - contentRadius;
+	result.nearDistance = (nearestContent > 0) ?
+		fmax(minimumNear, 0.5*nearestContent) : minimumNear;
+	result.farDistance = fmax(result.nearDistance + fmax(sceneRadius, 1.0),
+		cameraDistance + contentRadius);
+	/* Projection entries are floats inside rlgl, and rlFrustum() multiplies
+	 * near*far after casting both operands to float. Keeping each plane below
+	 * sqrt(FLT_MAX)/4 keeps that intermediate finite even for a malformed,
+	 * astronomically large scene. Ordinary large boxes still receive a far
+	 * plane many orders of magnitude beyond raylib's fixed default. */
+	result.farDistance = fmin(result.farDistance,
+		0.25*sqrt((double)FLT_MAX));
+	if (!(result.farDistance > result.nearDistance)){
+		result.nearDistance = fmax(1e-6, 1e-6*result.farDistance);
+	}
+	return result;
 }
 
 static void resetCamera3D(window* screenWindow){
@@ -948,19 +1019,28 @@ static bool refreshRenderPredictions(void){
 		renderPredictions = resized;
 		renderPredictionCapacity = N;
 	}
-	#if !THREE_D
+	#if THREE_D
+	double maximumRadius3D = 0;
+	#else
 	double maximumRadius = 0;
 	#endif
 	for (int i = 0; i < N; i++){
 		renderPredictions[i] = graphicsParticlePrediction(particles + i);
-		#if !THREE_D
+		#if THREE_D
+		if (isfinite(renderPredictions[i].rad) &&
+			(renderPredictions[i].rad > maximumRadius3D)){
+			maximumRadius3D = renderPredictions[i].rad;
+		}
+		#else
 		if (isfinite(renderPredictions[i].rad) &&
 			(renderPredictions[i].rad > maximumRadius)){
 			maximumRadius = renderPredictions[i].rad;
 		}
 		#endif
 	}
-	#if !THREE_D
+	#if THREE_D
+	maximumPredictedParticleRadius3D = maximumRadius3D;
+	#else
 	maximumPredictedParticleRadius = maximumRadius;
 	maximumPredictedParticleRadiusTime = t;
 	maximumPredictedParticleRadiusCount = N;
@@ -1412,6 +1492,7 @@ static const char* sphereVertexShader3D =
 	"layout(location = 9) in mat4 instanceTransform;\n"
 	"uniform mat4 mvp;\n"
 	"out vec3 sphereNormal;\n"
+	"out vec3 sphereWorldPosition;\n"
 	"out vec4 sphereColor;\n"
 	"void main(void)\n"
 	"{\n"
@@ -1419,6 +1500,7 @@ static const char* sphereVertexShader3D =
 	"    vec3 center = instanceTransform[3].xyz;\n"
 	"    vec3 worldPosition = center + scale*vertexPosition;\n"
 	"    sphereNormal = normalize(scale*vertexNormal);\n"
+	"    sphereWorldPosition = worldPosition;\n"
 	"    sphereColor = vec4(instanceTransform[0].w,\n"
 	"                       instanceTransform[1].w,\n"
 	"                       instanceTransform[2].w,\n"
@@ -1434,7 +1516,12 @@ static const char* sphereFragmentShader3D =
 	"#version 330\n"
 	#endif
 	"in vec3 sphereNormal;\n"
+	"in vec3 sphereWorldPosition;\n"
 	"in vec4 sphereColor;\n"
+	"uniform int lightingMode;\n"
+	"uniform vec3 cameraPosition;\n"
+	"uniform vec3 backgroundColor;\n"
+	"uniform float sceneRadius;\n"
 	"out vec4 finalColor;\n"
 	"void main(void)\n"
 	"{\n"
@@ -1443,8 +1530,40 @@ static const char* sphereFragmentShader3D =
 	"    vec3 fillLight = normalize(vec3(0.55, -0.20, -0.80));\n"
 	"    float key = max(dot(normal, keyLight), 0.0);\n"
 	"    float fill = max(dot(normal, fillLight), 0.0);\n"
-	"    float brightness = min(1.0, 0.42 + 0.50*key + 0.10*fill);\n"
-	"    finalColor = vec4(sphereColor.rgb*brightness, sphereColor.a);\n"
+	"    if (lightingMode == 0)\n"
+	"    {\n"
+	"        float brightness = min(1.0, 0.42 + 0.50*key + 0.10*fill);\n"
+	"        finalColor = vec4(sphereColor.rgb*brightness, sphereColor.a);\n"
+	"        return;\n"
+	"    }\n"
+	"    vec3 viewVector = cameraPosition - sphereWorldPosition;\n"
+	"    vec3 viewDirection = viewVector*\n"
+	"        inversesqrt(max(dot(viewVector, viewVector), 1.0e-8));\n"
+	"    float hemisphere = 0.5 + 0.5*normal.y;\n"
+	"    vec3 ambient = mix(vec3(0.16, 0.18, 0.23),\n"
+	"                       vec3(0.32, 0.35, 0.39), hemisphere);\n"
+	"    float wrappedKey = max((dot(normal, keyLight) + 0.16)/1.16, 0.0);\n"
+	"    vec3 halfVector = keyLight + viewDirection;\n"
+	"    vec3 halfDirection = halfVector*\n"
+	"        inversesqrt(max(dot(halfVector, halfVector), 1.0e-8));\n"
+	"    float specular = pow(max(dot(normal, halfDirection), 0.0), 32.0);\n"
+	"    specular *= smoothstep(0.0, 0.18, key);\n"
+	"    vec3 litColor = sphereColor.rgb*\n"
+	"        (ambient + vec3(0.56*wrappedKey + 0.11*fill));\n"
+	"    litColor += vec3(1.00, 0.93, 0.82)*(0.20*specular);\n"
+	"    if (lightingMode >= 2)\n"
+	"    {\n"
+	"        float viewFacing = clamp(dot(normal, viewDirection), 0.0, 1.0);\n"
+	"        float edgeSeparation = smoothstep(0.02, 0.62, viewFacing);\n"
+	"        litColor *= mix(0.72, 1.0, edgeSeparation);\n"
+	"        float rim = pow(1.0 - viewFacing, 3.0);\n"
+	"        litColor += vec3(0.10, 0.15, 0.22)*rim*(0.35 + 0.65*key);\n"
+	"        float relativeDepth = sqrt(max(dot(viewVector, viewVector), 0.0))/\n"
+	"            max(sceneRadius, 0.001);\n"
+	"        float haze = 0.12*smoothstep(2.25, 6.0, relativeDepth);\n"
+	"        litColor = mix(litColor, backgroundColor, haze);\n"
+	"    }\n"
+	"    finalColor = vec4(clamp(litColor, 0.0, 1.0), sphereColor.a);\n"
 	"}\n";
 
 static void sphereResolution3D(int particleCount, int* rings, int* slices){
@@ -1544,8 +1663,20 @@ static bool loadSphereBatch(sphereBatch* batch, int capacity,
 		loaded.shader, "mvp");
 	loaded.shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(
 		loaded.shader, "instanceTransform");
+	loaded.lightingModeLocation = GetShaderLocation(loaded.shader,
+		"lightingMode");
+	loaded.cameraPositionLocation = GetShaderLocation(loaded.shader,
+		"cameraPosition");
+	loaded.backgroundColorLocation = GetShaderLocation(loaded.shader,
+		"backgroundColor");
+	loaded.sceneRadiusLocation = GetShaderLocation(loaded.shader,
+		"sceneRadius");
 	if ((loaded.shader.locs[SHADER_LOC_MATRIX_MVP] < 0) ||
-		(loaded.shader.locs[SHADER_LOC_MATRIX_MODEL] < 0)){
+		(loaded.shader.locs[SHADER_LOC_MATRIX_MODEL] < 0) ||
+		(loaded.lightingModeLocation < 0) ||
+		(loaded.cameraPositionLocation < 0) ||
+		(loaded.backgroundColorLocation < 0) ||
+		(loaded.sceneRadiusLocation < 0)){
 		TraceLog(LOG_ERROR, "The instanced sphere shader is missing required inputs");
 		unloadSphereBatch(&loaded);
 		return false;
@@ -1601,10 +1732,28 @@ static bool appendSphereBatch(sphereBatch* batch, Vector3 center,
 	return true;
 }
 
-static void drawSphereBatch(sphereBatch* batch){
-	if (!batch->loaded || (batch->count == 0)){
+static void drawSphereBatch(sphereBatch* batch, const Camera3D* camera){
+	if (!batch->loaded || (batch->count == 0) || (camera == NULL)){
 		return;
 	}
+	int lightingMode = (int)guiLive.lighting_mode;
+	if (lightingMode < SIM_LIGHTING_SIMPLE ||
+		lightingMode > SIM_LIGHTING_DEPTH_ENHANCED){
+		lightingMode = SIM_LIGHTING_STUDIO;
+	}
+	const Color background = colorFromRgba(guiLive.background_rgba);
+	const Vector3 backgroundColor = {
+		background.r/255.0f, background.g/255.0f, background.b/255.0f,
+	};
+	const float sceneRadius = boxRadius3D();
+	SetShaderValue(batch->shader, batch->lightingModeLocation,
+		&lightingMode, SHADER_UNIFORM_INT);
+	SetShaderValue(batch->shader, batch->cameraPositionLocation,
+		&camera->position, SHADER_UNIFORM_VEC3);
+	SetShaderValue(batch->shader, batch->backgroundColorLocation,
+		&backgroundColor, SHADER_UNIFORM_VEC3);
+	SetShaderValue(batch->shader, batch->sceneRadiusLocation,
+		&sceneRadius, SHADER_UNIFORM_FLOAT);
 	DrawMeshInstanced(batch->mesh, batch->material,
 		batch->transforms, batch->count);
 }
@@ -1864,12 +2013,13 @@ static void drawWallGrid3D(int axis, float coordinate, Color color){
 	}
 }
 
-static void drawVelocityArrow3D(const particlePrediction* predicted){
+static bool drawVelocityArrow3D(const CameraFrustum3D* frustum,
+	const particlePrediction* predicted){
 	if (predicted == NULL || !isfinite(predicted->rad) || predicted->rad <= 0)
-		return;
+		return false;
 	const double speedSquared = predicted->vx*predicted->vx +
 		predicted->vy*predicted->vy + predicted->vz*predicted->vz;
-	if (!isfinite(speedSquared) || speedSquared <= 1e-20) return;
+	if (!isfinite(speedSquared) || speedSquared <= 1e-20) return false;
 	const double speed = sqrt(speedSquared);
 	const Vector3 direction = {
 		(float)(predicted->vx/speed),
@@ -1885,6 +2035,10 @@ static void drawVelocityArrow3D(const particlePrediction* predicted){
 		(float)predicted->x, (float)predicted->y, (float)predicted->z,
 	};
 	const Vector3 tip = Vector3Add(center, Vector3Scale(direction, length));
+	if (!camera_frustum_3d_intersects_arrow(frustum, center, tip,
+		0.30f*radius)){
+		return false;
+	}
 	const Vector3 shaftEnd = Vector3Subtract(tip,
 		Vector3Scale(direction, headLength));
 	const Color shaftColor = {236, 239, 244, 245};
@@ -1895,13 +2049,17 @@ static void drawVelocityArrow3D(const particlePrediction* predicted){
 		6, shaftColor);
 	DrawCylinderEx(shaftEnd, tip, 0.30f*radius, 0.0f,
 		8, headColor);
+	return true;
 }
 
-static void drawParticlesAndBox3D(state* screenState){
-	const bool predictionsReady = refreshRenderPredictions();
+static void drawParticlesAndBox3D(const Camera3D* camera,
+	const CameraFrustum3D* frustum, state* screenState,
+	bool predictionsReady){
 	const bool colorsReady = refreshParticleColorCache(screenState);
 	const bool sphereBatchReady = ensureSphereBatch(&particleSphereBatch, N);
 	particleSphereBatch.count = 0;
+	guiMetrics.visible_particle_count = 0;
+	guiMetrics.frustum_culled_particle_count = 0;
 	const Color boundaryColor = colorFromRgba(guiLive.boundary_rgba);
 	if (guiLive.show_boundary){
 		if (addCircularWall){
@@ -1943,6 +2101,15 @@ static void drawParticlesAndBox3D(state* screenState){
 	for (int i = N - 1; i >= 0; i--){
 		const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
 			graphicsParticlePrediction(particles + i);
+		const Vector3 center = {
+			(float)predicted.x, (float)predicted.y, (float)predicted.z,
+		};
+		if (!camera_frustum_3d_intersects_sphere(frustum, center,
+			predicted.rad)){
+			guiMetrics.frustum_culled_particle_count++;
+			continue;
+		}
+		guiMetrics.visible_particle_count++;
 		Color particleColor;
 		if (colorsReady){
 			particleColor = colorSelect(
@@ -1952,9 +2119,6 @@ static void drawParticlesAndBox3D(state* screenState){
 		else{
 			particleColor = screenState->particleArray[particles[i].type];
 		}
-		const Vector3 center = {
-			(float)predicted.x, (float)predicted.y, (float)predicted.z,
-		};
 		if (sphereBatchReady){
 			appendSphereBatch(&particleSphereBatch, center,
 				(float)predicted.rad, particleColor);
@@ -1964,13 +2128,13 @@ static void drawParticlesAndBox3D(state* screenState){
 		}
 	}
 	if (sphereBatchReady){
-		drawSphereBatch(&particleSphereBatch);
+		drawSphereBatch(&particleSphereBatch, camera);
 	}
 	if (screenState->arrow){
 		for (int i = N - 1; i >= 0; i--){
 			const particlePrediction predicted = predictionsReady ? renderPredictions[i] :
 				graphicsParticlePrediction(particles + i);
-			drawVelocityArrow3D(&predicted);
+			drawVelocityArrow3D(frustum, &predicted);
 		}
 	}
 
@@ -1982,8 +2146,11 @@ static void drawParticlesAndBox3D(state* screenState){
 			(float)selected.x, (float)selected.y, (float)selected.z,
 		};
 		const Color selectionColor = {245, 247, 250, 255};
-		DrawSphereWires(center, (float)(1.08*selected.rad),
-			8, 12, selectionColor);
+		const float outlineRadius = (float)(1.08*selected.rad);
+		if (camera_frustum_3d_intersects_sphere(frustum, center,
+			outlineRadius)){
+			DrawSphereWires(center, outlineRadius, 8, 12, selectionColor);
+		}
 	}
 }
 #endif
@@ -2250,8 +2417,21 @@ static bool renderSimulationScene(window* screenWindow, state* screenState){
 	#if THREE_D
 	ensureCamera3D(screenWindow);
 	screenWindow->cam3D.fovy = (float)guiLive.camera_fov_degrees;
+	const bool predictionsReady = refreshRenderPredictions();
+	const double maximumParticleRadius = predictionsReady ?
+		maximumPredictedParticleRadius3D : NAN;
+	const cameraClipPlanes3D clipPlanes = computeCameraClipPlanes3D(
+		&screenWindow->cam3D, screenState->arrow, maximumParticleRadius);
+	rlSetClipPlanes(clipPlanes.nearDistance, clipPlanes.farDistance);
+	const double exactNearDistance = rlGetCullDistanceNear();
+	const double exactFarDistance = rlGetCullDistanceFar();
+	const double sceneAspect = (double)sceneTargetWidth/sceneTargetHeight;
+	CameraFrustum3D frustum = {0};
+	camera_frustum_3d_build_perspective(&frustum, &screenWindow->cam3D,
+		sceneAspect, exactNearDistance, exactFarDistance);
 	BeginMode3D(screenWindow->cam3D);
-	drawParticlesAndBox3D(screenState);
+	drawParticlesAndBox3D(&screenWindow->cam3D, &frustum, screenState,
+		predictionsReady);
 	EndMode3D();
 	#else
 	if (camera2DNeedsReset){

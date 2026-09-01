@@ -564,6 +564,12 @@ void draw_diagnostics(edmd_gui::Context &context, const GuiMetrics *metrics) {
                                  metrics->simulation_time_lag, "%.6g");
             }
             table_double_row("render FPS", metrics->frames_per_second, "%.1f");
+            if (metrics->dimensions == 3) {
+                table_int_row("visible particles",
+                              metrics->visible_particle_count);
+                table_int_row("frustum-culled particles",
+                              metrics->frustum_culled_particle_count);
+            }
             table_int_row("collision / interaction events",
                           static_cast<long long>(metrics->collisions));
             table_int_row("cell crossings", static_cast<long long>(metrics->crossings));
@@ -723,6 +729,7 @@ void copy_live_to_rendering(const GuiLiveState &live,
     rendering.show_axes = live.show_axes;
     rendering.show_boundary = live.show_boundary;
     rendering.show_selection_outline = live.show_selection_outline;
+    rendering.lighting_mode = live.lighting_mode;
     rendering.sphere_quality = live.sphere_quality;
     rendering.scene_supersampling = live.scene_supersampling;
     rendering.camera_fov_degrees = live.camera_fov_degrees;
@@ -744,6 +751,7 @@ void copy_rendering_to_live(const SimRenderingConfig &rendering,
     live.show_axes = rendering.show_axes;
     live.show_boundary = rendering.show_boundary;
     live.show_selection_outline = rendering.show_selection_outline;
+    live.lighting_mode = rendering.lighting_mode;
     live.color_mode = rendering.color_mode;
     live.palette = rendering.palette;
     live.sphere_quality = rendering.sphere_quality;
